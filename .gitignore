@@ -1,0 +1,13 @@
+.DS_Store
+*.xcuserdata
+*.xcuserstate
+DerivedData/
+build/
+.build/
+.swiftpm/
+.env
+.venv/
+__pycache__/
+*.pyc
+*.sqlite3
+*.log

@@ -1,0 +1,93 @@
+name: VoiceType
+options:
+  bundleIdPrefix: com.kyleqi
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    SWIFT_VERSION: 6.0
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+    ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    VOICETYPE_BACKEND_URL: http://127.0.0.1:8000
+    VOICETYPE_APP_GROUP: group.com.kyleqi.voicetype
+targets:
+  VoiceType:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: VoiceType
+      - path: Shared
+    dependencies:
+      - target: VoiceTypeKeyboard
+        embed: true
+    info:
+      path: VoiceType/Info.plist
+      properties:
+        CFBundleDisplayName: VoiceType
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        NSMicrophoneUsageDescription: VoiceType records your speech only when you press record so it can turn it into text.
+        NSSpeechRecognitionUsageDescription: VoiceType sends recorded audio to your private transcription backend for speech-to-text.
+        VoiceTypeBackendURL: $(VOICETYPE_BACKEND_URL)
+        VoiceTypeAppGroup: $(VOICETYPE_APP_GROUP)
+        UILaunchStoryboardName: LaunchScreen
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        CFBundleURLTypes:
+          - CFBundleURLName: com.kyleqi.voicetype
+            CFBundleURLSchemes:
+              - voicetype
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kyleqi.voicetype
+        INFOPLIST_FILE: VoiceType/Info.plist
+        CODE_SIGN_ENTITLEMENTS: VoiceType/VoiceType.entitlements
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: WC3PWB5R2J
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_PREVIEWS: true
+  VoiceTypeKeyboard:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: VoiceTypeKeyboard
+      - path: Shared
+    info:
+      path: VoiceTypeKeyboard/Info.plist
+      properties:
+        CFBundleDisplayName: VoiceType Keyboard
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        VoiceTypeAppGroup: $(VOICETYPE_APP_GROUP)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
+          NSExtensionAttributes:
+            PrimaryLanguage: en-US
+            IsASCIICapable: false
+            PrefersRightToLeft: false
+            RequestsOpenAccess: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kyleqi.voicetype.keyboard
+        INFOPLIST_FILE: VoiceTypeKeyboard/Info.plist
+        CODE_SIGN_ENTITLEMENTS: VoiceTypeKeyboard/VoiceTypeKeyboard.entitlements
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: WC3PWB5R2J
+        APPLICATION_EXTENSION_API_ONLY: true
+schemes:
+  VoiceType:
+    build:
+      targets:
+        VoiceType: all
+        VoiceTypeKeyboard: all
+    run:
+      config: Debug
