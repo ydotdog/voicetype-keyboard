@@ -84,6 +84,16 @@ final class AccountStore: ObservableObject {
         UserDefaults.standard.set(email, forKey: emailKey)
     }
 
+    func addLocalTestCredit() {
+        token = Self.previewToken
+        email = "Local preview"
+        balanceUSDMicros += 5_000_000
+        balanceText = String(format: "$%.4f", Double(balanceUSDMicros) / 1_000_000)
+        errorMessage = nil
+        KeychainStore.save(token, service: keychainService, account: tokenAccount)
+        UserDefaults.standard.set(email, forKey: emailKey)
+    }
+
     func apply(balance: BalancePayload) {
         balanceUSDMicros = balance.balanceUSDMicros
         balanceText = balance.formatted

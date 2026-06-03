@@ -91,7 +91,7 @@ final class RecordingController: NSObject, ObservableObject {
         }
 
         do {
-            if account.isPreviewMode {
+            if account.isPreviewMode || account.balanceUSDMicros <= 0 {
                 let snapshot = TranscriptSnapshot(
                     id: UUID().uuidString,
                     text: "This is a local preview transcript from VoiceType.",

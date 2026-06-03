@@ -340,6 +340,18 @@ private struct StorePanel: View {
                 }
             }
 
+            Button {
+                account.addLocalTestCredit()
+            } label: {
+                Label("Add Test Credit", systemImage: "plus.circle")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background(AppTheme.mint)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+
             if store.products.isEmpty {
                 Button {
                     Task { await store.loadProducts() }
