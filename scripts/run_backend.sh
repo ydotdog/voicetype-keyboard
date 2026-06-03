@@ -7,4 +7,8 @@ if [ ! -d .venv ]; then
 fi
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn main:app --reload
+if [ -f .env ]; then
+  uvicorn main:app --reload --env-file .env
+else
+  uvicorn main:app --reload
+fi

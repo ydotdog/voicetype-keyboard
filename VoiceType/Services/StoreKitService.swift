@@ -31,7 +31,12 @@ final class StoreKitService: ObservableObject {
         defer { isLoading = false }
 
         do {
-            let result = try await product.purchase()
+            var options: Set<Product.PurchaseOption> = []
+            if let appAccountToken = account.appAccountToken {
+                options.insert(.appAccountToken(appAccountToken))
+            }
+
+            let result = try await product.purchase(options: options)
             switch result {
             case let .success(verification):
                 let signedTransaction = verification.jwsRepresentation

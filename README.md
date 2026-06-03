@@ -1,69 +1,94 @@
 # VoiceType Keyboard
 
-VoiceType is a pay-as-you-go iOS speech-to-text keyboard. The containing app handles recording, Sign in with Apple, StoreKit credit packs, and server-backed transcription. The keyboard extension stays small: it inserts the latest transcript from the shared app group and opens the app when the user wants to record.
+VoiceType is a pay-as-you-go iOS speech-to-text keyboard. The containing app owns recording, Sign in with Apple, StoreKit credit packs, and secure backend calls. The keyboard extension stays focused: it inserts the latest transcript from the shared App Group and opens the app when the user wants to record again.
 
-## Why the flow is split
+## Product Model
 
-Apple's custom keyboard sandbox does not allow microphone access, and network/full-access keyboards carry extra review and trust obligations. This v1 keeps microphone capture and billing inside the containing app, then syncs completed transcripts to the keyboard through the app group.
+- No subscription.
+- Users buy consumable credit packs through StoreKit.
+- Credits are stored server-side in USD micros and do not expire.
+- Every credit/debit is written to a per-user immutable ledger.
+- The OpenAI API key is held by the backend only.
+- StoreKit transactions are verified server-side and bound to the backend user through `appAccountToken`.
 
-## Product model
-
-- No subscriptions.
-- Users buy consumable credit packs with StoreKit.
-- Credits are stored server-side as USD micros and never expire.
-- Each transcription debits the user's balance according to the configured model price.
-- OpenAI API keys stay on the backend only.
-
-## Repo layout
+## Repo Layout
 
 - `VoiceType/`: SwiftUI containing app.
 - `VoiceTypeKeyboard/`: iOS custom keyboard extension.
-- `Shared/`: shared constants, DTOs, and app-group transcript storage.
-- `backend/`: FastAPI backend for Apple auth, credit ledger, StoreKit transaction intake, and OpenAI transcription.
-- `StoreKit/Products.storekit`: local StoreKit testing products.
+- `Shared/`: shared DTOs, constants, and App Group transcript storage.
+- `backend/`: FastAPI backend for Apple auth, StoreKit verification, credit ledger, and OpenAI transcription.
+- `StoreKit/Products.storekit`: local StoreKit testing catalog.
+- `docs/ARCHITECTURE.md`: billing and scaling architecture.
+- `docs/RELEASE_CHECKLIST.md`: App Store and backend launch checklist.
 
-## Local backend
+## Backend
 
 ```bash
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 cp .env.example .env
 uvicorn main:app --reload
 ```
 
-Required production env vars:
+Run tests:
+
+```bash
+cd backend
+PYTHONPATH=. .venv/bin/python -m pytest -q
+```
+
+Production uses `DATABASE_URL` for Postgres. If `DATABASE_URL` is empty, the backend falls back to SQLite for local development.
+
+Important production env vars:
 
 - `OPENAI_API_KEY`
 - `JWT_SECRET`
-- `APPLE_CLIENT_ID`, normally the app bundle id `com.kyleqi.voicetype`
+- `DATABASE_URL`
+- `APPLE_CLIENT_ID`
+- `APPLE_BUNDLE_ID`
+- `APPLE_APP_APPLE_ID`
+- `APPLE_ROOT_CERTIFICATE_PATHS` or `APPLE_ROOT_CERTIFICATE_PEMS_B64`
+- `STOREKIT_VERIFICATION_MODE=strict`
+- `ALLOW_UNVERIFIED_STOREKIT_JWS=false`
+- `REQUIRE_STOREKIT_APP_ACCOUNT_TOKEN=true`
 
-Useful development env vars:
-
-- `APPLE_AUTH_DEV_BYPASS=true` accepts identity tokens starting with `dev:`.
-- `DATABASE_PATH=./voicetype.sqlite3`
-- `OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe`
-
-## iOS project
+## iOS
 
 ```bash
 xcodegen generate
 open VoiceType.xcodeproj
 ```
 
-Use the `VoiceType` scheme. For simulator testing against the backend running on the Mac, keep `VOICETYPE_BACKEND_URL` as `http://127.0.0.1:8000`.
+Use the `VoiceType` scheme.
 
-## App Store setup
+Build settings:
 
-1. Enable App Groups for the app and keyboard: `group.com.kyleqi.voicetype`.
-2. Enable Sign in with Apple for the app target.
-3. Create consumable IAP products matching `StoreKit/Products.storekit`.
-4. Configure the backend product map before shipping.
-5. Replace the development StoreKit transaction decoding path with App Store Server API / signed transaction verification before accepting production credit purchases.
+- Debug backend URL: `http://192.168.2.63:8000` for local iPhone testing on this network.
+- Release backend URL: `https://api.voicetype.example`; replace this with the production HTTPS API host before TestFlight.
+- App Group: `group.com.kyleqi.voicetype`.
+- Bundle IDs: `com.kyleqi.voicetype` and `com.kyleqi.voicetype.keyboard`.
 
-## Source notes
+The keyboard extension requests Full Access because it needs to read the latest transcript from the shared App Group container.
 
-- Existing transcription inspiration came from the Memory Recorder backend `/v1/memories/from-audio` and iOS `RecordingController` / multipart upload client.
-- Apple documents that custom keyboards cannot use microphone access in the extension and require care around open access.
-- OpenAI's current speech-to-text models include `gpt-4o-mini-transcribe` on `v1/audio/transcriptions`, priced by audio input/output tokens.
+## App Store Products
+
+Create consumable In-App Purchase products matching:
+
+- `com.kyleqi.voicetype.credits.small`
+- `com.kyleqi.voicetype.credits.medium`
+- `com.kyleqi.voicetype.credits.large`
+
+Keep the backend product catalog in sync through `CREDIT_PRODUCTS_JSON` if prices or pack sizes change.
+
+## Current Verification
+
+Verified locally:
+
+- Backend per-user ledger tests pass.
+- StoreKit transaction replay is idempotent.
+- StoreKit transactions for one user cannot be submitted by another user.
+- StoreKit transactions without `appAccountToken` are rejected.
+- Existing local SQLite schemas migrate in place.
+- Debug and Release iOS builds succeed with the keyboard extension embedded.

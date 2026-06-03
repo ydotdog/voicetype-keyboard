@@ -9,8 +9,12 @@ settings:
     MARKETING_VERSION: 0.1.0
     CURRENT_PROJECT_VERSION: 1
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-    VOICETYPE_BACKEND_URL: http://192.168.2.63:8000
     VOICETYPE_APP_GROUP: group.com.kyleqi.voicetype
+  configs:
+    Debug:
+      VOICETYPE_BACKEND_URL: http://192.168.2.63:8000
+    Release:
+      VOICETYPE_BACKEND_URL: https://api.voicetype.example
 targets:
   VoiceType:
     type: application
@@ -31,7 +35,7 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         NSMicrophoneUsageDescription: VoiceType records your speech only when you press record so it can turn it into text.
         NSSpeechRecognitionUsageDescription: VoiceType sends recorded audio to your private transcription backend for speech-to-text.
-        NSLocalNetworkUsageDescription: VoiceType connects to your local development backend while you test the app on this iPhone.
+        NSLocalNetworkUsageDescription: VoiceType connects to your configured transcription backend.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         VoiceTypeBackendURL: $(VOICETYPE_BACKEND_URL)
@@ -77,7 +81,7 @@ targets:
             PrimaryLanguage: en-US
             IsASCIICapable: false
             PrefersRightToLeft: false
-            RequestsOpenAccess: false
+            RequestsOpenAccess: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.kyleqi.voicetype.keyboard

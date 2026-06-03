@@ -91,7 +91,8 @@ final class RecordingController: NSObject, ObservableObject {
         }
 
         do {
-            if account.isPreviewMode || account.balanceUSDMicros <= 0 {
+            #if DEBUG
+            if account.isPreviewMode {
                 let snapshot = TranscriptSnapshot(
                     id: UUID().uuidString,
                     text: "This is a local preview transcript from VoiceType.",
@@ -100,18 +101,20 @@ final class RecordingController: NSObject, ObservableObject {
                 )
                 SharedTranscriptStore.latest = snapshot
                 lastTranscript = snapshot
-            } else {
-                let response = try await BackendClient.transcribe(fileURL: fileURL, duration: duration, token: account.token)
-                let snapshot = TranscriptSnapshot(
-                    id: response.id,
-                    text: response.transcript,
-                    createdAt: Date(),
-                    chargeText: response.charge.formatted
-                )
-                SharedTranscriptStore.latest = snapshot
-                lastTranscript = snapshot
-                account.apply(balance: response.balance)
+                return
             }
+            #endif
+
+            let response = try await BackendClient.transcribe(fileURL: fileURL, duration: duration, token: account.token)
+            let snapshot = TranscriptSnapshot(
+                id: response.id,
+                text: response.transcript,
+                createdAt: Date(),
+                chargeText: response.charge.formatted
+            )
+            SharedTranscriptStore.latest = snapshot
+            lastTranscript = snapshot
+            account.apply(balance: response.balance)
         } catch {
             errorMessage = error.localizedDescription
         }

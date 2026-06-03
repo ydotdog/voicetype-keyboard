@@ -39,7 +39,7 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>VoiceType connects to your local development backend while you test the app on this iPhone.</string>
+	<string>VoiceType connects to your configured transcription backend.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>VoiceType records your speech only when you press record so it can turn it into text.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

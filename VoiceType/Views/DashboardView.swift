@@ -31,6 +31,11 @@ struct DashboardView: View {
                         }
                         StorePanel(store: store)
                             .environmentObject(account)
+                        KeyboardSetupPanel()
+                        #if DEBUG
+                        DeveloperToolsPanel()
+                            .environmentObject(account)
+                        #endif
                     } else {
                         SignInPanel()
                     }
@@ -66,7 +71,9 @@ struct DashboardView: View {
             }
             .task {
                 await account.refresh()
-                await store.loadProducts()
+                if account.isSignedIn {
+                    await store.loadProducts()
+                }
                 recorder.refreshLatest()
             }
         }
@@ -124,10 +131,11 @@ private struct SignInPanel: View {
             .frame(height: 52)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
+            #if DEBUG
             Button {
                 account.enterPreviewMode()
             } label: {
-                Label("Preview", systemImage: "eye")
+                Label("Developer Preview", systemImage: "hammer")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(AppTheme.ink)
                     .frame(maxWidth: .infinity)
@@ -135,6 +143,7 @@ private struct SignInPanel: View {
                     .background(AppTheme.background)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
+            #endif
 
             if let error = account.errorMessage {
                 Text(error)
@@ -340,18 +349,6 @@ private struct StorePanel: View {
                 }
             }
 
-            Button {
-                account.addLocalTestCredit()
-            } label: {
-                Label("Add Test Credit", systemImage: "plus.circle")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-                    .background(AppTheme.mint)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-
             if store.products.isEmpty {
                 Button {
                     Task { await store.loadProducts() }
@@ -401,3 +398,67 @@ private struct StorePanel: View {
         .panelStyle()
     }
 }
+
+private struct KeyboardSetupPanel: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Label("Keyboard", systemImage: "keyboard")
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.ink)
+                Spacer()
+                Button {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.headline)
+                }
+                .accessibilityLabel("Open Settings")
+                .foregroundStyle(AppTheme.accent)
+            }
+
+            Text("Add VoiceType Keyboard in iOS Settings and enable Full Access so the keyboard can read the latest transcript from the shared app container.")
+                .font(.subheadline)
+                .foregroundStyle(AppTheme.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .panelStyle()
+    }
+}
+
+#if DEBUG
+private struct DeveloperToolsPanel: View {
+    @EnvironmentObject private var account: AccountStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Developer tools", systemImage: "hammer")
+                .font(.headline)
+                .foregroundStyle(AppTheme.ink)
+
+            Text("Debug-only local preview. Release builds hide this panel.")
+                .font(.footnote)
+                .foregroundStyle(AppTheme.secondary)
+
+            Button {
+                if account.isPreviewMode {
+                    account.addLocalTestCredit()
+                } else {
+                    account.enterPreviewMode()
+                }
+            } label: {
+                Label(account.isPreviewMode ? "Add Preview Credit" : "Switch to Preview", systemImage: "plus.circle")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background(AppTheme.mint)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+        }
+        .panelStyle()
+    }
+}
+#endif

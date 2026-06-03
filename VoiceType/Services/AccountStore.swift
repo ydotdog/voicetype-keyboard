@@ -7,8 +7,10 @@ final class AccountStore: ObservableObject {
     private let keychainService = "com.kyleqi.voicetype.account"
     private let tokenAccount = "userToken"
     private let emailKey = "accountEmail"
+    private let userIDKey = "accountUserID"
 
     @Published private(set) var token: String
+    @Published private(set) var userID: String
     @Published private(set) var email: String
     @Published private(set) var balanceText: String
     @Published private(set) var balanceUSDMicros: Int
@@ -23,14 +25,20 @@ final class AccountStore: ObservableObject {
         token == Self.previewToken
     }
 
+    var appAccountToken: UUID? {
+        UUID(uuidString: userID)
+    }
+
     init() {
         let storedToken = KeychainStore.read(service: keychainService, account: tokenAccount) ?? ""
         token = storedToken
         if storedToken == Self.previewToken {
+            userID = UUID().uuidString
             email = "Local preview"
             balanceText = "$5.0000"
             balanceUSDMicros = 5_000_000
         } else {
+            userID = UserDefaults.standard.string(forKey: userIDKey) ?? ""
             email = UserDefaults.standard.string(forKey: emailKey) ?? ""
             balanceText = "$0.0000"
             balanceUSDMicros = 0
@@ -66,8 +74,10 @@ final class AccountStore: ObservableObject {
 
     func apply(auth: AuthResponse) {
         token = auth.token
+        userID = auth.user.id
         email = auth.user.email ?? email
         KeychainStore.save(auth.token, service: keychainService, account: tokenAccount)
+        UserDefaults.standard.set(auth.user.id, forKey: userIDKey)
         if let userEmail = auth.user.email {
             UserDefaults.standard.set(userEmail, forKey: emailKey)
         }
@@ -76,21 +86,27 @@ final class AccountStore: ObservableObject {
 
     func enterPreviewMode() {
         token = Self.previewToken
+        userID = UUID().uuidString
         email = "Local preview"
         balanceText = "$5.0000"
         balanceUSDMicros = 5_000_000
         errorMessage = nil
         KeychainStore.save(token, service: keychainService, account: tokenAccount)
+        UserDefaults.standard.set(userID, forKey: userIDKey)
         UserDefaults.standard.set(email, forKey: emailKey)
     }
 
     func addLocalTestCredit() {
         token = Self.previewToken
+        if userID.isEmpty {
+            userID = UUID().uuidString
+        }
         email = "Local preview"
         balanceUSDMicros += 5_000_000
         balanceText = String(format: "$%.4f", Double(balanceUSDMicros) / 1_000_000)
         errorMessage = nil
         KeychainStore.save(token, service: keychainService, account: tokenAccount)
+        UserDefaults.standard.set(userID, forKey: userIDKey)
         UserDefaults.standard.set(email, forKey: emailKey)
     }
 
@@ -101,10 +117,12 @@ final class AccountStore: ObservableObject {
 
     func signOut() {
         token = ""
+        userID = ""
         email = ""
         balanceText = "$0.0000"
         balanceUSDMicros = 0
         KeychainStore.delete(service: keychainService, account: tokenAccount)
+        UserDefaults.standard.removeObject(forKey: userIDKey)
         UserDefaults.standard.removeObject(forKey: emailKey)
     }
 }
