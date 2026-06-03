@@ -9,7 +9,7 @@ settings:
     MARKETING_VERSION: 0.1.0
     CURRENT_PROJECT_VERSION: 1
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-    VOICETYPE_BACKEND_URL: http://127.0.0.1:8000
+    VOICETYPE_BACKEND_URL: http://192.168.2.63:8000
     VOICETYPE_APP_GROUP: group.com.kyleqi.voicetype
 targets:
   VoiceType:
@@ -31,6 +31,9 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         NSMicrophoneUsageDescription: VoiceType records your speech only when you press record so it can turn it into text.
         NSSpeechRecognitionUsageDescription: VoiceType sends recorded audio to your private transcription backend for speech-to-text.
+        NSLocalNetworkUsageDescription: VoiceType connects to your local development backend while you test the app on this iPhone.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         VoiceTypeBackendURL: $(VOICETYPE_BACKEND_URL)
         VoiceTypeAppGroup: $(VOICETYPE_APP_GROUP)
         UILaunchStoryboardName: LaunchScreen

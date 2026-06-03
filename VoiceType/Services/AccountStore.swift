@@ -2,6 +2,8 @@ import Foundation
 
 @MainActor
 final class AccountStore: ObservableObject {
+    static let previewToken = "local-preview-token"
+
     private let keychainService = "com.kyleqi.voicetype.account"
     private let tokenAccount = "userToken"
     private let emailKey = "accountEmail"
@@ -17,11 +19,22 @@ final class AccountStore: ObservableObject {
         !token.isEmpty
     }
 
+    var isPreviewMode: Bool {
+        token == Self.previewToken
+    }
+
     init() {
-        token = KeychainStore.read(service: keychainService, account: tokenAccount) ?? ""
-        email = UserDefaults.standard.string(forKey: emailKey) ?? ""
-        balanceText = "$0.0000"
-        balanceUSDMicros = 0
+        let storedToken = KeychainStore.read(service: keychainService, account: tokenAccount) ?? ""
+        token = storedToken
+        if storedToken == Self.previewToken {
+            email = "Local preview"
+            balanceText = "$5.0000"
+            balanceUSDMicros = 5_000_000
+        } else {
+            email = UserDefaults.standard.string(forKey: emailKey) ?? ""
+            balanceText = "$0.0000"
+            balanceUSDMicros = 0
+        }
     }
 
     func signInWithApple(identityToken: String, email: String?, fullName: String?) async {
@@ -42,7 +55,7 @@ final class AccountStore: ObservableObject {
     }
 
     func refresh() async {
-        guard isSignedIn else { return }
+        guard isSignedIn, !isPreviewMode else { return }
         do {
             let payload = try await BackendClient.me(token: token)
             apply(balance: payload.balance)
@@ -59,6 +72,16 @@ final class AccountStore: ObservableObject {
             UserDefaults.standard.set(userEmail, forKey: emailKey)
         }
         apply(balance: auth.balance)
+    }
+
+    func enterPreviewMode() {
+        token = Self.previewToken
+        email = "Local preview"
+        balanceText = "$5.0000"
+        balanceUSDMicros = 5_000_000
+        errorMessage = nil
+        KeychainStore.save(token, service: keychainService, account: tokenAccount)
+        UserDefaults.standard.set(email, forKey: emailKey)
     }
 
     func apply(balance: BalancePayload) {

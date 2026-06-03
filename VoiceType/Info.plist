@@ -33,6 +33,13 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>VoiceType connects to your local development backend while you test the app on this iPhone.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>VoiceType records your speech only when you press record so it can turn it into text.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

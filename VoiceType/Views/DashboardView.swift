@@ -124,6 +124,18 @@ private struct SignInPanel: View {
             .frame(height: 52)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
+            Button {
+                account.enterPreviewMode()
+            } label: {
+                Label("Preview", systemImage: "eye")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(AppTheme.ink)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .background(AppTheme.background)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+
             if let error = account.errorMessage {
                 Text(error)
                     .font(.footnote)
