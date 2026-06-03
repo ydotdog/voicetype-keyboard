@@ -26,16 +26,22 @@ final class StoreKitService: ObservableObject {
             return
         }
 
+        var appAccountToken = account.appAccountToken
+        if appAccountToken == nil {
+            await account.refresh()
+            appAccountToken = account.appAccountToken
+        }
+        guard let appAccountToken else {
+            errorMessage = "Account refresh failed. Sign in again before adding credit."
+            return
+        }
+
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
 
         do {
-            var options: Set<Product.PurchaseOption> = []
-            if let appAccountToken = account.appAccountToken {
-                options.insert(.appAccountToken(appAccountToken))
-            }
-
+            let options: Set<Product.PurchaseOption> = [.appAccountToken(appAccountToken)]
             let result = try await product.purchase(options: options)
             switch result {
             case let .success(verification):

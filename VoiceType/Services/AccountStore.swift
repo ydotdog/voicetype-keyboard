@@ -66,6 +66,7 @@ final class AccountStore: ObservableObject {
         guard isSignedIn, !isPreviewMode else { return }
         do {
             let payload = try await BackendClient.me(token: token)
+            apply(user: payload.user)
             apply(balance: payload.balance)
         } catch {
             errorMessage = error.localizedDescription
@@ -82,6 +83,15 @@ final class AccountStore: ObservableObject {
             UserDefaults.standard.set(userEmail, forKey: emailKey)
         }
         apply(balance: auth.balance)
+    }
+
+    func apply(user: UserProfile) {
+        userID = user.id
+        email = user.email ?? email
+        UserDefaults.standard.set(user.id, forKey: userIDKey)
+        if let userEmail = user.email {
+            UserDefaults.standard.set(userEmail, forKey: emailKey)
+        }
     }
 
     func enterPreviewMode() {
