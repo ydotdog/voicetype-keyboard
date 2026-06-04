@@ -30,6 +30,25 @@ def load_main(tmp_path, monkeypatch):
     return importlib.import_module("main")
 
 
+def load_production_main(tmp_path, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "test-secret")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setenv("APPLE_APP_APPLE_ID", "1234567890")
+    monkeypatch.setenv("APPLE_ROOT_CERTIFICATE_PEMS_B64", base64.b64encode(b"cert").decode())
+    monkeypatch.setenv("STOREKIT_VERIFICATION_MODE", "strict")
+    monkeypatch.setenv("ALLOW_UNVERIFIED_STOREKIT_JWS", "false")
+    monkeypatch.setenv("REQUIRE_STOREKIT_APP_ACCOUNT_TOKEN", "true")
+    monkeypatch.setenv("ALLOW_DEV_CREDIT", "false")
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "voicetype.sqlite3"))
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("COST_MARKUP_BPS", raising=False)
+    monkeypatch.delenv("APPLE_AUTH_DEV_BYPASS", raising=False)
+
+    if "main" in sys.modules:
+        del sys.modules["main"]
+    return importlib.import_module("main")
+
+
 def auth(client: TestClient, name: str) -> dict:
     response = client.post(
         "/v1/auth/apple",
@@ -218,3 +237,26 @@ def test_audio_minute_pricing_uses_retail_markup(tmp_path, monkeypatch):
     assert charged_input == 60
     assert charged_output == 0
     assert cost == 10_286
+
+
+def test_readiness_reports_development_configuration_as_not_ready(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+
+    with TestClient(main.app) as client:
+        response = client.get("/health/ready")
+
+    assert response.status_code == 503, response.text
+    checks = response.json()["checks"]
+    assert checks["database"] is True
+    assert checks["dev_credit_disabled"] is False
+    assert checks["storekit_strict"] is False
+
+
+def test_readiness_accepts_production_configuration(tmp_path, monkeypatch):
+    main = load_production_main(tmp_path, monkeypatch)
+
+    with TestClient(main.app) as client:
+        response = client.get("/health/ready")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["ok"] is True

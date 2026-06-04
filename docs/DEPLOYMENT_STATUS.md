@@ -1,6 +1,6 @@
 # Deployment Status
 
-Last updated: 2026-06-04
+Last updated: 2026-06-05
 
 ## GCP
 
@@ -26,12 +26,14 @@ Billing configuration:
 
 - Credit packs: `$1`, `$5`, `$20` consumable StoreKit products.
 - `COST_MARKUP_BPS=7143`, covering standard 30% App Store commission plus 20% target profit.
+- `ALLOW_DEV_CREDIT=false` in production.
 
 Current public smoke tests:
 
 ```bash
 curl http://34.10.43.168/health
 curl https://voicetype.y.dog/health
+curl https://voicetype.y.dog/health/ready
 ```
 
 Expected response:
@@ -39,6 +41,22 @@ Expected response:
 ```json
 {"ok":true,"service":"voicetype-api","model":"gpt-4o-mini-transcribe","database":"postgres","storekit_verification_mode":"strict"}
 ```
+
+`/health/ready` should return HTTP 200 with all production checks true:
+
+- JWT secret configured.
+- OpenAI API key configured.
+- Postgres reachable.
+- StoreKit strict verification enabled.
+- `appAccountToken` required.
+- Apple App ID and root certificate material configured.
+- Dev credit disabled.
+
+Latest real transcription smoke test:
+
+- Date: 2026-06-05.
+- Model: `gpt-4o-mini-transcribe`.
+- Result: HTTP 200, transcript returned, ledger debited, temporary smoke user deleted.
 
 ## DNS
 

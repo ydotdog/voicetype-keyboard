@@ -734,6 +734,37 @@ def health() -> dict[str, Any]:
     }
 
 
+@app.get("/health/ready")
+def readiness() -> JSONResponse:
+    checks: dict[str, Any] = {
+        "jwt_secret": bool(JWT_SECRET),
+        "openai_api_key": bool(OPENAI_API_KEY),
+        "database": False,
+        "storekit_strict": STOREKIT_VERIFICATION_MODE == "strict" and not ALLOW_UNVERIFIED_STOREKIT_JWS,
+        "storekit_app_account_token_required": REQUIRE_STOREKIT_APP_ACCOUNT_TOKEN,
+        "apple_app_id": bool(APPLE_APP_APPLE_ID),
+        "apple_root_certificates": bool(APPLE_ROOT_CERTIFICATE_PATHS or APPLE_ROOT_CERTIFICATE_PEMS_B64),
+        "dev_credit_disabled": not ALLOW_DEV_CREDIT,
+    }
+    try:
+        with db() as conn:
+            execute(conn, "SELECT 1").fetchone()
+        checks["database"] = True
+    except Exception as exc:
+        checks["database_error"] = exc.__class__.__name__
+
+    ok = all(value is True for value in checks.values() if isinstance(value, bool))
+    return JSONResponse(
+        status_code=200 if ok else 503,
+        content={
+            "ok": ok,
+            "service": "voicetype-api",
+            "model": OPENAI_TRANSCRIBE_MODEL,
+            "checks": checks,
+        },
+    )
+
+
 @app.post("/v1/auth/apple", response_model=AuthResponse)
 def auth_apple(request: AppleAuthRequest) -> AuthResponse:
     apple_payload = verify_apple_identity_token(request.identity_token)

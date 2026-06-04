@@ -13,9 +13,30 @@ enum BackendClientError: LocalizedError {
         case .invalidResponse:
             "The backend returned an unexpected response."
         case let .httpError(status, message):
-            "Backend error \(status): \(message)"
+            Self.userMessage(status: status, message: message)
         case .missingFile:
             "The recording file could not be read."
+        }
+    }
+
+    private static func userMessage(status: Int, message: String) -> String {
+        switch status {
+        case 400:
+            return message.isEmpty ? "The request could not be completed." : message
+        case 401:
+            return "Your session expired. Sign in again."
+        case 402:
+            return "Add credit before transcribing. Your credit never expires."
+        case 413:
+            return "That recording is too large. Try a shorter clip."
+        case 429:
+            return "The transcription service is busy. Try again in a moment."
+        case 500:
+            return "VoiceType is not fully configured on the server yet."
+        case 502, 503, 504:
+            return "Transcription is temporarily unavailable. Try again in a moment."
+        default:
+            return message.isEmpty ? "Backend error \(status)." : message
         }
     }
 }
@@ -116,10 +137,61 @@ enum BackendClient {
         guard (200..<300).contains(httpResponse.statusCode) else {
             throw BackendClientError.httpError(
                 status: httpResponse.statusCode,
-                message: String(data: data, encoding: .utf8) ?? ""
+                message: backendMessage(from: data)
             )
         }
         return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    private static func backendMessage(from data: Data) -> String {
+        if
+            let payload = try? JSONDecoder().decode(BackendErrorPayload.self, from: data),
+            let detail = payload.detailText,
+            !detail.isEmpty
+        {
+            return detail
+        }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+}
+
+private struct BackendErrorPayload: Decodable {
+    let detail: Detail
+
+    var detailText: String? {
+        switch detail {
+        case let .string(value):
+            return value
+        case let .list(values):
+            return values.compactMap(\.message).joined(separator: "\n")
+        case .object:
+            return nil
+        }
+    }
+
+    enum Detail: Decodable {
+        case string(String)
+        case list([BackendValidationError])
+        case object
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            if let value = try? container.decode(String.self) {
+                self = .string(value)
+            } else if let value = try? container.decode([BackendValidationError].self) {
+                self = .list(value)
+            } else {
+                self = .object
+            }
+        }
+    }
+}
+
+private struct BackendValidationError: Decodable {
+    let message: String?
+
+    enum CodingKeys: String, CodingKey {
+        case message = "msg"
     }
 }
 
