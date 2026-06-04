@@ -11,6 +11,12 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     @Published var durationLimit = RecordingPreferencesStore.durationLimit {
         didSet {
             RecordingPreferencesStore.durationLimit = durationLimit
+            guard isRecording || isKeyboardReady else { return }
+            activeDurationLimit = durationLimit
+            publishBridgeState()
+            Task { @MainActor [weak self] in
+                await self?.stopIfDurationLimitReached()
+            }
         }
     }
     @Published var errorMessage: String?
@@ -88,13 +94,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             try session.setActive(true)
 
             let (audioRecorder, fileURL) = try makeAudioRecorder()
-            let didStartRecording: Bool
-            if let maximumDuration = durationLimit.maximumDuration {
-                didStartRecording = audioRecorder.record(forDuration: maximumDuration)
-            } else {
-                didStartRecording = audioRecorder.record()
-            }
-            guard didStartRecording else {
+            guard audioRecorder.record() else {
                 try? FileManager.default.removeItem(at: fileURL)
                 throw RecorderError.failedToStart
             }
@@ -228,20 +228,6 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         }
 
         do {
-            #if DEBUG
-            if account.isPreviewMode {
-                let snapshot = TranscriptSnapshot(
-                    id: UUID().uuidString,
-                    text: "This is a local preview transcript from VoiceType.",
-                    createdAt: Date(),
-                    chargeText: "0 credits"
-                )
-                SharedTranscriptStore.latest = snapshot
-                lastTranscript = snapshot
-                return
-            }
-            #endif
-
             let response = try await BackendClient.transcribe(fileURL: fileURL, duration: duration, token: account.token)
             let snapshot = TranscriptSnapshot(
                 id: response.id,
@@ -514,29 +500,6 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             try restartKeyboardReadyRecorder()
             try await exportClip(sourceURL: sourceURL, outputURL: clipURL, start: clipStartTime, duration: clipDuration)
 
-            #if DEBUG
-            if activeAccount.isPreviewMode {
-                let snapshot = TranscriptSnapshot(
-                    id: UUID().uuidString,
-                    text: "This is a local preview transcript from VoiceType.",
-                    createdAt: Date(),
-                    chargeText: "0 credits"
-                )
-                SharedTranscriptStore.latest = snapshot
-                lastTranscript = snapshot
-            } else {
-                let response = try await BackendClient.transcribe(fileURL: clipURL, duration: clipDuration, token: activeAccount.token)
-                let snapshot = TranscriptSnapshot(
-                    id: response.id,
-                    text: response.transcript,
-                    createdAt: Date(),
-                    chargeText: response.charge.formatted
-                )
-                SharedTranscriptStore.latest = snapshot
-                lastTranscript = snapshot
-                activeAccount.apply(balance: response.balance)
-            }
-            #else
             let response = try await BackendClient.transcribe(fileURL: clipURL, duration: clipDuration, token: activeAccount.token)
             let snapshot = TranscriptSnapshot(
                 id: response.id,
@@ -547,7 +510,6 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             SharedTranscriptStore.latest = snapshot
             lastTranscript = snapshot
             activeAccount.apply(balance: response.balance)
-            #endif
 
             isProcessing = false
             bridgeMode = .keyboardReady

@@ -31,13 +31,17 @@ final class AccountStore: ObservableObject {
 
     init() {
         let storedToken = KeychainStore.read(service: keychainService, account: tokenAccount) ?? ""
-        token = storedToken
         if storedToken == Self.previewToken {
-            userID = UUID().uuidString
-            email = "Local preview"
-            balanceText = "5,000,000 credits"
-            balanceUSDMicros = 5_000_000
+            KeychainStore.delete(service: keychainService, account: tokenAccount)
+            UserDefaults.standard.removeObject(forKey: userIDKey)
+            UserDefaults.standard.removeObject(forKey: emailKey)
+            token = ""
+            userID = ""
+            email = ""
+            balanceText = "0 credits"
+            balanceUSDMicros = 0
         } else {
+            token = storedToken
             userID = UserDefaults.standard.string(forKey: userIDKey) ?? ""
             email = UserDefaults.standard.string(forKey: emailKey) ?? ""
             balanceText = "0 credits"
@@ -117,34 +121,6 @@ final class AccountStore: ObservableObject {
         if let userEmail = user.email {
             UserDefaults.standard.set(userEmail, forKey: emailKey)
         }
-    }
-
-    func enterPreviewMode() {
-        token = Self.previewToken
-        userID = UUID().uuidString
-        email = "Local preview"
-        balanceText = "5,000,000 credits"
-        balanceUSDMicros = 5_000_000
-        errorMessage = nil
-        SharedAccountStore.balanceText = balanceText
-        KeychainStore.save(token, service: keychainService, account: tokenAccount)
-        UserDefaults.standard.set(userID, forKey: userIDKey)
-        UserDefaults.standard.set(email, forKey: emailKey)
-    }
-
-    func addLocalTestCredit() {
-        token = Self.previewToken
-        if userID.isEmpty {
-            userID = UUID().uuidString
-        }
-        email = "Local preview"
-        balanceUSDMicros += 5_000_000
-        balanceText = Self.formatCredits(balanceUSDMicros)
-        errorMessage = nil
-        SharedAccountStore.balanceText = balanceText
-        KeychainStore.save(token, service: keychainService, account: tokenAccount)
-        UserDefaults.standard.set(userID, forKey: userIDKey)
-        UserDefaults.standard.set(email, forKey: emailKey)
     }
 
     func apply(balance: BalancePayload) {

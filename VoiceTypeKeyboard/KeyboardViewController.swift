@@ -27,8 +27,10 @@ final class KeyboardViewController: UIInputViewController {
     private let keyFeedback = UIImpactFeedbackGenerator(style: .light)
     private let actionFeedback = UIImpactFeedbackGenerator(style: .medium)
     private var deleteRepeatTimer: Timer?
+    private var openAppFallbackWorkItem: DispatchWorkItem?
 
     private let palette = KeyboardPalette()
+    private let keyboardHeight: CGFloat = 344
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -54,6 +56,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        cancelOpenAppFallback()
         stopDeleteRepeat()
         stopRefreshing()
     }
@@ -65,7 +68,7 @@ final class KeyboardViewController: UIInputViewController {
         inputView?.backgroundColor = palette.keyboard
         view.insetsLayoutMarginsFromSafeArea = false
 
-        let height = view.heightAnchor.constraint(equalToConstant: 282)
+        let height = view.heightAnchor.constraint(equalToConstant: keyboardHeight)
         height.priority = .defaultHigh
         height.isActive = true
 
@@ -358,6 +361,10 @@ final class KeyboardViewController: UIInputViewController {
     @MainActor
     private func refreshKeyboardState() {
         viewModel.refresh()
+        if viewModel.isKeyboardReady {
+            cancelOpenAppFallback()
+            actionNotice = nil
+        }
         clearResolvedPendingAction()
         updateUI()
         guard !viewModel.isRecording, KeyboardAutoInsertStore.shouldInsert(viewModel.snapshot) else { return }
@@ -502,31 +509,46 @@ final class KeyboardViewController: UIInputViewController {
 
     private func openContainingApp(route: ContainingAppRoute) {
         guard let url = route.url else { return }
-        if openURLThroughResponderChain(url) {
-            return
-        }
+        scheduleOpenAppFallback(route: route)
 
-        extensionContext?.open(url) { [weak self] didOpen in
-            guard !didOpen else { return }
-            DispatchQueue.main.async {
-                self?.actionNotice = "Open VoiceType once, then return."
-                self?.updateUI()
+        if let extensionContext {
+            extensionContext.open(url) { [weak self] didOpen in
+                guard !didOpen else { return }
+                DispatchQueue.main.async {
+                    self?.openURLThroughResponderChain(url)
+                }
             }
+        } else {
+            openURLThroughResponderChain(url)
         }
     }
 
-    @discardableResult
-    private func openURLThroughResponderChain(_ url: URL) -> Bool {
+    private func scheduleOpenAppFallback(route: ContainingAppRoute) {
+        cancelOpenAppFallback()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, !self.viewModel.isKeyboardReady else { return }
+            self.actionNotice = route.fallbackMessage
+            self.updateUI()
+        }
+        openAppFallbackWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: workItem)
+    }
+
+    private func cancelOpenAppFallback() {
+        openAppFallbackWorkItem?.cancel()
+        openAppFallbackWorkItem = nil
+    }
+
+    private func openURLThroughResponderChain(_ url: URL) {
         let selector = NSSelectorFromString("openURL:")
         var responder: UIResponder? = self
         while let current = responder {
             if current.responds(to: selector) {
                 current.perform(selector, with: url)
-                return true
+                return
             }
             responder = current.next
         }
-        return false
     }
 
     private func setPendingAction(_ action: PendingKeyboardAction?) {
@@ -593,6 +615,15 @@ private enum ContainingAppRoute {
             components.host = "keyboard-setup"
         }
         return components.url
+    }
+
+    var fallbackMessage: String {
+        switch self {
+        case .keyboardMic:
+            return "Could not open from this app. Open VoiceType from Home and turn keyboard mic on."
+        case .keyboardSetup:
+            return "Could not open from this app. Open VoiceType from Home to finish setup."
+        }
     }
 }
 

@@ -38,7 +38,7 @@ struct DashboardView: View {
                 }
                 .environmentObject(account)
                 .environmentObject(appState)
-                .presentationDetents([.height(390), .medium])
+                .presentationDetents([.height(470), .medium])
                 .presentationDragIndicator(.visible)
             }
             .task {
@@ -321,17 +321,6 @@ private struct SignInScreen: View {
                 .frame(height: 56)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                #if DEBUG
-                Button {
-                    account.enterPreviewMode()
-                } label: {
-                    Label("Explore the demo", systemImage: "sparkles")
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 54)
-                }
-                .buttonStyle(GhostButtonStyle())
-                #endif
-
                 Text("No subscription. Buy credit only when you want it.")
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(AppTheme.secondary)
@@ -440,7 +429,7 @@ private struct HomeScreen: View {
 
             RecordingLimitPicker(
                 selection: $recorder.durationLimit,
-                isDisabled: recorder.isKeyboardReady || recorder.isRecording || recorder.isProcessing
+                isDisabled: recorder.isProcessing
             )
 
             if recorder.isProcessing {
@@ -982,20 +971,7 @@ private struct DeveloperToolsSection: View {
                         .frame(height: 46)
                 }
                 .buttonStyle(InkButtonStyle())
-                .disabled(!account.isSignedIn || account.isPreviewMode)
-
-                Button {
-                    if account.isPreviewMode {
-                        account.addLocalTestCredit()
-                    } else {
-                        account.enterPreviewMode()
-                    }
-                } label: {
-                    Label(account.isPreviewMode ? "Add Preview Credit" : "Switch to Preview", systemImage: "plus.circle")
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 46)
-                }
-                .buttonStyle(InkButtonStyle(color: AppTheme.accent, foreground: AppTheme.ink))
+                .disabled(!account.isSignedIn)
             }
             .panelStyle()
         }
@@ -1164,7 +1140,10 @@ private struct RecorderSheet: View {
                     .monospacedDigit()
 
                 LiveWaveform()
-                    .frame(height: 94)
+                    .frame(height: 78)
+
+                RecordingLimitPicker(selection: $recorder.durationLimit, isDisabled: false)
+                    .padding(.horizontal, 2)
 
                 Button {
                     Task {

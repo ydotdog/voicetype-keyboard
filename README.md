@@ -74,7 +74,7 @@ Use the `VoiceType` scheme.
 
 Build settings:
 
-- Debug backend URL: `http://192.168.2.63:8000` for local iPhone testing on this network.
+- Debug backend URL: `https://voicetype.y.dog` so device builds use the deployed backend by default.
 - Release backend URL: `https://voicetype.y.dog`.
 - App Group: `group.com.kyleqi.voicetype`.
 - Bundle IDs: `com.kyleqi.voicetype` and `com.kyleqi.voicetype.keyboard`.

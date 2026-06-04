@@ -13,7 +13,7 @@ settings:
     VOICETYPE_DEV_CREDIT_KEY: ""
   configs:
     Debug:
-      VOICETYPE_BACKEND_URL: http://192.168.2.63:8000
+      VOICETYPE_BACKEND_URL: https://voicetype.y.dog
     Release:
       VOICETYPE_BACKEND_URL: https://voicetype.y.dog
 targets:
