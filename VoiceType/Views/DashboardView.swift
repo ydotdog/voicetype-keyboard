@@ -44,6 +44,12 @@ struct DashboardView: View {
             .task {
                 await initialLoad()
             }
+            .task(id: appState.keyboardMicRequestID) {
+                await handleKeyboardMicRequest()
+            }
+            .task(id: appState.keyboardSetupRequestID) {
+                handleKeyboardSetupRequest()
+            }
             .onChange(of: account.isSignedIn) { _, isSignedIn in
                 guard isSignedIn else {
                     transcriptHistory = []
@@ -149,6 +155,45 @@ struct DashboardView: View {
         guard !snapshot.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         UIPasteboard.general.string = snapshot.text
         showToast("Copied")
+    }
+
+    private func handleKeyboardMicRequest() async {
+        guard appState.keyboardMicRequestID != nil else { return }
+        withAnimation(.snappy) {
+            selectedTab = .home
+            isKeyboardSetupPresented = false
+        }
+
+        guard appState.consumeKeyboardMicAutoStart() else { return }
+        guard account.isSignedIn else {
+            showToast("Sign in to turn on keyboard mic")
+            return
+        }
+        guard !recorder.isKeyboardReady else {
+            showToast("Keyboard mic is already on")
+            return
+        }
+        guard !recorder.isRecording, !recorder.isProcessing else {
+            showToast("Finish the current recording first")
+            return
+        }
+
+        await recorder.startKeyboardReady(account: account)
+        if recorder.isKeyboardReady {
+            showToast("Keyboard mic is on. Return to your app.")
+        }
+    }
+
+    private func handleKeyboardSetupRequest() {
+        guard appState.keyboardSetupRequestID != nil else { return }
+        guard account.isSignedIn else {
+            showToast("Sign in, then enable Full Access")
+            return
+        }
+        withAnimation(.snappy) {
+            selectedTab = .settings
+            isKeyboardSetupPresented = true
+        }
     }
 
     private func showToast(_ message: String) {

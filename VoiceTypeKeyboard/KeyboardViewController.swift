@@ -14,10 +14,6 @@ final class KeyboardViewController: UIInputViewController {
     private let brandStack = UIStackView()
     private let markView = KeyboardMarkView()
     private let wordmarkLabel = UILabel()
-    private let modePill = UIStackView()
-    private let modeWaveView = KeyboardMiniWaveView()
-    private let englishLabel = UILabel()
-    private let pinyinLabel = UILabel()
     private let promptLabel = UILabel()
     private let actionControl = KeyboardActionControl()
     private let actionStack = UIStackView()
@@ -28,6 +24,9 @@ final class KeyboardViewController: UIInputViewController {
     private let switchKeyboardButton = UIButton(type: .system)
     private let returnButton = UIButton(type: .system)
     private let deleteButton = UIButton(type: .system)
+    private let keyFeedback = UIImpactFeedbackGenerator(style: .light)
+    private let actionFeedback = UIImpactFeedbackGenerator(style: .medium)
+    private var deleteRepeatTimer: Timer?
 
     private let palette = KeyboardPalette()
 
@@ -44,6 +43,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        prepareHaptics()
         startRefreshing()
     }
 
@@ -54,6 +54,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        stopDeleteRepeat()
         stopRefreshing()
     }
 
@@ -112,47 +113,8 @@ final class KeyboardViewController: UIInputViewController {
         wordmarkLabel.textColor = palette.ink
         wordmarkLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        modePill.axis = .horizontal
-        modePill.alignment = .center
-        modePill.spacing = 16
-        modePill.isUserInteractionEnabled = false
-        modePill.backgroundColor = palette.keySurface
-        modePill.layer.cornerCurve = .continuous
-        modePill.layer.cornerRadius = 25
-        modePill.translatesAutoresizingMaskIntoConstraints = false
-        modePill.layoutMargins = UIEdgeInsets(top: 3, left: 8, bottom: 3, right: 18)
-        modePill.isLayoutMarginsRelativeArrangement = true
-
-        let selectedChip = UIView()
-        selectedChip.backgroundColor = palette.keyGray
-        selectedChip.layer.cornerCurve = .continuous
-        selectedChip.layer.cornerRadius = 22
-        selectedChip.translatesAutoresizingMaskIntoConstraints = false
-        selectedChip.addSubview(modeWaveView)
-        modeWaveView.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            selectedChip.widthAnchor.constraint(equalToConstant: 48),
-            selectedChip.heightAnchor.constraint(equalToConstant: 44),
-            modeWaveView.centerXAnchor.constraint(equalTo: selectedChip.centerXAnchor),
-            modeWaveView.centerYAnchor.constraint(equalTo: selectedChip.centerYAnchor),
-            modeWaveView.widthAnchor.constraint(equalToConstant: 28),
-            modeWaveView.heightAnchor.constraint(equalToConstant: 24)
-        ])
-
-        styleModeLabel(englishLabel, text: "EN")
-        styleModeLabel(pinyinLabel, text: "拼")
-
-        modePill.addArrangedSubview(selectedChip)
-        modePill.addArrangedSubview(englishLabel)
-        modePill.addArrangedSubview(pinyinLabel)
-        NSLayoutConstraint.activate([
-            modePill.widthAnchor.constraint(equalToConstant: 166),
-            modePill.heightAnchor.constraint(equalToConstant: 50)
-        ])
-
         topRow.addArrangedSubview(brandStack)
         topRow.addArrangedSubview(UIView())
-        topRow.addArrangedSubview(modePill)
 
         NSLayoutConstraint.activate([
             topRow.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 18),
@@ -175,6 +137,7 @@ final class KeyboardViewController: UIInputViewController {
         actionControl.layer.cornerCurve = .continuous
         actionControl.layer.cornerRadius = 36
         actionControl.addTarget(self, action: #selector(actionTapped), for: .touchUpInside)
+        installActionPressFeedback(on: actionControl)
         actionControl.isAccessibilityElement = true
         actionControl.accessibilityTraits = .button
         contentView.addSubview(actionControl)
@@ -257,13 +220,19 @@ final class KeyboardViewController: UIInputViewController {
         contentView.addSubview(bottomRow)
 
         configureIconKey(switchKeyboardButton, systemName: "globe", accessibilityLabel: "Next keyboard")
+        installKeyPressFeedback(on: switchKeyboardButton)
         switchKeyboardButton.addTarget(self, action: #selector(nextKeyboardTapped), for: .touchUpInside)
 
         configureTextKey(returnButton, text: "return", accessibilityLabel: "Return")
+        installKeyPressFeedback(on: returnButton)
         returnButton.addTarget(self, action: #selector(returnTapped), for: .touchUpInside)
 
         configureIconKey(deleteButton, systemName: "delete.left", accessibilityLabel: "Delete")
+        installKeyPressFeedback(on: deleteButton)
         deleteButton.addTarget(self, action: #selector(deleteTapped), for: .touchUpInside)
+        let deleteLongPress = UILongPressGestureRecognizer(target: self, action: #selector(deleteLongPressed(_:)))
+        deleteLongPress.minimumPressDuration = 0.35
+        deleteButton.addGestureRecognizer(deleteLongPress)
 
         bottomRow.addArrangedSubview(switchKeyboardButton)
         bottomRow.addArrangedSubview(returnButton)
@@ -282,14 +251,6 @@ final class KeyboardViewController: UIInputViewController {
             deleteButton.widthAnchor.constraint(equalToConstant: 58),
             deleteButton.heightAnchor.constraint(equalToConstant: 58)
         ])
-    }
-
-    private func styleModeLabel(_ label: UILabel, text: String) {
-        label.text = text
-        label.font = .systemFont(ofSize: 22, weight: .regular)
-        label.textColor = palette.muted
-        label.textAlignment = .center
-        label.isUserInteractionEnabled = false
     }
 
     private func configureIconKey(_ button: UIButton, systemName: String, accessibilityLabel: String) {
@@ -324,6 +285,56 @@ final class KeyboardViewController: UIInputViewController {
         result.append(NSAttributedString(string: "Voice", attributes: [.font: voiceFont, .foregroundColor: palette.ink]))
         result.append(NSAttributedString(string: "Type", attributes: [.font: typeFont, .foregroundColor: palette.ink]))
         return result
+    }
+
+    private func prepareHaptics() {
+        keyFeedback.prepare()
+        actionFeedback.prepare()
+    }
+
+    private func installKeyPressFeedback(on control: UIControl) {
+        control.addTarget(self, action: #selector(keyPressBegan(_:)), for: [.touchDown, .touchDragEnter])
+        control.addTarget(
+            self,
+            action: #selector(pressEnded(_:)),
+            for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit]
+        )
+    }
+
+    private func installActionPressFeedback(on control: UIControl) {
+        control.addTarget(self, action: #selector(actionPressBegan(_:)), for: [.touchDown, .touchDragEnter])
+        control.addTarget(
+            self,
+            action: #selector(pressEnded(_:)),
+            for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit]
+        )
+    }
+
+    @objc private func keyPressBegan(_ sender: UIControl) {
+        keyFeedback.impactOccurred(intensity: 0.85)
+        keyFeedback.prepare()
+        setPressed(true, for: sender)
+    }
+
+    @objc private func actionPressBegan(_ sender: UIControl) {
+        actionFeedback.impactOccurred(intensity: 0.9)
+        actionFeedback.prepare()
+        setPressed(true, for: sender)
+    }
+
+    @objc private func pressEnded(_ sender: UIControl) {
+        setPressed(false, for: sender)
+    }
+
+    private func setPressed(_ isPressed: Bool, for control: UIControl) {
+        UIView.animate(
+            withDuration: isPressed ? 0.08 : 0.14,
+            delay: 0,
+            options: [.beginFromCurrentState, .allowUserInteraction]
+        ) {
+            control.transform = isPressed ? CGAffineTransform(scaleX: 0.96, y: 0.96) : .identity
+            control.alpha = isPressed ? 0.82 : 1
+        }
     }
 
     private func startRefreshing() {
@@ -420,15 +431,15 @@ final class KeyboardViewController: UIInputViewController {
         } else if !hasFullAccess {
             setPendingAction(nil)
             actionNotice = "Full Access is required so the keyboard can talk to VoiceType."
-            openContainingApp()
+            openContainingApp(route: .keyboardSetup)
         } else if viewModel.isKeyboardReady, hasFullAccess {
             setPendingAction(.startingClip)
             KeyboardAutoInsertStore.arm(baselineTranscriptID: viewModel.snapshot.id)
             RecordingBridgeStore.requestStartClip()
         } else {
             setPendingAction(nil)
-            actionNotice = "Open VoiceType and turn on keyboard mic before using this key."
-            openContainingApp()
+            actionNotice = "Opening VoiceType to turn on keyboard mic."
+            openContainingApp(route: .keyboardMic)
         }
         viewModel.refresh()
         clearResolvedPendingAction()
@@ -447,9 +458,53 @@ final class KeyboardViewController: UIInputViewController {
         textDocumentProxy.deleteBackward()
     }
 
-    private func openContainingApp() {
-        guard let url = URL(string: "\(AppConstants.appURLScheme)://keyboard") else { return }
-        extensionContext?.open(url)
+    @objc private func deleteLongPressed(_ recognizer: UILongPressGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            keyFeedback.impactOccurred(intensity: 0.9)
+            keyFeedback.prepare()
+            setPressed(true, for: deleteButton)
+            textDocumentProxy.deleteBackward()
+            startDeleteRepeat()
+        case .ended, .cancelled, .failed:
+            stopDeleteRepeat()
+            setPressed(false, for: deleteButton)
+        default:
+            break
+        }
+    }
+
+    private func startDeleteRepeat() {
+        stopDeleteRepeat()
+        deleteRepeatTimer = Timer.scheduledTimer(
+            timeInterval: 0.08,
+            target: self,
+            selector: #selector(deleteRepeatTick),
+            userInfo: nil,
+            repeats: true
+        )
+    }
+
+    @objc private func deleteRepeatTick() {
+        textDocumentProxy.deleteBackward()
+        keyFeedback.impactOccurred(intensity: 0.45)
+        keyFeedback.prepare()
+    }
+
+    private func stopDeleteRepeat() {
+        deleteRepeatTimer?.invalidate()
+        deleteRepeatTimer = nil
+    }
+
+    private func openContainingApp(route: ContainingAppRoute) {
+        guard let url = route.url else { return }
+        extensionContext?.open(url) { [weak self] didOpen in
+            guard !didOpen else { return }
+            DispatchQueue.main.async {
+                self?.actionNotice = "VoiceType could not open from this app. Open VoiceType once, then return."
+                self?.updateUI()
+            }
+        }
     }
 
     private func setPendingAction(_ action: PendingKeyboardAction?) {
@@ -498,6 +553,24 @@ private enum PendingKeyboardAction {
         case .stoppingClip:
             return "VoiceType did not finish this clip. Reopen VoiceType to check the recording."
         }
+    }
+}
+
+private enum ContainingAppRoute {
+    case keyboardMic
+    case keyboardSetup
+
+    var url: URL? {
+        var components = URLComponents()
+        components.scheme = AppConstants.appURLScheme
+        switch self {
+        case .keyboardMic:
+            components.host = "keyboard"
+            components.queryItems = [URLQueryItem(name: "autostart", value: "1")]
+        case .keyboardSetup:
+            components.host = "keyboard-setup"
+        }
+        return components.url
     }
 }
 
@@ -578,35 +651,6 @@ private final class KeyboardMarkView: UIView {
             let y = (bounds.height - height) / 2
             let path = UIBezierPath(roundedRect: CGRect(x: x, y: y, width: barWidth, height: height), cornerRadius: barWidth / 2)
             (index == bars.count - 1 ? palette.accent : palette.ink).setFill()
-            path.fill()
-            x += barWidth + spacing
-        }
-    }
-}
-
-private final class KeyboardMiniWaveView: UIView {
-    private let heights: [CGFloat] = [9, 17, 24, 18, 11]
-    private let palette = KeyboardPalette()
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        backgroundColor = .clear
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        backgroundColor = .clear
-    }
-
-    override func draw(_ rect: CGRect) {
-        let barWidth: CGFloat = 3.2
-        let spacing: CGFloat = 3.2
-        let totalWidth = CGFloat(heights.count) * barWidth + CGFloat(heights.count - 1) * spacing
-        var x = (bounds.width - totalWidth) / 2
-        for height in heights {
-            let y = (bounds.height - height) / 2
-            let path = UIBezierPath(roundedRect: CGRect(x: x, y: y, width: barWidth, height: height), cornerRadius: barWidth / 2)
-            palette.ink.setFill()
             path.fill()
             x += barWidth + spacing
         }
