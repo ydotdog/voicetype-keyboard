@@ -81,6 +81,8 @@ struct RecordingBridgeCommand: Codable, Equatable {
 }
 
 enum RecordingBridgeStore {
+    static let commandNotificationName = "com.kyleqi.voicetype.recording-bridge-command"
+
     private static let stateKey = "recordingBridgeState"
     private static let commandKey = "recordingBridgeCommand"
     private static let staleKeyboardStateInterval: TimeInterval = 10
@@ -155,6 +157,7 @@ enum RecordingBridgeStore {
         guard let data = try? encoder.encode(command) else { return }
         defaults.set(data, forKey: commandKey)
         defaults.synchronize()
+        postCommandNotification()
     }
 
     static func clearCommand(id: String) {
@@ -162,5 +165,10 @@ enum RecordingBridgeStore {
         guard let defaults = UserDefaults(suiteName: AppConstants.appGroup) else { return }
         defaults.removeObject(forKey: commandKey)
         defaults.synchronize()
+    }
+
+    private static func postCommandNotification() {
+        let name = CFNotificationName(commandNotificationName as CFString)
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), name, nil, nil, true)
     }
 }

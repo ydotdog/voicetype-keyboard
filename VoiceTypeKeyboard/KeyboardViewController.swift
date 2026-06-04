@@ -5,6 +5,9 @@ final class KeyboardViewController: UIInputViewController {
     private let viewModel = KeyboardViewModel()
     private var refreshTimer: Timer?
     private var pendingAction: PendingKeyboardAction?
+    private var pendingActionStartedAt: Date?
+    private var actionNotice: String?
+    private let pendingActionTimeout: TimeInterval = 4
 
     private let chromeStack = UIStackView()
     private let markView = KeyboardMarkView()
@@ -100,6 +103,7 @@ final class KeyboardViewController: UIInputViewController {
         actionControl.layer.cornerCurve = .continuous
         actionControl.layer.cornerRadius = 22
         actionControl.addTarget(self, action: #selector(actionTapped), for: .touchUpInside)
+        actionControl.isAccessibilityElement = true
         actionControl.accessibilityTraits = .button
         actionControl.heightAnchor.constraint(equalToConstant: 112).isActive = true
 
@@ -212,7 +216,7 @@ final class KeyboardViewController: UIInputViewController {
 
     private func startRefreshing() {
         stopRefreshing()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.refreshKeyboardState()
             }
@@ -242,7 +246,7 @@ final class KeyboardViewController: UIInputViewController {
         }
 
         let canUseBridge = viewModel.isKeyboardReady && hasFullAccess
-        actionControl.isEnabled = !viewModel.isTranscribing
+        actionControl.isEnabled = pendingAction == nil && !viewModel.isTranscribing
 
         if pendingAction == .startingClip {
             actionControl.backgroundColor = palette.surface
@@ -308,15 +312,15 @@ final class KeyboardViewController: UIInputViewController {
             actionTitleLabel.textColor = palette.onInk
             if !hasFullAccess {
                 actionTitleLabel.text = "Enable Full Access"
-                helperLabel.text = "Settings -> Keyboard -> VoiceType -> Allow Full Access."
+                helperLabel.text = actionNotice ?? "Settings -> Keyboard -> VoiceType -> Allow Full Access."
                 actionControl.accessibilityLabel = "Enable Full Access for VoiceType Keyboard"
             } else if viewModel.isKeyboardReady {
-                actionTitleLabel.text = "Tap to talk"
-                helperLabel.text = "Tap once to start a clip. Tap again to finish and insert."
+                actionTitleLabel.text = actionNotice == nil ? "Tap to talk" : "Tap to retry"
+                helperLabel.text = actionNotice ?? "Tap once to start a clip. Tap again to finish and insert."
                 actionControl.accessibilityLabel = "Tap to talk"
             } else {
                 actionTitleLabel.text = "Open VoiceType"
-                helperLabel.text = "Turn on keyboard mic in VoiceType first."
+                helperLabel.text = actionNotice ?? "Turn on keyboard mic in VoiceType first."
                 actionControl.accessibilityLabel = "Open VoiceType to turn on keyboard microphone"
             }
             actionStack.addArrangedSubview(actionCircle)
@@ -340,18 +344,28 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     @objc private func actionTapped() {
+        viewModel.refresh()
+        clearResolvedPendingAction()
+        guard pendingAction == nil else {
+            updateUI()
+            return
+        }
+        actionNotice = nil
+
         if viewModel.isKeyboardRecording {
-            pendingAction = .stoppingClip
+            setPendingAction(.stoppingClip)
             RecordingBridgeStore.requestStopClip()
         } else if !hasFullAccess {
-            pendingAction = nil
+            setPendingAction(nil)
+            actionNotice = "Full Access is required so the keyboard can talk to VoiceType."
             openContainingApp()
         } else if viewModel.isKeyboardReady, hasFullAccess {
-            pendingAction = .startingClip
+            setPendingAction(.startingClip)
             KeyboardAutoInsertStore.arm(baselineTranscriptID: viewModel.snapshot.id)
             RecordingBridgeStore.requestStartClip()
         } else {
-            pendingAction = nil
+            setPendingAction(nil)
+            actionNotice = "Open VoiceType and turn on keyboard mic before using this key."
             openContainingApp()
         }
         viewModel.refresh()
@@ -368,14 +382,36 @@ final class KeyboardViewController: UIInputViewController {
         extensionContext?.open(url)
     }
 
+    private func setPendingAction(_ action: PendingKeyboardAction?) {
+        pendingAction = action
+        pendingActionStartedAt = action == nil ? nil : Date()
+    }
+
     private func clearResolvedPendingAction() {
+        guard let pendingAction else {
+            if viewModel.isKeyboardRecording || viewModel.isTranscribing {
+                actionNotice = nil
+            }
+            return
+        }
+
         switch pendingAction {
         case .startingClip where viewModel.isKeyboardRecording:
-            pendingAction = nil
+            setPendingAction(nil)
+            actionNotice = nil
         case .stoppingClip where !viewModel.isKeyboardRecording:
-            pendingAction = nil
+            setPendingAction(nil)
+            actionNotice = nil
         default:
-            break
+            guard
+                let pendingActionStartedAt,
+                Date().timeIntervalSince(pendingActionStartedAt) >= pendingActionTimeout
+            else {
+                return
+            }
+            setPendingAction(nil)
+            KeyboardAutoInsertStore.clear()
+            actionNotice = pendingAction.timeoutMessage
         }
     }
 }
@@ -383,6 +419,15 @@ final class KeyboardViewController: UIInputViewController {
 private enum PendingKeyboardAction {
     case startingClip
     case stoppingClip
+
+    var timeoutMessage: String {
+        switch self {
+        case .startingClip:
+            return "VoiceType did not respond. Reopen VoiceType and turn keyboard mic on again."
+        case .stoppingClip:
+            return "VoiceType did not finish this clip. Reopen VoiceType to check the recording."
+        }
+    }
 }
 
 private final class KeyboardActionControl: UIControl {

@@ -28,6 +28,15 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     private var keyboardClipStartTime: TimeInterval?
     private var lastBridgeHeartbeatAt: Date?
 
+    override init() {
+        super.init()
+        registerBridgeCommandObserver()
+    }
+
+    deinit {
+        removeBridgeCommandObserver()
+    }
+
     var isKeyboardReady: Bool {
         bridgeMode == .keyboardReady || bridgeMode == .keyboardRecording || bridgeMode == .transcribing
     }
@@ -412,6 +421,36 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             return
         }
         await stopAndTranscribe(account: activeAccount)
+    }
+
+    private func registerBridgeCommandObserver() {
+        let observer = Unmanaged.passUnretained(self).toOpaque()
+        let name = CFNotificationName(RecordingBridgeStore.commandNotificationName as CFString)
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            observer,
+            { _, observer, _, _, _ in
+                guard let observer else { return }
+                let controller = Unmanaged<RecordingController>.fromOpaque(observer).takeUnretainedValue()
+                Task { @MainActor in
+                    await controller.handleBridgeCommandIfNeeded()
+                }
+            },
+            name.rawValue,
+            nil,
+            .deliverImmediately
+        )
+    }
+
+    nonisolated private func removeBridgeCommandObserver() {
+        let observer = Unmanaged.passUnretained(self).toOpaque()
+        let name = CFNotificationName(RecordingBridgeStore.commandNotificationName as CFString)
+        CFNotificationCenterRemoveObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            observer,
+            name,
+            nil
+        )
     }
 
     private func beginKeyboardClip() {
