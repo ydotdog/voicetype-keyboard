@@ -59,10 +59,10 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func setupKeyboard() {
-        view.backgroundColor = .clear
-        view.isOpaque = false
-        view.clipsToBounds = false
-        inputView?.backgroundColor = .clear
+        view.backgroundColor = palette.keyboard
+        view.isOpaque = true
+        view.clipsToBounds = true
+        inputView?.backgroundColor = palette.keyboard
         view.insetsLayoutMarginsFromSafeArea = false
 
         let height = view.heightAnchor.constraint(equalToConstant: 282)
@@ -89,6 +89,10 @@ final class KeyboardViewController: UIInputViewController {
 
     private func updateKeyboardChrome() {
         contentView.layer.cornerRadius = keyboardChromeCornerRadius
+        view.backgroundColor = palette.keyboard
+        inputView?.backgroundColor = palette.keyboard
+        view.superview?.backgroundColor = palette.keyboard
+        inputView?.superview?.backgroundColor = palette.keyboard
     }
 
     private func setupTopRow() {
@@ -197,18 +201,18 @@ final class KeyboardViewController: UIInputViewController {
         NSLayoutConstraint.activate([
             promptLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 18),
             promptLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -18),
-            promptLabel.topAnchor.constraint(equalTo: topRow.bottomAnchor, constant: 10),
-            promptLabel.heightAnchor.constraint(equalToConstant: 32),
-
-            actionControl.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            actionControl.topAnchor.constraint(equalTo: promptLabel.bottomAnchor, constant: 12),
-            actionControl.widthAnchor.constraint(equalToConstant: 204),
-            actionControl.heightAnchor.constraint(equalToConstant: 72),
+            promptLabel.topAnchor.constraint(equalTo: topRow.bottomAnchor, constant: 6),
+            promptLabel.heightAnchor.constraint(equalToConstant: 30),
 
             helperLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 28),
             helperLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -28),
-            helperLabel.topAnchor.constraint(equalTo: actionControl.bottomAnchor, constant: 8),
-            helperLabel.heightAnchor.constraint(greaterThanOrEqualToConstant: 16)
+            helperLabel.topAnchor.constraint(equalTo: promptLabel.bottomAnchor, constant: 2),
+            helperLabel.heightAnchor.constraint(equalToConstant: 32),
+
+            actionControl.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            actionControl.topAnchor.constraint(equalTo: helperLabel.bottomAnchor, constant: 7),
+            actionControl.widthAnchor.constraint(equalToConstant: 204),
+            actionControl.heightAnchor.constraint(equalToConstant: 70)
         ])
     }
 
@@ -430,7 +434,7 @@ final class KeyboardViewController: UIInputViewController {
             RecordingBridgeStore.requestStopClip()
         } else if !hasFullAccess {
             setPendingAction(nil)
-            actionNotice = "Full Access is required so the keyboard can talk to VoiceType."
+            actionNotice = "Enable Full Access in VoiceType."
             openContainingApp(route: .keyboardSetup)
         } else if viewModel.isKeyboardReady, hasFullAccess {
             setPendingAction(.startingClip)
@@ -438,7 +442,7 @@ final class KeyboardViewController: UIInputViewController {
             RecordingBridgeStore.requestStartClip()
         } else {
             setPendingAction(nil)
-            actionNotice = "Opening VoiceType to turn on keyboard mic."
+            actionNotice = "Opening VoiceType..."
             openContainingApp(route: .keyboardMic)
         }
         viewModel.refresh()
@@ -498,13 +502,31 @@ final class KeyboardViewController: UIInputViewController {
 
     private func openContainingApp(route: ContainingAppRoute) {
         guard let url = route.url else { return }
+        if openURLThroughResponderChain(url) {
+            return
+        }
+
         extensionContext?.open(url) { [weak self] didOpen in
             guard !didOpen else { return }
             DispatchQueue.main.async {
-                self?.actionNotice = "VoiceType could not open from this app. Open VoiceType once, then return."
+                self?.actionNotice = "Open VoiceType once, then return."
                 self?.updateUI()
             }
         }
+    }
+
+    @discardableResult
+    private func openURLThroughResponderChain(_ url: URL) -> Bool {
+        let selector = NSSelectorFromString("openURL:")
+        var responder: UIResponder? = self
+        while let current = responder {
+            if current.responds(to: selector) {
+                current.perform(selector, with: url)
+                return true
+            }
+            responder = current.next
+        }
+        return false
     }
 
     private func setPendingAction(_ action: PendingKeyboardAction?) {
