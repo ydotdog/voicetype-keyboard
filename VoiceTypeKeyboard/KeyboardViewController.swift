@@ -7,6 +7,7 @@ final class KeyboardViewController: UIInputViewController {
     private var pendingActionStartedAt: Date?
     private var actionNotice: String?
     private let pendingActionTimeout: TimeInterval = 4
+    private let keyboardChromeCornerRadius: CGFloat = 32
 
     private let contentView = UIView()
     private let topRow = UIStackView()
@@ -46,13 +47,21 @@ final class KeyboardViewController: UIInputViewController {
         startRefreshing()
     }
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateKeyboardChrome()
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         stopRefreshing()
     }
 
     private func setupKeyboard() {
-        view.backgroundColor = palette.keyboard
+        view.backgroundColor = .clear
+        view.isOpaque = false
+        view.clipsToBounds = false
+        inputView?.backgroundColor = .clear
         view.insetsLayoutMarginsFromSafeArea = false
 
         let height = view.heightAnchor.constraint(equalToConstant: 282)
@@ -61,6 +70,9 @@ final class KeyboardViewController: UIInputViewController {
 
         contentView.translatesAutoresizingMaskIntoConstraints = false
         contentView.backgroundColor = palette.keyboard
+        contentView.layer.cornerCurve = .continuous
+        contentView.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        contentView.layer.masksToBounds = true
         view.addSubview(contentView)
         NSLayoutConstraint.activate([
             contentView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -72,6 +84,10 @@ final class KeyboardViewController: UIInputViewController {
         setupTopRow()
         setupActionArea()
         setupBottomRow()
+    }
+
+    private func updateKeyboardChrome() {
+        contentView.layer.cornerRadius = keyboardChromeCornerRadius
     }
 
     private func setupTopRow() {
