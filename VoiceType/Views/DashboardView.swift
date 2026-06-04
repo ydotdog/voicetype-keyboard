@@ -8,152 +8,248 @@ struct DashboardView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var recorder = RecordingController()
     @StateObject private var store = StoreKitService()
-    @State private var copied = false
+    @State private var selectedTab: VoiceTypeTab = .home
+    @State private var isKeyboardSetupPresented = false
+    @State private var transcriptHistory = SharedTranscriptStore.history
+    @State private var toastMessage: String?
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: account.isSignedIn ? 18 : 0) {
-                    if account.isSignedIn {
-                        AppHeader()
-                            .environmentObject(account)
-                        BalanceHero(balanceText: account.balanceText, identity: account.email)
-                        RecorderPanel(recorder: recorder)
-                            .environmentObject(account)
-                        RecentTranscriptPanel(snapshot: recorder.lastTranscript, copied: copied) {
-                            UIPasteboard.general.string = recorder.lastTranscript.text
-                            withAnimation(.snappy) { copied = true }
-                            Task {
-                                try? await Task.sleep(for: .seconds(1.2))
-                                await MainActor.run {
-                                    withAnimation(.snappy) { copied = false }
-                                }
-                            }
-                        }
-                        StorePanel(store: store)
-                            .environmentObject(account)
-                        KeyboardSetupPanel()
-                        #if DEBUG
-                        DeveloperToolsPanel()
-                            .environmentObject(account)
-                        #endif
-                    } else {
-                        SignInPanel()
-                    }
+            ZStack(alignment: .bottom) {
+                AppTheme.background.ignoresSafeArea()
+
+                if account.isSignedIn {
+                    signedInContent
+                } else {
+                    SignInScreen()
+                        .environmentObject(account)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, account.isSignedIn ? 16 : 34)
-                .padding(.bottom, 30)
+
+                if let toastMessage {
+                    ToastView(message: toastMessage)
+                        .padding(.bottom, account.isSignedIn ? 92 : 26)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
-            .background(AppTheme.background.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $appState.isRecorderPresented) {
-                RecorderSheet(recorder: recorder)
-                    .environmentObject(account)
-                    .environmentObject(appState)
-                    .presentationDetents([.height(360), .medium])
-                    .presentationDragIndicator(.visible)
+                RecorderSheet(recorder: recorder) {
+                    refreshHistory()
+                }
+                .environmentObject(account)
+                .environmentObject(appState)
+                .presentationDetents([.height(390), .medium])
+                .presentationDragIndicator(.visible)
             }
             .task {
-                await account.refresh()
-                #if DEBUG
-                await account.grantDeveloperCreditIfAvailable()
-                #endif
-                if account.isSignedIn {
-                    await store.loadProducts()
-                    await store.syncUnfinishedTransactions(account: account)
-                }
-                recorder.refreshLatest()
+                await initialLoad()
             }
             .onChange(of: account.isSignedIn) { _, isSignedIn in
-                guard isSignedIn else { return }
-                Task {
-                    await account.refresh()
-                    #if DEBUG
-                    await account.grantDeveloperCreditIfAvailable()
-                    #endif
-                    await store.loadProducts()
-                    await store.syncUnfinishedTransactions(account: account)
-                    recorder.refreshLatest()
+                guard isSignedIn else {
+                    transcriptHistory = []
+                    selectedTab = .home
+                    isKeyboardSetupPresented = false
+                    return
+                }
+                Task { await signedInLoad() }
+            }
+            .onChange(of: recorder.lastTranscript) { _, _ in
+                refreshHistory()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var signedInContent: some View {
+        if isKeyboardSetupPresented {
+            KeyboardSetupScreen {
+                withAnimation(.snappy) {
+                    isKeyboardSetupPresented = false
+                }
+            }
+        } else {
+            VStack(spacing: 0) {
+                ScrollView {
+                    Group {
+                        switch selectedTab {
+                        case .home:
+                            HomeScreen(
+                                account: account,
+                                recorder: recorder,
+                                latest: recorder.lastTranscript,
+                                copyLatest: copyLatestTranscript,
+                                openHistory: {
+                                    withAnimation(.snappy) { selectedTab = .history }
+                                },
+                                openSettings: {
+                                    withAnimation(.snappy) { selectedTab = .settings }
+                                },
+                                openRecorder: {
+                                    appState.presentRecorder(autoStart: false)
+                                }
+                            )
+                        case .history:
+                            HistoryScreen(history: transcriptHistory, copy: copyTranscript)
+                        case .credit:
+                            CreditScreen(store: store, account: account)
+                        case .settings:
+                            SettingsScreen(
+                                account: account,
+                                store: store,
+                                openKeyboardSetup: {
+                                    withAnimation(.snappy) {
+                                        isKeyboardSetupPresented = true
+                                    }
+                                }
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 18)
+                    .padding(.bottom, 106)
+                }
+
+                VoiceTypeTabBar(selection: $selectedTab)
+            }
+        }
+    }
+
+    private func initialLoad() async {
+        await account.refresh()
+        #if DEBUG
+        await account.grantDeveloperCreditIfAvailable()
+        #endif
+        if account.isSignedIn {
+            await signedInLoad()
+        }
+        recorder.refreshLatest()
+        refreshHistory()
+    }
+
+    private func signedInLoad() async {
+        await account.refresh()
+        #if DEBUG
+        await account.grantDeveloperCreditIfAvailable()
+        #endif
+        await store.loadProducts()
+        await store.syncUnfinishedTransactions(account: account)
+        recorder.refreshLatest()
+        refreshHistory()
+    }
+
+    private func refreshHistory() {
+        transcriptHistory = SharedTranscriptStore.history
+    }
+
+    private func copyLatestTranscript() {
+        copyTranscript(recorder.lastTranscript)
+    }
+
+    private func copyTranscript(_ snapshot: TranscriptSnapshot) {
+        guard !snapshot.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        UIPasteboard.general.string = snapshot.text
+        showToast("Copied")
+    }
+
+    private func showToast(_ message: String) {
+        withAnimation(.snappy) {
+            toastMessage = message
+        }
+        Task {
+            try? await Task.sleep(for: .seconds(1.25))
+            await MainActor.run {
+                withAnimation(.snappy) {
+                    if toastMessage == message {
+                        toastMessage = nil
+                    }
                 }
             }
         }
     }
 }
 
-private struct AppHeader: View {
-    @EnvironmentObject private var account: AccountStore
+private enum VoiceTypeTab: String, CaseIterable, Identifiable {
+    case home
+    case history
+    case credit
+    case settings
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .home: "Home"
+        case .history: "History"
+        case .credit: "Credit"
+        case .settings: "Settings"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .home: "house"
+        case .history: "clock"
+        case .credit: "dollarsign.circle"
+        case .settings: "gearshape"
+        }
+    }
+}
+
+private struct VoiceTypeTabBar: View {
+    @Binding var selection: VoiceTypeTab
 
     var body: some View {
-        HStack(spacing: 12) {
-            VoiceTypeLogo(compact: true)
-            Spacer()
-            Button {
-                account.signOut()
-            } label: {
-                Image(systemName: "person.crop.circle.badge.xmark")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(AppTheme.ink)
-                    .frame(width: 38, height: 38)
-                    .background(AppTheme.surface.opacity(0.72))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(AppTheme.borderSoft, lineWidth: 1)
+        HStack(spacing: 0) {
+            ForEach(VoiceTypeTab.allCases) { tab in
+                Button {
+                    withAnimation(.snappy) {
+                        selection = tab
                     }
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 21, weight: .medium))
+                            .symbolVariant(selection == tab ? .fill : .none)
+                        Text(tab.title)
+                            .font(.system(size: 10.5, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .foregroundStyle(selection == tab ? AppTheme.accentDeep : AppTheme.secondary)
+                }
+                .buttonStyle(.plain)
             }
-            .accessibilityLabel("Sign out")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 9)
+        .padding(.bottom, 22)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(AppTheme.borderSoft)
+                .frame(height: 1)
         }
     }
 }
 
-private struct BalanceHero: View {
-    let balanceText: String
-    let identity: String
-
-    var body: some View {
-        VStack(spacing: 8) {
-            KickerText(text: "Balance")
-
-            Text(balanceText)
-                .font(AppTheme.serif(56, weight: .regular))
-                .foregroundStyle(AppTheme.ink)
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.46)
-                .frame(maxWidth: .infinity)
-
-            Text("Credit never expires")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(AppTheme.secondary)
-
-            Text(identity.isEmpty ? "Signed in" : identity)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(AppTheme.secondary.opacity(0.74))
-                .lineLimit(1)
-        }
-        .padding(.top, 18)
-        .padding(.bottom, 12)
-    }
-}
-
-private struct SignInPanel: View {
+private struct SignInScreen: View {
     @EnvironmentObject private var account: AccountStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 28) {
+        VStack(alignment: .leading, spacing: 0) {
             VoiceTypeLogo()
-                .padding(.top, 28)
+                .padding(.top, 62)
+
+            Spacer(minLength: 70)
 
             VStack(alignment: .leading, spacing: 16) {
                 KickerText(text: "Speech to text · paid by use")
 
-                VStack(alignment: .leading, spacing: -2) {
+                VStack(alignment: .leading, spacing: -3) {
                     Text("Voice,")
                         .font(AppTheme.serif(58, weight: .regular))
                         .foregroundStyle(AppTheme.ink)
                     Text("set in type.")
-                        .font(AppTheme.serif(50, weight: .regular))
+                        .font(AppTheme.serif(52, weight: .regular))
                         .italic()
                         .foregroundStyle(AppTheme.accentDeep)
                 }
@@ -161,14 +257,14 @@ private struct SignInPanel: View {
                 .minimumScaleFactor(0.72)
 
                 Text("Dictate anywhere. Your words come back as clean, copy-ready text, and your credit never expires.")
-                    .font(.system(size: 17, weight: .regular))
+                    .font(.system(size: 16.5, weight: .regular))
                     .lineSpacing(5)
                     .foregroundStyle(AppTheme.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.trailing, 12)
+                    .padding(.trailing, 18)
             }
 
-            Spacer(minLength: 60)
+            Spacer(minLength: 84)
 
             VStack(spacing: 12) {
                 SignInWithAppleButton(.signIn) { request in
@@ -184,12 +280,18 @@ private struct SignInPanel: View {
                 Button {
                     account.enterPreviewMode()
                 } label: {
-                    Label("Developer Preview", systemImage: "hammer")
+                    Label("Explore the demo", systemImage: "sparkles")
                         .frame(maxWidth: .infinity)
                         .frame(height: 54)
                 }
                 .buttonStyle(GhostButtonStyle())
                 #endif
+
+                Text("No subscription. Buy credit only when you want it.")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(AppTheme.secondary)
+                    .frame(maxWidth: .infinity)
+                    .multilineTextAlignment(.center)
 
                 if let error = account.errorMessage {
                     Text(error)
@@ -199,7 +301,10 @@ private struct SignInPanel: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 690, alignment: .topLeading)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(AppTheme.background.ignoresSafeArea())
     }
 
     private func handle(_ result: Result<ASAuthorization, Error>) async {
@@ -230,18 +335,62 @@ private struct SignInPanel: View {
     }
 }
 
-private struct RecorderPanel: View {
+private struct HomeScreen: View {
+    @ObservedObject var account: AccountStore
     @ObservedObject var recorder: RecordingController
-    @EnvironmentObject private var account: AccountStore
+    let latest: TranscriptSnapshot
+    let copyLatest: () -> Void
+    let openHistory: () -> Void
+    let openSettings: () -> Void
+    let openRecorder: () -> Void
 
     var body: some View {
-        VStack(spacing: 14) {
-            if recorder.isKeyboardReady {
-                keyboardMicCard
-            } else if recorder.isRecording {
-                recordingCard
-            } else {
-                idleRecordButton
+        VStack(alignment: .leading, spacing: 24) {
+            HeaderRow(openSettings: openSettings)
+
+            BalanceBlock(balanceText: account.balanceText, identity: account.email)
+
+            VStack(spacing: 12) {
+                if recorder.isKeyboardReady {
+                    KeyboardMicStatusCard(recorder: recorder)
+                    Button {
+                        recorder.stopKeyboardReady()
+                    } label: {
+                        Label("Turn off keyboard mic", systemImage: "mic.slash.fill")
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
+                    }
+                    .buttonStyle(GhostButtonStyle())
+                } else {
+                    Button {
+                        Task { await recorder.startKeyboardReady(account: account) }
+                    } label: {
+                        HStack(spacing: 18) {
+                            CircleIcon(systemName: "mic.fill", foreground: AppTheme.ink, background: AppTheme.accent)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Turn on keyboard mic")
+                                    .font(AppTheme.serif(22, weight: .medium))
+                                Text("Keep VoiceType ready in other apps")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(AppTheme.surface.opacity(0.72))
+                            }
+                            Spacer()
+                        }
+                        .foregroundStyle(AppTheme.surface)
+                        .padding(16)
+                    }
+                    .buttonStyle(InkButtonStyle())
+                    .disabled(recorder.isProcessing)
+                }
+
+                Button {
+                    openRecorder()
+                } label: {
+                    Label("Record a clip in VoiceType", systemImage: "waveform")
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                }
+                .buttonStyle(GhostButtonStyle())
             }
 
             RecordingLimitPicker(
@@ -249,49 +398,8 @@ private struct RecorderPanel: View {
                 isDisabled: recorder.isKeyboardReady || recorder.isRecording || recorder.isProcessing
             )
 
-            if recorder.isKeyboardReady {
-                Button {
-                    recorder.stopKeyboardReady()
-                } label: {
-                    Label("Turn off keyboard mic", systemImage: "mic.slash.fill")
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 48)
-                }
-                .buttonStyle(GhostButtonStyle())
-            } else if recorder.isRecording {
-                HStack(spacing: 10) {
-                    Button {
-                        Task { await recorder.stopAndTranscribe(account: account) }
-                    } label: {
-                        Label("Stop & transcribe", systemImage: "checkmark")
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 48)
-                    }
-                    .buttonStyle(InkButtonStyle(color: AppTheme.coral, foreground: .white))
-
-                    Button {
-                        recorder.cancel()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .frame(width: 48, height: 48)
-                    }
-                    .buttonStyle(GhostButtonStyle())
-                    .accessibilityLabel("Cancel recording")
-                }
-            }
-
             if recorder.isProcessing {
-                HStack(spacing: 10) {
-                    ProgressView()
-                        .tint(AppTheme.coral)
-                    Text("Transcribing")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(AppTheme.inkSoft)
-                    Spacer()
-                }
-                .padding(12)
-                .background(AppTheme.surface)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                ProcessingRow()
             }
 
             if let error = recorder.errorMessage {
@@ -300,55 +408,76 @@ private struct RecorderPanel: View {
                     .foregroundStyle(AppTheme.coral)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            LatestTranscriptCard(snapshot: latest, copy: copyLatest, openHistory: openHistory)
         }
     }
+}
 
-    private var idleRecordButton: some View {
-        Button {
-            Task { await recorder.startKeyboardReady(account: account) }
-        } label: {
-            HStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(AppTheme.accent)
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(AppTheme.ink)
-                }
-                .frame(width: 46, height: 46)
+private struct HeaderRow: View {
+    let openSettings: () -> Void
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Turn on keyboard mic")
-                        .font(AppTheme.serif(22, weight: .medium))
-                    Text("Keep VoiceType ready in other apps")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(AppTheme.surface.opacity(0.72))
-                }
-
-                Spacer()
+    var body: some View {
+        HStack(spacing: 12) {
+            VoiceTypeLogo(compact: true)
+            Spacer()
+            Button(action: openSettings) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 38, height: 38)
+                    .foregroundStyle(AppTheme.inkSoft)
             }
-            .foregroundStyle(AppTheme.surface)
-            .padding(14)
-            .frame(maxWidth: .infinity)
-            .background(AppTheme.ink)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .buttonStyle(.plain)
+            .accessibilityLabel("Settings")
         }
-        .disabled(recorder.isProcessing)
-        .opacity(recorder.isProcessing ? 0.72 : 1)
     }
+}
 
-    private var keyboardMicCard: some View {
+private struct BalanceBlock: View {
+    let balanceText: String
+    let identity: String
+
+    var body: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 6) {
+            KickerText(text: "Balance")
+            Text(balanceText.isEmpty ? "0 credits" : balanceText)
+                .font(AppTheme.serif(58, weight: .regular))
+                .foregroundStyle(AppTheme.ink)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.42)
+                .frame(maxWidth: .infinity)
+
+            VStack(spacing: 3) {
+                Text("Credit never expires")
+                    .font(.system(size: 13.5, weight: .semibold))
+                Text(identity.isEmpty ? "Signed in" : identity)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .foregroundStyle(AppTheme.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+    }
+}
+
+private struct KeyboardMicStatusCard: View {
+    @ObservedObject var recorder: RecordingController
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 8) {
                 Circle()
                     .fill(recorder.isKeyboardRecording ? AppTheme.coral : AppTheme.accent)
-                    .frame(width: 7, height: 7)
+                    .frame(width: 8, height: 8)
                 KickerText(
                     text: recorder.isKeyboardRecording ? "Saving clip" : recorder.isKeyboardTranscribing ? "Transcribing" : "Keyboard mic on",
                     color: recorder.isKeyboardRecording || recorder.isKeyboardTranscribing ? AppTheme.coral : AppTheme.accentDeep
                 )
                 Spacer()
-                Text(timerText)
+                Text(RecorderPanel.format(recorder.elapsedSeconds))
                     .font(AppTheme.serif(24, weight: .regular))
                     .foregroundStyle(AppTheme.ink)
                     .monospacedDigit()
@@ -356,63 +485,601 @@ private struct RecorderPanel: View {
 
             if recorder.isKeyboardRecording || recorder.isKeyboardTranscribing {
                 LiveWaveform(dense: true)
-                    .frame(height: 54)
+                    .frame(height: 56)
             } else {
-                Text("Now switch to any app and tap VoiceType Keyboard to start and finish a clip.")
+                Text("Switch to any app and tap VoiceType Keyboard to start and finish a clip.")
                     .font(.system(size: 14, weight: .medium))
+                    .lineSpacing(4)
                     .foregroundStyle(AppTheme.inkSoft)
                     .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .panelStyle()
+    }
+}
+
+private struct LatestTranscriptCard: View {
+    let snapshot: TranscriptSnapshot
+    let copy: () -> Void
+    let openHistory: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                KickerText(text: "Latest transcript")
+                Spacer()
+                if !snapshot.text.isEmpty {
+                    Button("History", action: openHistory)
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(AppTheme.accentDeep)
+                }
+            }
+
+            if snapshot.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text("No transcripts yet. Turn on keyboard mic or record a clip to make your first.")
+                    .font(.system(size: 14.5, weight: .medium))
+                    .lineSpacing(4)
+                    .foregroundStyle(AppTheme.secondary)
+                    .frame(maxWidth: .infinity)
+                    .multilineTextAlignment(.center)
+                    .padding(.vertical, 10)
+            } else {
+                Text(snapshot.text)
+                    .font(AppTheme.serif(20, weight: .regular))
+                    .lineSpacing(5)
+                    .foregroundStyle(AppTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack {
+                    if let charge = snapshot.chargeText, !charge.isEmpty {
+                        Text("Charged \(charge)")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(AppTheme.secondary)
+                    }
+                    Spacer()
+                    Button(action: copy) {
+                        Label("Copy", systemImage: "doc.on.doc")
+                            .font(.system(size: 13, weight: .semibold))
+                            .padding(.horizontal, 13)
+                            .frame(height: 36)
+                    }
+                    .buttonStyle(GhostButtonStyle())
+                }
+            }
+        }
+        .panelStyle()
+    }
+}
+
+private struct HistoryScreen: View {
+    let history: [TranscriptSnapshot]
+    let copy: (TranscriptSnapshot) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ScreenTitle(kicker: "Transcripts", title: "History")
+
+            if history.isEmpty {
+                EmptyStateCard(
+                    systemName: "clock",
+                    title: "Nothing here yet",
+                    detail: "Your latest transcripts will appear here after the first recording."
+                )
+            } else {
+                VStack(alignment: .leading, spacing: 20) {
+                    ForEach(groupedHistory, id: \.day) { group in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(group.day.uppercased())
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .tracking(1.2)
+                                .foregroundStyle(AppTheme.secondary)
+
+                            VStack(spacing: 0) {
+                                ForEach(group.items, id: \.id) { item in
+                                    HistoryRow(snapshot: item) {
+                                        copy(item)
+                                    }
+                                    if item.id != group.items.last?.id {
+                                        Divider()
+                                            .background(AppTheme.borderSoft)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 2)
+                            .background(AppTheme.surface)
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .stroke(AppTheme.border, lineWidth: 1)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var groupedHistory: [(day: String, items: [TranscriptSnapshot])] {
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: history) { snapshot in
+            if calendar.isDateInToday(snapshot.createdAt) {
+                return "Today"
+            }
+            if calendar.isDateInYesterday(snapshot.createdAt) {
+                return "Yesterday"
+            }
+            return Self.dayFormatter.string(from: snapshot.createdAt)
+        }
+        return grouped
+            .map { (day: $0.key, items: $0.value.sorted { $0.createdAt > $1.createdAt }) }
+            .sorted { ($0.items.first?.createdAt ?? .distantPast) > ($1.items.first?.createdAt ?? .distantPast) }
+    }
+
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter
+    }()
+}
+
+private struct HistoryRow: View {
+    let snapshot: TranscriptSnapshot
+    let copy: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(snapshot.text)
+                    .font(AppTheme.serif(17, weight: .regular))
+                    .lineSpacing(3)
+                    .foregroundStyle(AppTheme.ink)
+                    .lineLimit(2)
+
+                HStack(spacing: 6) {
+                    Text(Self.timeFormatter.string(from: snapshot.createdAt))
+                    if let charge = snapshot.chargeText, !charge.isEmpty {
+                        Text("·")
+                        Text(charge)
+                    }
+                }
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(AppTheme.secondary)
+            }
+
+            Spacer()
+
+            Button(action: copy) {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 34, height: 34)
+            }
+            .buttonStyle(GhostButtonStyle())
+            .accessibilityLabel("Copy transcript")
+        }
+        .padding(.vertical, 14)
+    }
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter
+    }()
+}
+
+private struct CreditScreen: View {
+    @ObservedObject var store: StoreKitService
+    @ObservedObject var account: AccountStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ScreenTitle(
+                kicker: "Pay as you go",
+                title: "Add credit",
+                detail: "Buy once, use whenever. Each clip is billed against your credit balance and your credit never expires."
+            )
+
+            VStack(spacing: 12) {
+                if store.products.isEmpty {
+                    Button {
+                        Task { await store.loadProducts() }
+                    } label: {
+                        Label("Reload packs", systemImage: "arrow.clockwise")
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
+                    }
+                    .buttonStyle(GhostButtonStyle())
+                } else {
+                    ForEach(store.products) { product in
+                        CreditPackCard(product: product, isPopular: product.id.contains("medium")) {
+                            Task { await store.purchase(product, account: account) }
+                        }
+                        .disabled(store.isLoading)
+                    }
+                }
+            }
+
+            LedgerNoteCard()
+
+            if let error = store.errorMessage {
+                Text(error)
+                    .font(.footnote)
+                    .foregroundStyle(AppTheme.coral)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+}
+
+private struct CreditPackCard: View {
+    let product: Product
+    let isPopular: Bool
+    let buy: () -> Void
+
+    var body: some View {
+        Button(action: buy) {
+            HStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 9) {
+                        Text(product.displayPrice)
+                            .font(AppTheme.serif(30, weight: .regular))
+                        if isPopular {
+                            Text("POPULAR")
+                                .font(.system(size: 10, weight: .bold))
+                                .tracking(0.8)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(AppTheme.accent)
+                                .foregroundStyle(AppTheme.ink)
+                                .clipShape(Capsule())
+                        }
+                    }
+
+                    Text(product.displayName)
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(product.description)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(2)
+                }
+                .foregroundStyle(isPopular ? AppTheme.surface : AppTheme.ink)
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(isPopular ? AppTheme.surface.opacity(0.58) : AppTheme.secondary)
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity)
+            .background(isPopular ? AppTheme.ink : AppTheme.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(isPopular ? Color.clear : AppTheme.border, lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct LedgerNoteCard: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "dollarsign.circle")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(AppTheme.accentDeep)
+                .padding(.top, 1)
+            Text("Every credit and debit is tied to your account, so users never share API quota or billing history.")
+                .font(.system(size: 13, weight: .medium))
+                .lineSpacing(3)
+                .foregroundStyle(AppTheme.inkSoft)
+        }
         .padding(16)
         .background(AppTheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke((recorder.isKeyboardRecording ? AppTheme.coral : AppTheme.accent).opacity(0.22), lineWidth: 1)
+                .stroke(AppTheme.border, lineWidth: 1)
         }
     }
+}
 
-    private var recordingCard: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(AppTheme.coral)
-                    .frame(width: 7, height: 7)
-                KickerText(text: "Recording", color: AppTheme.coral)
-                Spacer()
-                Text(timerText)
-                    .font(AppTheme.serif(24, weight: .regular))
-                    .foregroundStyle(AppTheme.ink)
-                    .monospacedDigit()
+private struct SettingsScreen: View {
+    @ObservedObject var account: AccountStore
+    @ObservedObject var store: StoreKitService
+    let openKeyboardSetup: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ScreenTitle(kicker: "Account", title: "Settings")
+
+            AccountSummaryCard(account: account)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("PREFERENCES")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .tracking(1.2)
+                    .foregroundStyle(AppTheme.secondary)
+
+                VStack(spacing: 0) {
+                    SettingsRow(title: "VoiceType keyboard", detail: "Set up", systemName: "keyboard", action: openKeyboardSetup)
+                    Divider().background(AppTheme.borderSoft)
+                    SettingsRow(title: "Open iOS Settings", detail: "", systemName: "gearshape") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(url)
+                        }
+                    }
+                    Divider().background(AppTheme.borderSoft)
+                    SettingsRow(title: "Restore purchases", detail: "", systemName: "arrow.clockwise") {
+                        Task { await store.syncUnfinishedTransactions(account: account) }
+                    }
+                }
+                .padding(.horizontal, 18)
+                .background(AppTheme.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(AppTheme.border, lineWidth: 1)
+                }
             }
 
-            LiveWaveform(dense: true)
-                .frame(height: 54)
+            #if DEBUG
+            DeveloperToolsSection(account: account)
+            #endif
+
+            Button {
+                account.signOut()
+            } label: {
+                Text("Sign out")
+                    .font(.system(size: 15.5, weight: .semibold))
+                    .foregroundStyle(AppTheme.coral)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+            }
+            .background(AppTheme.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(AppTheme.border, lineWidth: 1)
+            }
+
+            Text("VoiceType · v0.1")
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(AppTheme.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 4)
         }
-        .padding(16)
+    }
+}
+
+private struct AccountSummaryCard: View {
+    @ObservedObject var account: AccountStore
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Circle()
+                .fill(AppTheme.accent)
+                .frame(width: 48, height: 48)
+                .overlay {
+                    VoiceTypeMark()
+                        .frame(width: 25, height: 22)
+                        .foregroundStyle(AppTheme.ink)
+                }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(account.email.isEmpty ? "Signed in" : account.email)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(AppTheme.ink)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(account.balanceText)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(AppTheme.secondary)
+            }
+
+            Spacer()
+        }
+        .panelStyle()
+    }
+}
+
+private struct SettingsRow: View {
+    let title: String
+    let detail: String
+    let systemName: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: systemName)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(AppTheme.inkSoft)
+                    .frame(width: 22)
+                Text(title)
+                    .font(.system(size: 15.5, weight: .medium))
+                    .foregroundStyle(AppTheme.ink)
+                Spacer()
+                if !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(AppTheme.secondary)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(AppTheme.secondary.opacity(0.72))
+            }
+            .padding(.vertical, 15)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+#if DEBUG
+private struct DeveloperToolsSection: View {
+    @ObservedObject var account: AccountStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("DEVELOPER")
+                .font(.system(size: 11.5, weight: .semibold))
+                .tracking(1.2)
+                .foregroundStyle(AppTheme.secondary)
+
+            VStack(spacing: 10) {
+                Button {
+                    Task { await account.grantDeveloperCreditIfAvailable() }
+                } label: {
+                    Label("Grant Test API Credit", systemImage: "server.rack")
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                }
+                .buttonStyle(InkButtonStyle())
+                .disabled(!account.isSignedIn || account.isPreviewMode)
+
+                Button {
+                    if account.isPreviewMode {
+                        account.addLocalTestCredit()
+                    } else {
+                        account.enterPreviewMode()
+                    }
+                } label: {
+                    Label(account.isPreviewMode ? "Add Preview Credit" : "Switch to Preview", systemImage: "plus.circle")
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                }
+                .buttonStyle(InkButtonStyle(color: AppTheme.accent, foreground: AppTheme.ink))
+            }
+            .panelStyle()
+        }
+    }
+}
+#endif
+
+private struct KeyboardSetupScreen: View {
+    let close: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                Button(action: close) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(AppTheme.ink)
+                        .frame(width: 40, height: 40, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+
+                ScreenTitle(kicker: "Keyboard", title: "Add the keyboard\nin three steps")
+
+                KeyboardToggleIllustration()
+
+                VStack(spacing: 0) {
+                    SetupStep(index: "01", title: "Open Settings", detail: "Settings -> General -> Keyboard -> Keyboards.")
+                    Divider().background(AppTheme.borderSoft)
+                    SetupStep(index: "02", title: "Add VoiceType", detail: "Tap Add New Keyboard and choose VoiceType.")
+                    Divider().background(AppTheme.borderSoft)
+                    SetupStep(index: "03", title: "Allow Full Access", detail: "Enable Full Access so the keyboard can read VoiceType's latest transcript and recording state.")
+                }
+
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(AppTheme.accentDeep)
+                    Text("Full Access is used for VoiceType's shared App Group state. The keyboard still cannot use the microphone directly; the VoiceType app owns the audio session.")
+                        .font(.system(size: 12.5, weight: .medium))
+                        .lineSpacing(3)
+                        .foregroundStyle(AppTheme.inkSoft)
+                }
+                .padding(14)
+                .background(AppTheme.accentTint)
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 8)
+            .padding(.bottom, 30)
+        }
+        .background(AppTheme.background.ignoresSafeArea())
+    }
+}
+
+private struct KeyboardToggleIllustration: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                HStack(spacing: 10) {
+                    VoiceTypeMark()
+                        .frame(width: 25, height: 22)
+                    Text("VoiceType")
+                        .font(.system(size: 15, weight: .medium))
+                }
+                Spacer()
+                TogglePill()
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 11)
+
+            Divider().background(AppTheme.borderSoft)
+
+            HStack {
+                Text("Allow Full Access")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(AppTheme.ink)
+                Spacer()
+                TogglePill()
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 11)
+        }
+        .padding(18)
         .background(AppTheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(AppTheme.coral.opacity(0.18), lineWidth: 1)
+                .stroke(AppTheme.border, lineWidth: 1)
         }
     }
+}
 
-    private var timerText: String {
-        Self.format(recorder.elapsedSeconds)
+private struct TogglePill: View {
+    var body: some View {
+        Capsule()
+            .fill(AppTheme.accent)
+            .frame(width: 44, height: 26)
+            .overlay(alignment: .trailing) {
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 20, height: 20)
+                    .padding(.trailing, 3)
+            }
     }
+}
 
-    static func format(_ elapsedSeconds: TimeInterval) -> String {
-        let total = max(0, Int(elapsedSeconds.rounded(.down)))
-        let hours = total / 3600
-        let minutes = (total % 3600) / 60
-        let seconds = total % 60
-        if hours > 0 {
-            return "\(hours):\(String(format: "%02d", minutes)):\(String(format: "%02d", seconds))"
+private struct SetupStep: View {
+    let index: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 16) {
+            Text(index)
+                .font(AppTheme.serif(26, weight: .regular))
+                .foregroundStyle(AppTheme.accentDeep)
+                .frame(width: 36, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(AppTheme.ink)
+                Text(detail)
+                    .font(.system(size: 13.5, weight: .medium))
+                    .lineSpacing(3)
+                    .foregroundStyle(AppTheme.inkSoft)
+            }
+            Spacer()
         }
-        return "\(minutes):\(String(format: "%02d", seconds))"
+        .padding(.vertical, 14)
     }
 }
 
@@ -422,12 +1089,13 @@ private struct RecorderSheet: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var handledRequestID: UUID?
+    let onTranscript: () -> Void
 
     var body: some View {
         VStack(spacing: 18) {
             Capsule()
                 .fill(AppTheme.border)
-                .frame(width: 50, height: 5)
+                .frame(width: 44, height: 5)
 
             if recorder.isProcessing {
                 ProgressView()
@@ -446,7 +1114,7 @@ private struct RecorderSheet: View {
                 }
 
                 Text(RecorderPanel.format(recorder.elapsedSeconds))
-                    .font(AppTheme.serif(36, weight: .regular))
+                    .font(AppTheme.serif(38, weight: .regular))
                     .foregroundStyle(AppTheme.ink)
                     .monospacedDigit()
 
@@ -456,12 +1124,13 @@ private struct RecorderSheet: View {
                 Button {
                     Task {
                         await recorder.stopAndTranscribe(account: account)
+                        onTranscript()
                         dismiss()
                     }
                 } label: {
                     Label("Stop & transcribe", systemImage: "checkmark")
                         .frame(maxWidth: .infinity)
-                        .frame(height: 48)
+                        .frame(height: 50)
                 }
                 .buttonStyle(InkButtonStyle(color: AppTheme.coral, foreground: .white))
 
@@ -549,7 +1218,7 @@ private struct RecordingLimitPicker: View {
                             .foregroundStyle(selection == limit ? AppTheme.surface : AppTheme.inkSoft)
                             .frame(maxWidth: .infinity)
                             .frame(height: 36)
-                            .background(selection == limit ? AppTheme.ink : AppTheme.surface2.opacity(0.58))
+                            .background(selection == limit ? AppTheme.ink : AppTheme.surface.opacity(0.72))
                             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                             .overlay {
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -564,216 +1233,117 @@ private struct RecordingLimitPicker: View {
     }
 }
 
-private struct RecentTranscriptPanel: View {
-    let snapshot: TranscriptSnapshot
-    let copied: Bool
-    let copy: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center) {
-                KickerText(text: "Latest transcript")
-                Spacer()
-                Button(action: copy) {
-                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 15, weight: .semibold))
-                        .frame(width: 34, height: 34)
-                }
-                .disabled(snapshot.text.isEmpty)
-                .foregroundStyle(snapshot.text.isEmpty ? AppTheme.secondary.opacity(0.45) : AppTheme.ink)
-                .background(AppTheme.surface2.opacity(0.52))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .accessibilityLabel("Copy transcript")
-            }
-
-            Text(snapshot.text.isEmpty ? "No transcripts yet." : snapshot.text)
-                .font(AppTheme.serif(snapshot.text.isEmpty ? 22 : 21, weight: .regular))
-                .foregroundStyle(snapshot.text.isEmpty ? AppTheme.secondary : AppTheme.ink)
-                .lineSpacing(5)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let charge = snapshot.chargeText, !charge.isEmpty {
-                Text("Charged \(charge)")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(AppTheme.secondary)
-            }
+private enum RecorderPanel {
+    static func format(_ elapsedSeconds: TimeInterval) -> String {
+        let total = max(0, Int(elapsedSeconds.rounded(.down)))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        if hours > 0 {
+            return "\(hours):\(String(format: "%02d", minutes)):\(String(format: "%02d", seconds))"
         }
-        .panelStyle()
+        return "\(minutes):\(String(format: "%02d", seconds))"
     }
 }
 
-private struct StorePanel: View {
-    @ObservedObject var store: StoreKitService
-    @EnvironmentObject private var account: AccountStore
-
+private struct ProcessingRow: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                KickerText(text: "Credit packs")
-                Spacer()
-                if store.isLoading {
-                    ProgressView()
-                        .tint(AppTheme.ink)
-                }
-            }
-
-            if store.products.isEmpty {
-                Button {
-                    Task { await store.loadProducts() }
-                } label: {
-                    Label("Reload packs", systemImage: "arrow.clockwise")
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 46)
-                }
-                .buttonStyle(GhostButtonStyle())
-            } else {
-                VStack(spacing: 10) {
-                    ForEach(store.products) { product in
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(product.displayName)
-                                    .font(AppTheme.serif(20, weight: .medium))
-                                    .foregroundStyle(AppTheme.ink)
-                                Text(product.description)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(AppTheme.secondary)
-                                    .lineLimit(2)
-                            }
-
-                            Spacer(minLength: 12)
-
-                            Button {
-                                Task { await store.purchase(product, account: account) }
-                            } label: {
-                                Text(product.displayPrice)
-                                    .font(.system(size: 14, weight: .bold))
-                                    .padding(.horizontal, 14)
-                                    .frame(height: 38)
-                            }
-                            .buttonStyle(InkButtonStyle())
-                            .disabled(store.isLoading)
-                        }
-                        .padding(14)
-                        .background(AppTheme.surface2.opacity(product.id.contains("medium") ? 0.84 : 0.44))
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(product.id.contains("medium") ? AppTheme.accent.opacity(0.48) : AppTheme.borderSoft, lineWidth: 1)
-                        }
-                    }
-                }
-            }
-
-            if let error = store.errorMessage {
-                Text(error)
-                    .font(.footnote)
-                    .foregroundStyle(AppTheme.coral)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .panelStyle()
-    }
-}
-
-private struct KeyboardSetupPanel: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                KickerText(text: "Keyboard")
-                Spacer()
-                Button {
-                    if let url = URL(string: UIApplication.openSettingsURLString) {
-                        UIApplication.shared.open(url)
-                    }
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 15, weight: .semibold))
-                        .frame(width: 34, height: 34)
-                }
-                .foregroundStyle(AppTheme.ink)
-                .background(AppTheme.surface2.opacity(0.52))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .accessibilityLabel("Open Settings")
-            }
-
-            VStack(spacing: 10) {
-                SetupRow(index: "1", title: "Open Settings", detail: "General → Keyboard → Keyboards")
-                SetupRow(index: "2", title: "Add VoiceType", detail: "Choose VoiceType and enable Full Access")
-            }
-        }
-        .panelStyle()
-    }
-}
-
-private struct SetupRow: View {
-    let index: String
-    let title: String
-    let detail: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Text(index)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(AppTheme.ink)
-                .frame(width: 28, height: 28)
-                .background(AppTheme.accentTint)
-                .clipShape(Circle())
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(AppTheme.ink)
-                Text(detail)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(AppTheme.secondary)
-                    .lineLimit(2)
-            }
-
+        HStack(spacing: 10) {
+            ProgressView()
+                .tint(AppTheme.coral)
+            Text("Transcribing")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(AppTheme.inkSoft)
             Spacer()
         }
         .padding(12)
-        .background(AppTheme.surface2.opacity(0.42))
+        .background(AppTheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
-#if DEBUG
-private struct DeveloperToolsPanel: View {
-    @EnvironmentObject private var account: AccountStore
+private struct ScreenTitle: View {
+    let kicker: String
+    let title: String
+    var detail: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            KickerText(text: "Developer")
-
-            Text("Debug-only controls for device testing.")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(AppTheme.secondary)
-
-            Button {
-                Task { await account.grantDeveloperCreditIfAvailable() }
-            } label: {
-                Label("Grant Test API Credit", systemImage: "server.rack")
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 46)
+        VStack(alignment: .leading, spacing: 8) {
+            KickerText(text: kicker)
+            Text(title)
+                .font(AppTheme.serif(34, weight: .regular))
+                .foregroundStyle(AppTheme.ink)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+            if let detail {
+                Text(detail)
+                    .font(.system(size: 14.5, weight: .regular))
+                    .lineSpacing(4)
+                    .foregroundStyle(AppTheme.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .buttonStyle(InkButtonStyle())
-            .disabled(!account.isSignedIn || account.isPreviewMode)
-
-            Button {
-                if account.isPreviewMode {
-                    account.addLocalTestCredit()
-                } else {
-                    account.enterPreviewMode()
-                }
-            } label: {
-                Label(account.isPreviewMode ? "Add Preview Credit" : "Switch to Preview", systemImage: "plus.circle")
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-            }
-            .buttonStyle(InkButtonStyle(color: AppTheme.accent, foreground: AppTheme.ink))
         }
-        .panelStyle()
     }
 }
-#endif
+
+private struct EmptyStateCard: View {
+    let systemName: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: systemName)
+                .font(.system(size: 26, weight: .medium))
+                .foregroundStyle(AppTheme.secondary)
+            Text(title)
+                .font(AppTheme.serif(24, weight: .regular))
+                .foregroundStyle(AppTheme.ink)
+            Text(detail)
+                .font(.system(size: 14, weight: .medium))
+                .lineSpacing(4)
+                .foregroundStyle(AppTheme.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(26)
+        .background(AppTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(AppTheme.border, lineWidth: 1)
+        }
+    }
+}
+
+private struct CircleIcon: View {
+    let systemName: String
+    let foreground: Color
+    let background: Color
+
+    var body: some View {
+        Circle()
+            .fill(background)
+            .frame(width: 54, height: 54)
+            .overlay {
+                Image(systemName: systemName)
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(foreground)
+            }
+    }
+}
+
+private struct ToastView: View {
+    let message: String
+
+    var body: some View {
+        Text(message)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(AppTheme.surface)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 11)
+            .background(AppTheme.ink)
+            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .shadow(color: .black.opacity(0.14), radius: 14, x: 0, y: 8)
+    }
+}

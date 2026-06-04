@@ -160,6 +160,7 @@ final class AccountStore: ObservableObject {
         balanceText = "0 credits"
         balanceUSDMicros = 0
         SharedAccountStore.balanceText = ""
+        SharedTranscriptStore.clear()
         KeyboardAutoInsertStore.clear()
         KeychainStore.delete(service: keychainService, account: tokenAccount)
         UserDefaults.standard.removeObject(forKey: userIDKey)
