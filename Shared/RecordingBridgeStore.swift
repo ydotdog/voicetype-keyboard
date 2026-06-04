@@ -108,6 +108,7 @@ enum RecordingBridgeStore {
             } else {
                 defaults.removeObject(forKey: stateKey)
             }
+            defaults.synchronize()
         }
     }
 
@@ -138,10 +139,13 @@ enum RecordingBridgeStore {
         let command = RecordingBridgeCommand(id: UUID().uuidString, action: action, createdAt: Date())
         guard let data = try? encoder.encode(command) else { return }
         defaults.set(data, forKey: commandKey)
+        defaults.synchronize()
     }
 
     static func clearCommand(id: String) {
         guard latestCommand?.id == id else { return }
-        UserDefaults(suiteName: AppConstants.appGroup)?.removeObject(forKey: commandKey)
+        guard let defaults = UserDefaults(suiteName: AppConstants.appGroup) else { return }
+        defaults.removeObject(forKey: commandKey)
+        defaults.synchronize()
     }
 }

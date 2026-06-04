@@ -355,7 +355,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
 
     private func handleBridgeCommandIfNeeded() async {
         guard
-            isRecording,
+            isRecording || isKeyboardReady,
             let command = RecordingBridgeStore.latestCommand,
             command.id != handledCommandID
         else {
@@ -382,7 +382,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
 
     private func stopIfDurationLimitReached() async {
         guard
-            isRecording,
+            isRecording || bridgeMode == .keyboardReady || bridgeMode == .keyboardRecording,
             let maximumDuration = activeDurationLimit.maximumDuration,
             elapsedSeconds >= maximumDuration,
             let activeAccount
