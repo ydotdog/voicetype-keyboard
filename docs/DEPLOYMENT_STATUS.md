@@ -22,10 +22,11 @@ Services:
 - `postgres`: local Postgres 16.
 - `caddy`: public reverse proxy on ports `80` and `443`.
 
-Current public smoke test:
+Current public smoke tests:
 
 ```bash
 curl http://34.10.43.168/health
+curl https://voicetype.y.dog/health
 ```
 
 Expected response:
@@ -38,39 +39,52 @@ Expected response:
 
 Target production hostname: `voicetype.y.dog`.
 
-Current blocker: `y.dog` is delegated to Cloudflare nameservers:
+`y.dog` is delegated to Cloudflare nameservers:
 
 - `nena.ns.cloudflare.com`
 - `jarred.ns.cloudflare.com`
 
-So DNS records must be changed in Cloudflare, not name.com, unless the domain's authoritative nameservers are moved away from Cloudflare. The required DNS change is:
+The production record is configured in Cloudflare:
 
 - Type: `A`
 - Name: `voicetype`
 - Value: `34.10.43.168`
-- Proxy: DNS only is simplest for first TLS validation; Cloudflare proxy can be enabled later after origin HTTPS is confirmed.
+- Proxy: DNS only.
 
-After DNS points at the VM:
-
-```bash
-gcloud compute ssh voicetype-api --zone us-central1-a --project voicetype-y-dog-20260604 --command '
-sudo cp /opt/voicetype/app/deploy/gcp-vm/Caddyfile.https /opt/voicetype/config/Caddyfile
-cd /opt/voicetype/app
-sudo docker compose -f deploy/gcp-vm/docker-compose.yml restart caddy
-'
-```
-
-Then verify:
+Authoritative verification:
 
 ```bash
-curl https://voicetype.y.dog/health
+dig @nena.ns.cloudflare.com voicetype.y.dog A +short
+dig @jarred.ns.cloudflare.com voicetype.y.dog A +short
 ```
 
-## Remaining Secrets
+Both should return:
 
-`OPENAI_API_KEY` is intentionally blank until the production key is provided.
+```bash
+34.10.43.168
+```
 
-To install it later:
+## TLS
+
+Caddy is active with automatic HTTPS for `voicetype.y.dog`.
+
+HTTP redirects to HTTPS:
+
+```bash
+curl -I http://voicetype.y.dog/health
+```
+
+Expected first line:
+
+```text
+HTTP/1.1 308 Permanent Redirect
+```
+
+## Secrets
+
+`OPENAI_API_KEY` is configured on the VM in `/opt/voicetype/env/backend.env`.
+
+To rotate it later:
 
 ```bash
 gcloud compute ssh voicetype-api --zone us-central1-a --project voicetype-y-dog-20260604 --command '
@@ -80,7 +94,7 @@ sudo docker compose -f deploy/gcp-vm/docker-compose.yml restart backend
 '
 ```
 
-Also still required for production purchase grants:
+Still required for production purchase grants:
 
 - `APPLE_APP_APPLE_ID` in `/opt/voicetype/env/backend.env`.
 - App Store Connect consumable IAP products.
