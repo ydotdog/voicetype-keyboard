@@ -1,6 +1,6 @@
 # VoiceType Keyboard
 
-VoiceType is a pay-as-you-go iOS speech-to-text keyboard. The containing app owns recording, Sign in with Apple, StoreKit credit packs, and secure backend calls. The keyboard extension opens the app into recording when the user taps the keyboard mic, can send a stop command while recording is active, and inserts the latest transcript from the shared App Group.
+VoiceType is a pay-as-you-go iOS speech-to-text keyboard. The containing app owns recording, Sign in with Apple, StoreKit credit packs, and secure backend calls. The user turns on the keyboard mic in the containing app, then taps the keyboard in any text field to mark the clip to transcribe and insert. The keyboard extension coordinates with the app through the shared App Group.
 
 ## Product Model
 
@@ -40,6 +40,13 @@ cd backend
 PYTHONPATH=. .venv/bin/python -m pytest -q
 ```
 
+From the repo root:
+
+```bash
+source backend/.venv/bin/activate
+pytest -q backend/tests
+```
+
 Production uses `DATABASE_URL` for Postgres. If `DATABASE_URL` is empty, the backend falls back to SQLite for local development.
 
 Important production env vars:
@@ -72,7 +79,7 @@ Build settings:
 - App Group: `group.com.kyleqi.voicetype`.
 - Bundle IDs: `com.kyleqi.voicetype` and `com.kyleqi.voicetype.keyboard`.
 
-The keyboard extension requests Full Access because it needs to read the latest transcript and recording bridge state from the shared App Group container. iOS custom keyboard extensions cannot access the microphone directly, so the keyboard mic opens the containing app and asks it to start recording. During an active recording, the containing app can continue under the audio background mode, and the keyboard can send a stop command through the shared bridge. Users can choose a recording duration of 5 minutes, 12 hours, or Forever.
+The keyboard extension requests Full Access because it needs to read the latest transcript, account balance, and recording bridge state from the shared App Group container. iOS custom keyboard extensions cannot access the microphone directly, so the containing app owns the audio session. Users turn on the keyboard mic in VoiceType first; while the app keeps the audio session alive under the audio background mode, the keyboard sends start/stop clip commands through the shared bridge. Users can choose a recording session length of 5 minutes, 12 hours, or Forever.
 
 ## App Store Products
 
@@ -92,5 +99,7 @@ Verified locally:
 - StoreKit transaction replay is idempotent.
 - StoreKit transactions for one user cannot be submitted by another user.
 - StoreKit transactions without `appAccountToken` are rejected.
+- Unfinished StoreKit transactions are replayed to the backend on app launch after sign-in.
+- Successful transcriptions debit credit; failed provider calls do not.
 - Existing local SQLite schemas migrate in place.
 - Debug and Release iOS builds succeed with the keyboard extension embedded.

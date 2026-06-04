@@ -2,8 +2,14 @@ import base64
 import importlib
 import json
 import sys
+from pathlib import Path
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
 
 def b64url(payload: dict) -> str:
@@ -237,6 +243,67 @@ def test_audio_minute_pricing_uses_retail_markup(tmp_path, monkeypatch):
     assert charged_input == 60
     assert charged_output == 0
     assert cost == 10_286
+
+
+def test_transcription_debits_user_after_successful_provider_response(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+
+    async def fake_transcribe_audio(*args, **kwargs):
+        return {"text": "hello world", "usage": {"input_tokens": 1_000, "output_tokens": 100}}
+
+    monkeypatch.setattr(main, "transcribe_audio", fake_transcribe_audio)
+
+    with TestClient(main.app) as client:
+        user = auth(client, "alice")
+        credit = client.post(
+            "/v1/billing/dev-credit",
+            headers=user["headers"],
+            json={"amount_usd_micros": 1_000_000},
+        )
+        assert credit.status_code == 200, credit.text
+
+        response = client.post(
+            "/v1/transcriptions",
+            headers=user["headers"],
+            data={"audio_seconds": "1.0"},
+            files={"file": ("clip.m4a", b"fake audio", "audio/m4a")},
+        )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["transcript"] == "hello world"
+    assert payload["charge"]["cost_usd_micros"] == 3_001
+    assert payload["balance"]["balance_usd_micros"] == 996_999
+
+
+def test_transcription_provider_failure_does_not_debit_user(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+
+    async def fake_transcribe_audio(*args, **kwargs):
+        raise HTTPException(status_code=502, detail="provider unavailable")
+
+    monkeypatch.setattr(main, "transcribe_audio", fake_transcribe_audio)
+
+    with TestClient(main.app) as client:
+        user = auth(client, "alice")
+        credit = client.post(
+            "/v1/billing/dev-credit",
+            headers=user["headers"],
+            json={"amount_usd_micros": 1_000_000},
+        )
+        assert credit.status_code == 200, credit.text
+
+        failed = client.post(
+            "/v1/transcriptions",
+            headers=user["headers"],
+            data={"audio_seconds": "1.0"},
+            files={"file": ("clip.m4a", b"fake audio", "audio/m4a")},
+        )
+        balance = client.get("/v1/me", headers=user["headers"])
+
+    assert failed.status_code == 502, failed.text
+    assert balance.status_code == 200, balance.text
+    assert balance.json()["balance"]["balance_usd_micros"] == 1_000_000
 
 
 def test_readiness_reports_development_configuration_as_not_ready(tmp_path, monkeypatch):

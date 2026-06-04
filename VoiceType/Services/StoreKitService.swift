@@ -45,14 +45,7 @@ final class StoreKitService: ObservableObject {
             let result = try await product.purchase(options: options)
             switch result {
             case let .success(verification):
-                let signedTransaction = verification.jwsRepresentation
-                let transaction = try checkVerified(verification)
-                let response = try await BackendClient.submitStoreKitTransaction(
-                    jws: signedTransaction,
-                    token: account.token
-                )
-                account.apply(balance: response.balance)
-                await transaction.finish()
+                try await submit(verification, account: account)
             case .userCancelled, .pending:
                 break
             @unknown default:
@@ -61,6 +54,28 @@ final class StoreKitService: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    func syncUnfinishedTransactions(account: AccountStore) async {
+        guard account.isSignedIn, !account.isPreviewMode else { return }
+        do {
+            for await verification in Transaction.unfinished {
+                try await submit(verification, account: account)
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func submit(_ verification: VerificationResult<Transaction>, account: AccountStore) async throws {
+        let signedTransaction = verification.jwsRepresentation
+        let transaction = try checkVerified(verification)
+        let response = try await BackendClient.submitStoreKitTransaction(
+            jws: signedTransaction,
+            token: account.token
+        )
+        account.apply(balance: response.balance)
+        await transaction.finish()
     }
 
     private func checkVerified<T>(_ result: VerificationResult<T>) throws -> T {

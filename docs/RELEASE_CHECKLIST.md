@@ -14,9 +14,9 @@
 
 - Create the app record for bundle id `com.kyleqi.voicetype`.
 - Create consumable IAP products:
-  - `com.kyleqi.voicetype.credits.small`, reference name `$1 Credit`, USD 1.00.
-  - `com.kyleqi.voicetype.credits.medium`, reference name `$5 Credit`, USD 5.00.
-  - `com.kyleqi.voicetype.credits.large`, reference name `$20 Credit`, USD 20.00.
+  - `com.kyleqi.voicetype.credits.small`, reference name `990,000 Credits`, USD 0.99.
+  - `com.kyleqi.voicetype.credits.medium`, reference name `4,990,000 Credits`, USD 4.99.
+  - `com.kyleqi.voicetype.credits.large`, reference name `19,990,000 Credits`, USD 19.99.
 - Match product display names and credit pack sizes with backend `CREDIT_PRODUCTS_JSON` if changed.
 - Add screenshots and review notes explaining why the keyboard requires Full Access: it reads the latest transcript from the app's shared container.
 - Use StoreKit sandbox/TestFlight before production launch.
@@ -51,8 +51,10 @@
 - Test on device:
   - Sign in with Apple succeeds.
   - StoreKit sandbox purchase grants credit.
+  - Interrupted or unfinished StoreKit purchases are granted after relaunch/sign-in.
   - Zero-credit transcription returns an insufficient-credit message.
   - Recording with credit creates a transcript and debits balance.
+  - Failed transcription provider calls do not debit balance.
   - Latest transcript appears in the keyboard after Full Access is enabled.
 
 ## Launch Monitoring

@@ -41,6 +41,7 @@ enum SharedTranscriptStore {
             } else if let data = try? encoder.encode(newValue) {
                 defaults.set(data, forKey: latestTranscriptKey)
             }
+            defaults.synchronize()
         }
     }
 }

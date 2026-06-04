@@ -61,6 +61,7 @@ struct DashboardView: View {
                 #endif
                 if account.isSignedIn {
                     await store.loadProducts()
+                    await store.syncUnfinishedTransactions(account: account)
                 }
                 recorder.refreshLatest()
             }
@@ -72,6 +73,7 @@ struct DashboardView: View {
                     await account.grantDeveloperCreditIfAvailable()
                     #endif
                     await store.loadProducts()
+                    await store.syncUnfinishedTransactions(account: account)
                     recorder.refreshLatest()
                 }
             }

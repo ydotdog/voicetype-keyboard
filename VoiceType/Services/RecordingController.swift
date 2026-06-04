@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 import UIKit
 
@@ -26,6 +26,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     private var isStopping = false
     private var bridgeMode: RecordingBridgeMode = .standard
     private var keyboardClipStartTime: TimeInterval?
+    private var lastBridgeHeartbeatAt: Date?
 
     var isKeyboardReady: Bool {
         bridgeMode == .keyboardReady || bridgeMode == .keyboardRecording || bridgeMode == .transcribing
@@ -140,6 +141,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             activeDurationLimit = durationLimit
             handledCommandID = RecordingBridgeStore.latestCommand?.id
             keyboardClipStartTime = nil
+            lastBridgeHeartbeatAt = nil
             elapsedSeconds = 0
             isRecording = false
             isProcessing = false
@@ -176,6 +178,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         activeSessionID = ""
         activeDurationLimit = durationLimit
         handledCommandID = nil
+        lastBridgeHeartbeatAt = nil
         elapsedSeconds = 0
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
@@ -208,6 +211,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             activeSessionID = ""
             activeDurationLimit = durationLimit
             handledCommandID = nil
+            lastBridgeHeartbeatAt = nil
             bridgeMode = .standard
             isStopping = false
             elapsedSeconds = 0
@@ -267,6 +271,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         activeSessionID = ""
         activeDurationLimit = durationLimit
         handledCommandID = nil
+        lastBridgeHeartbeatAt = nil
         bridgeMode = .standard
         isStopping = false
         elapsedSeconds = 0
@@ -310,6 +315,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
                 self.elapsedSeconds = Date().timeIntervalSince(startedAt)
                 await self.stopIfDurationLimitReached()
                 await self.handleBridgeCommandIfNeeded()
+                self.publishBridgeHeartbeatIfNeeded()
             }
         }
     }
@@ -341,9 +347,18 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             sessionID: activeSessionID,
             isRecording: isRecording,
             startedAt: startedAt,
+            updatedAt: Date(),
             durationLimit: activeDurationLimit,
             mode: bridgeMode
         )
+        lastBridgeHeartbeatAt = Date()
+    }
+
+    private func publishBridgeHeartbeatIfNeeded() {
+        guard isKeyboardReady else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastBridgeHeartbeatAt ?? .distantPast) >= 1 else { return }
+        publishBridgeState()
     }
 
     private static let durationFormatter: DateComponentsFormatter = {
@@ -402,9 +417,17 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     private func beginKeyboardClip() {
         guard
             bridgeMode == .keyboardReady,
-            !isProcessing,
-            let recorder
+            !isProcessing
         else {
+            return
+        }
+        let recorder: AVAudioRecorder
+        do {
+            recorder = try ensureKeyboardReadyRecorder()
+        } catch {
+            KeyboardAutoInsertStore.clear()
+            errorMessage = error.localizedDescription
+            stopKeyboardReady()
             return
         }
         keyboardClipStartTime = recorder.currentTime
@@ -494,7 +517,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             KeyboardAutoInsertStore.clear()
             errorMessage = error.localizedDescription
             isProcessing = false
-            if recorder == nil {
+            if self.recorder == nil {
                 stopKeyboardReady()
             } else {
                 bridgeMode = .keyboardReady
@@ -516,6 +539,23 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         currentFileURL = fileURL
     }
 
+    private func ensureKeyboardReadyRecorder() throws -> AVAudioRecorder {
+        if let recorder, recorder.isRecording {
+            return recorder
+        }
+        if let currentFileURL {
+            try? FileManager.default.removeItem(at: currentFileURL)
+        }
+        try restartKeyboardReadyRecorder()
+        if startedAt == nil {
+            startedAt = Date()
+        }
+        guard let recorder else {
+            throw RecorderError.failedToStart
+        }
+        return recorder
+    }
+
     private func exportClip(sourceURL: URL, outputURL: URL, start: TimeInterval, duration: TimeInterval) async throws {
         let asset = AVURLAsset(url: sourceURL)
         guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
@@ -527,18 +567,27 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         let endTime = CMTime(seconds: start + duration, preferredTimescale: 600)
         exportSession.timeRange = CMTimeRangeFromTimeToTime(start: startTime, end: endTime)
 
+        let exportBox = ExportSessionBox(exportSession)
         try await withCheckedThrowingContinuation { continuation in
-            exportSession.exportAsynchronously {
-                switch exportSession.status {
+            exportBox.session.exportAsynchronously {
+                switch exportBox.session.status {
                 case .completed:
                     continuation.resume()
                 case .failed, .cancelled:
-                    continuation.resume(throwing: exportSession.error ?? RecorderError.failedToExport)
+                    continuation.resume(throwing: exportBox.session.error ?? RecorderError.failedToExport)
                 default:
                     continuation.resume(throwing: RecorderError.failedToExport)
                 }
             }
         }
+    }
+}
+
+private final class ExportSessionBox: @unchecked Sendable {
+    let session: AVAssetExportSession
+
+    init(_ session: AVAssetExportSession) {
+        self.session = session
     }
 }
 

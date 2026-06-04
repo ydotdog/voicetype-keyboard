@@ -14,6 +14,7 @@ enum SharedAccountStore {
             } else {
                 defaults.set(newValue, forKey: balanceTextKey)
             }
+            defaults.synchronize()
         }
     }
 }
@@ -22,11 +23,15 @@ enum KeyboardAutoInsertStore {
     private static let baselineTranscriptIDKey = "keyboardAutoInsertBaselineTranscriptID"
 
     static func arm(baselineTranscriptID: String) {
-        UserDefaults(suiteName: AppConstants.appGroup)?.set(baselineTranscriptID, forKey: baselineTranscriptIDKey)
+        guard let defaults = UserDefaults(suiteName: AppConstants.appGroup) else { return }
+        defaults.set(baselineTranscriptID, forKey: baselineTranscriptIDKey)
+        defaults.synchronize()
     }
 
     static func clear() {
-        UserDefaults(suiteName: AppConstants.appGroup)?.removeObject(forKey: baselineTranscriptIDKey)
+        guard let defaults = UserDefaults(suiteName: AppConstants.appGroup) else { return }
+        defaults.removeObject(forKey: baselineTranscriptIDKey)
+        defaults.synchronize()
     }
 
     static func shouldInsert(_ snapshot: TranscriptSnapshot) -> Bool {

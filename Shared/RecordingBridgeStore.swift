@@ -11,6 +11,7 @@ struct RecordingBridgeState: Codable, Equatable {
     let sessionID: String
     let isRecording: Bool
     let startedAt: Date?
+    let updatedAt: Date?
     let durationLimit: RecordingDurationLimit
     let mode: RecordingBridgeMode
 
@@ -18,12 +19,14 @@ struct RecordingBridgeState: Codable, Equatable {
         sessionID: String,
         isRecording: Bool,
         startedAt: Date?,
+        updatedAt: Date? = nil,
         durationLimit: RecordingDurationLimit,
         mode: RecordingBridgeMode
     ) {
         self.sessionID = sessionID
         self.isRecording = isRecording
         self.startedAt = startedAt
+        self.updatedAt = updatedAt
         self.durationLimit = durationLimit
         self.mode = mode
     }
@@ -32,6 +35,7 @@ struct RecordingBridgeState: Codable, Equatable {
         case sessionID
         case isRecording
         case startedAt
+        case updatedAt
         case durationLimit
         case mode
     }
@@ -41,6 +45,7 @@ struct RecordingBridgeState: Codable, Equatable {
         sessionID = try container.decode(String.self, forKey: .sessionID)
         isRecording = try container.decode(Bool.self, forKey: .isRecording)
         startedAt = try container.decodeIfPresent(Date.self, forKey: .startedAt)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
         durationLimit = try container.decode(RecordingDurationLimit.self, forKey: .durationLimit)
         mode = try container.decodeIfPresent(RecordingBridgeMode.self, forKey: .mode) ?? .standard
     }
@@ -49,6 +54,7 @@ struct RecordingBridgeState: Codable, Equatable {
         sessionID: "",
         isRecording: false,
         startedAt: nil,
+        updatedAt: nil,
         durationLimit: .fiveMinutes,
         mode: .standard
     )
@@ -77,6 +83,7 @@ struct RecordingBridgeCommand: Codable, Equatable {
 enum RecordingBridgeStore {
     private static let stateKey = "recordingBridgeState"
     private static let commandKey = "recordingBridgeCommand"
+    private static let staleKeyboardStateInterval: TimeInterval = 10
 
     private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
@@ -98,6 +105,14 @@ enum RecordingBridgeStore {
                 let state = try? decoder.decode(RecordingBridgeState.self, from: data)
             else {
                 return .inactive
+            }
+            if state.isKeyboardReady {
+                let heartbeat = state.updatedAt ?? state.startedAt ?? .distantPast
+                if Date().timeIntervalSince(heartbeat) > staleKeyboardStateInterval {
+                    defaults.removeObject(forKey: stateKey)
+                    defaults.synchronize()
+                    return .inactive
+                }
             }
             return state
         }

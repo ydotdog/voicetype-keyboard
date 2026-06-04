@@ -16,7 +16,6 @@
 		614FB202309F1A996B56DF9D /* KeyboardViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B5A4DDC9C9E54B857D22CF9 /* KeyboardViewController.swift */; };
 		655F44FA771F48A8E184970C /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2735DB3CCADC0A8DD671ABF7 /* KeychainStore.swift */; };
 		67786FC486E07F95FD0A1E6F /* RecordingPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C8BD93EBD9F56D128832098 /* RecordingPreferences.swift */; };
-		6BEBD10B49C84F9054DD911C /* KeyboardRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F96B81D021C56427B8144C8 /* KeyboardRootView.swift */; };
 		6C684276D5D343B9E630FF83 /* RecordingBridgeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEE0A2CE8129DA11DB8761E2 /* RecordingBridgeStore.swift */; };
 		783AD5DDCA37DE660D35DC30 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE625B147986589D6AA872DD /* AppTheme.swift */; };
 		7893A27D21948DC61FAB9784 /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66790ACA8CA6CAF9B0F71DE7 /* APIModels.swift */; };
@@ -60,7 +59,6 @@
 
 /* Begin PBXFileReference section */
 		0C08C2528ED4CC6B32A429C6 /* BackendClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendClient.swift; sourceTree = "<group>"; };
-		0F96B81D021C56427B8144C8 /* KeyboardRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardRootView.swift; sourceTree = "<group>"; };
 		1A38A71FE30A70BD7E45C043 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		2735DB3CCADC0A8DD671ABF7 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		43D15ADDBAE32AD6CD904879 /* SharedAccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedAccountStore.swift; sourceTree = "<group>"; };
@@ -139,7 +137,6 @@
 			isa = PBXGroup;
 			children = (
 				E659CD58760B905C4E8FD9A1 /* Info.plist */,
-				0F96B81D021C56427B8144C8 /* KeyboardRootView.swift */,
 				4B5A4DDC9C9E54B857D22CF9 /* KeyboardViewController.swift */,
 				777D0FA0657535D7F279567F /* VoiceTypeKeyboard.entitlements */,
 			);
@@ -270,7 +267,6 @@
 			files = (
 				7893A27D21948DC61FAB9784 /* APIModels.swift in Sources */,
 				7E55C701AC87C9B10C5427CB /* AppConstants.swift in Sources */,
-				6BEBD10B49C84F9054DD911C /* KeyboardRootView.swift in Sources */,
 				614FB202309F1A996B56DF9D /* KeyboardViewController.swift in Sources */,
 				6C684276D5D343B9E630FF83 /* RecordingBridgeStore.swift in Sources */,
 				3218E7498F597D2A2DF4C899 /* RecordingPreferences.swift in Sources */,

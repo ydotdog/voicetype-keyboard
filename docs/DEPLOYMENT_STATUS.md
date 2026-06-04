@@ -24,7 +24,8 @@ Services:
 
 Billing configuration:
 
-- Credit packs: `$1`, `$5`, `$20` consumable StoreKit products.
+- Credit packs: `$0.99`, `$4.99`, `$19.99` consumable StoreKit products.
+- Granted credit units: `990,000`, `4,990,000`, `19,990,000`.
 - `COST_MARKUP_BPS=7143`, covering standard 30% App Store commission plus 20% target profit.
 - `ALLOW_DEV_CREDIT=false` in production.
 

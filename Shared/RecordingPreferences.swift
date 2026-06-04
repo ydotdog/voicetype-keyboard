@@ -47,7 +47,9 @@ enum RecordingPreferencesStore {
             return value
         }
         set {
-            UserDefaults(suiteName: AppConstants.appGroup)?.set(newValue.rawValue, forKey: durationLimitKey)
+            guard let defaults = UserDefaults(suiteName: AppConstants.appGroup) else { return }
+            defaults.set(newValue.rawValue, forKey: durationLimitKey)
+            defaults.synchronize()
         }
     }
 }
