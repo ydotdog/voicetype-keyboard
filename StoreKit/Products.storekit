@@ -5,7 +5,7 @@
   ],
   "products" : [
     {
-      "displayPrice" : "1.00",
+      "displayPrice" : "0.99",
       "familyShareable" : false,
       "internalID" : "voicetype-credit-small",
       "localizations" : [
@@ -20,7 +20,7 @@
       "type" : "Consumable"
     },
     {
-      "displayPrice" : "5.00",
+      "displayPrice" : "4.99",
       "familyShareable" : false,
       "internalID" : "voicetype-credit-medium",
       "localizations" : [
@@ -35,7 +35,7 @@
       "type" : "Consumable"
     },
     {
-      "displayPrice" : "20.00",
+      "displayPrice" : "19.99",
       "familyShareable" : false,
       "internalID" : "voicetype-credit-large",
       "localizations" : [
