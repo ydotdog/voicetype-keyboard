@@ -28,7 +28,23 @@ User separation is enforced by:
 
 ## Credit Policy
 
-Credits do not expire. The ledger model records balance as the sum of immutable entries rather than a mutable number on the user row, so audits and refunds are straightforward.
+Credits do not expire. Credit amounts are retail USD balances, stored in USD micros. The ledger model records balance as the sum of immutable entries rather than a mutable number on the user row, so audits and refunds are straightforward.
+
+Transcription debits start from raw OpenAI model cost and apply `COST_MARKUP_BPS`. The production default assumes the standard App Store commission and a 20% target profit margin:
+
+```text
+retail multiplier = 1.20 / (1 - 0.30) = 1.7142857
+COST_MARKUP_BPS = 7143
+```
+
+If the Apple developer account is approved for the App Store Small Business Program, the 15% commission version is:
+
+```text
+retail multiplier = 1.20 / (1 - 0.15) = 1.4117647
+COST_MARKUP_BPS = 4118
+```
+
+Actual proceeds can vary by storefront because Apple may account for taxes, foreign exchange, and local price equalization before remitting developer proceeds. Treat the markup as the default operating target, then reconcile it against App Store financial reports after launch.
 
 Recommended ledger entry types:
 
@@ -57,6 +73,7 @@ The design does not need to be rewritten for higher user volume:
 - Postgres holds users, transactions, transcriptions, and ledger entries.
 - Transaction ids and ledger source ids are unique, making retries safe.
 - Balance checks happen in database transactions.
+- Retail credit balances remain per-user even though the backend may use one shared OpenAI provider account.
 - API workers can scale independently.
 - Audio is streamed to OpenAI and not stored by default, reducing storage pressure and privacy exposure.
 

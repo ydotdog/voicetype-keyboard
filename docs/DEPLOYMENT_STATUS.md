@@ -22,6 +22,11 @@ Services:
 - `postgres`: local Postgres 16.
 - `caddy`: public reverse proxy on ports `80` and `443`.
 
+Billing configuration:
+
+- Credit packs: `$1`, `$5`, `$20` consumable StoreKit products.
+- `COST_MARKUP_BPS=7143`, covering standard 30% App Store commission plus 20% target profit.
+
 Current public smoke tests:
 
 ```bash

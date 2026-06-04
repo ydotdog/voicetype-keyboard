@@ -6,9 +6,10 @@ VoiceType is a pay-as-you-go iOS speech-to-text keyboard. The containing app own
 
 - No subscription.
 - Users buy consumable credit packs through StoreKit.
-- Credits are stored server-side in USD micros and do not expire.
+- Credits are stored server-side in retail USD micros and do not expire.
 - Every credit/debit is written to a per-user immutable ledger.
 - The OpenAI API key is held by the backend only.
+- Transcription debits apply the configured retail markup to raw OpenAI model cost.
 - StoreKit transactions are verified server-side and bound to the backend user through `appAccountToken`.
 
 ## Repo Layout
@@ -53,6 +54,7 @@ Important production env vars:
 - `STOREKIT_VERIFICATION_MODE=strict`
 - `ALLOW_UNVERIFIED_STOREKIT_JWS=false`
 - `REQUIRE_STOREKIT_APP_ACCOUNT_TOKEN=true`
+- `COST_MARKUP_BPS=7143` for standard 30% App Store commission plus 20% profit.
 
 ## iOS
 
@@ -76,9 +78,9 @@ The keyboard extension requests Full Access because it needs to read the latest 
 
 Create consumable In-App Purchase products matching:
 
-- `com.kyleqi.voicetype.credits.small`
-- `com.kyleqi.voicetype.credits.medium`
-- `com.kyleqi.voicetype.credits.large`
+- `com.kyleqi.voicetype.credits.small`: `$1 Credit`, USD 1.00
+- `com.kyleqi.voicetype.credits.medium`: `$5 Credit`, USD 5.00
+- `com.kyleqi.voicetype.credits.large`: `$20 Credit`, USD 20.00
 
 Keep the backend product catalog in sync through `CREDIT_PRODUCTS_JSON` if prices or pack sizes change.
 

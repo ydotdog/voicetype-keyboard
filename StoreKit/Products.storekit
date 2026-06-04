@@ -5,9 +5,24 @@
   ],
   "products" : [
     {
-      "displayPrice" : "4.99",
+      "displayPrice" : "1.00",
       "familyShareable" : false,
       "internalID" : "voicetype-credit-small",
+      "localizations" : [
+        {
+          "description" : "$1 non-expiring VoiceType credit",
+          "displayName" : "$1 Credit",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.kyleqi.voicetype.credits.small",
+      "referenceName" : "$1 Credit",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "5.00",
+      "familyShareable" : false,
+      "internalID" : "voicetype-credit-medium",
       "localizations" : [
         {
           "description" : "$5 non-expiring VoiceType credit",
@@ -15,38 +30,23 @@
           "locale" : "en_US"
         }
       ],
-      "productID" : "com.kyleqi.voicetype.credits.small",
+      "productID" : "com.kyleqi.voicetype.credits.medium",
       "referenceName" : "$5 Credit",
       "type" : "Consumable"
     },
     {
-      "displayPrice" : "14.99",
-      "familyShareable" : false,
-      "internalID" : "voicetype-credit-medium",
-      "localizations" : [
-        {
-          "description" : "$15 non-expiring VoiceType credit",
-          "displayName" : "$15 Credit",
-          "locale" : "en_US"
-        }
-      ],
-      "productID" : "com.kyleqi.voicetype.credits.medium",
-      "referenceName" : "$15 Credit",
-      "type" : "Consumable"
-    },
-    {
-      "displayPrice" : "49.99",
+      "displayPrice" : "20.00",
       "familyShareable" : false,
       "internalID" : "voicetype-credit-large",
       "localizations" : [
         {
-          "description" : "$50 non-expiring VoiceType credit",
-          "displayName" : "$50 Credit",
+          "description" : "$20 non-expiring VoiceType credit",
+          "displayName" : "$20 Credit",
           "locale" : "en_US"
         }
       ],
       "productID" : "com.kyleqi.voicetype.credits.large",
-      "referenceName" : "$50 Credit",
+      "referenceName" : "$20 Credit",
       "type" : "Consumable"
     }
   ],

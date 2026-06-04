@@ -62,30 +62,42 @@ APPLE_ROOT_CERTIFICATE_PATHS = os.getenv("APPLE_ROOT_CERTIFICATE_PATHS", "")
 APPLE_ROOT_CERTIFICATE_PEMS_B64 = os.getenv("APPLE_ROOT_CERTIFICATE_PEMS_B64", "")
 
 FALLBACK_AUDIO_TOKENS_PER_SECOND = float(os.getenv("FALLBACK_AUDIO_TOKENS_PER_SECOND", "50"))
-COST_MARKUP_BPS = int(os.getenv("COST_MARKUP_BPS", "0"))
+APPLE_COMMISSION_BPS = int(os.getenv("APPLE_COMMISSION_BPS", "3000"))
+TARGET_PROFIT_MARGIN_BPS = int(os.getenv("TARGET_PROFIT_MARGIN_BPS", "2000"))
 MAX_AUDIO_BYTES = int(os.getenv("MAX_AUDIO_BYTES", str(24 * 1024 * 1024)))
 
 USD_MICROS = 1_000_000
 
 
+def default_cost_markup_bps() -> int:
+    if APPLE_COMMISSION_BPS >= 10_000:
+        raise RuntimeError("APPLE_COMMISSION_BPS must be less than 10000.")
+    gross_multiplier_bps = math.ceil((10_000 + TARGET_PROFIT_MARGIN_BPS) * 10_000 / (10_000 - APPLE_COMMISSION_BPS))
+    return max(0, gross_multiplier_bps - 10_000)
+
+
+DEFAULT_COST_MARKUP_BPS = default_cost_markup_bps()
+COST_MARKUP_BPS = int(os.getenv("COST_MARKUP_BPS", str(DEFAULT_COST_MARKUP_BPS)))
+
+
 DEFAULT_PRODUCTS = [
     {
         "id": "com.kyleqi.voicetype.credits.small",
-        "display_name": "$5 credit",
-        "credit_usd_micros": 5 * USD_MICROS,
-        "subtitle": "Good for light dictation",
+        "display_name": "$1 credit",
+        "credit_usd_micros": 1 * USD_MICROS,
+        "subtitle": "Starter pack",
     },
     {
         "id": "com.kyleqi.voicetype.credits.medium",
-        "display_name": "$15 credit",
-        "credit_usd_micros": 15 * USD_MICROS,
-        "subtitle": "Best for everyday typing",
+        "display_name": "$5 credit",
+        "credit_usd_micros": 5 * USD_MICROS,
+        "subtitle": "Everyday pack",
     },
     {
         "id": "com.kyleqi.voicetype.credits.large",
-        "display_name": "$50 credit",
-        "credit_usd_micros": 50 * USD_MICROS,
-        "subtitle": "For heavy usage",
+        "display_name": "$20 credit",
+        "credit_usd_micros": 20 * USD_MICROS,
+        "subtitle": "Heavy usage pack",
     },
 ]
 
@@ -633,6 +645,12 @@ def estimate_text_tokens(text: str) -> int:
     return max(1, math.ceil(len(text) / 4))
 
 
+def apply_cost_markup(cost_usd_micros: int) -> int:
+    if COST_MARKUP_BPS:
+        return math.ceil(cost_usd_micros * (10_000 + COST_MARKUP_BPS) / 10_000)
+    return cost_usd_micros
+
+
 def calculate_cost(
     *,
     model: str,
@@ -644,16 +662,14 @@ def calculate_cost(
     pricing = MODEL_PRICING[model]
     if pricing["basis"] == "audio_minutes":
         minutes = max(audio_seconds, 1.0) / 60
-        cost = math.ceil(minutes * pricing["per_minute_usd_micros"])
+        cost = apply_cost_markup(math.ceil(minutes * pricing["per_minute_usd_micros"]))
         return max(cost, 1), "duration", math.ceil(minutes * 60), 0
 
     charged_input = input_tokens or math.ceil(max(audio_seconds, 1.0) * FALLBACK_AUDIO_TOKENS_PER_SECOND)
     charged_output = output_tokens or estimate_text_tokens(transcript)
     input_cost = charged_input * pricing["input_per_million_usd_micros"] / 1_000_000
     output_cost = charged_output * pricing["output_per_million_usd_micros"] / 1_000_000
-    cost = math.ceil(input_cost + output_cost)
-    if COST_MARKUP_BPS:
-        cost = math.ceil(cost * (10_000 + COST_MARKUP_BPS) / 10_000)
+    cost = apply_cost_markup(math.ceil(input_cost + output_cost))
     basis = "reported_usage" if input_tokens or output_tokens else "duration_estimate"
     return max(cost, 1), basis, charged_input, charged_output
 
