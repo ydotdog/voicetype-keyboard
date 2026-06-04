@@ -41,7 +41,7 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>VoiceType connects to your configured transcription backend.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>VoiceType records your speech only when you press record so it can turn it into text.</string>
+	<string>VoiceType uses the microphone during recording sessions so it can turn your speech into text.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>VoiceType sends recorded audio to your private transcription backend for speech-to-text.</string>
 	<key>UIApplicationSceneManifest</key>

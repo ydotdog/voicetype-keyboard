@@ -159,6 +159,8 @@ struct DashboardView: View {
 
     private func handleKeyboardMicRequest() async {
         guard appState.keyboardMicRequestID != nil else { return }
+        account.errorMessage = nil
+
         withAnimation(.snappy) {
             selectedTab = .home
             isKeyboardSetupPresented = false
@@ -186,6 +188,8 @@ struct DashboardView: View {
 
     private func handleKeyboardSetupRequest() {
         guard appState.keyboardSetupRequestID != nil else { return }
+        account.errorMessage = nil
+
         guard account.isSignedIn else {
             showToast("Sign in, then enable Full Access")
             return
@@ -313,6 +317,7 @@ private struct SignInScreen: View {
 
             VStack(spacing: 12) {
                 SignInWithAppleButton(.signIn) { request in
+                    account.errorMessage = nil
                     request.requestedScopes = [.email, .fullName]
                 } onCompletion: { result in
                     Task { await handle(result) }
@@ -342,6 +347,8 @@ private struct SignInScreen: View {
     }
 
     private func handle(_ result: Result<ASAuthorization, Error>) async {
+        account.errorMessage = nil
+
         switch result {
         case let .success(authorization):
             guard
@@ -364,7 +371,31 @@ private struct SignInScreen: View {
             await account.grantDeveloperCreditIfAvailable()
             #endif
         case let .failure(error):
-            account.errorMessage = error.localizedDescription
+            account.errorMessage = signInErrorMessage(for: error)
+        }
+    }
+
+    private func signInErrorMessage(for error: Error) -> String? {
+        let nsError = error as NSError
+        guard nsError.domain == ASAuthorizationError.errorDomain else {
+            return error.localizedDescription
+        }
+
+        guard let code = ASAuthorizationError.Code(rawValue: nsError.code) else {
+            return "Apple sign-in could not be completed. Try again."
+        }
+
+        switch code {
+        case .canceled:
+            return nil
+        case .unknown, .notHandled, .failed:
+            return "Sign in to your Apple Account in Settings, then try again."
+        case .invalidResponse:
+            return "Apple did not return a valid sign-in response. Try again."
+        case .notInteractive:
+            return "Apple sign-in needs VoiceType to stay open. Try again here."
+        default:
+            return "Apple sign-in could not be completed. Try again."
         }
     }
 }

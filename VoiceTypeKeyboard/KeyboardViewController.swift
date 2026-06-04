@@ -593,9 +593,9 @@ private enum PendingKeyboardAction {
     var timeoutMessage: String {
         switch self {
         case .startingClip:
-            return "VoiceType did not respond. Reopen VoiceType and turn keyboard mic on again."
+            return "VoiceType did not respond. Reopen it and try again."
         case .stoppingClip:
-            return "VoiceType did not finish this clip. Reopen VoiceType to check the recording."
+            return "Clip did not finish. Reopen VoiceType to check it."
         }
     }
 }
@@ -620,9 +620,9 @@ private enum ContainingAppRoute {
     var fallbackMessage: String {
         switch self {
         case .keyboardMic:
-            return "Could not open from this app. Open VoiceType from Home and turn keyboard mic on."
+            return "Open VoiceType from Home, then return here."
         case .keyboardSetup:
-            return "Could not open from this app. Open VoiceType from Home to finish setup."
+            return "Open VoiceType from Home to finish setup."
         }
     }
 }
