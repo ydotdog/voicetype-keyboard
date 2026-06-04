@@ -62,6 +62,19 @@ enum BackendClient {
         return try await sendJSON(request)
     }
 
+    #if DEBUG
+    static func grantDevCredit(amountUSDMicros: Int, token: String, key: String) async throws -> PurchaseCreditResponse {
+        guard let baseURL else { throw BackendClientError.missingBackendURL }
+        var request = URLRequest(url: baseURL.appending(path: "v1/billing/dev-credit"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(key, forHTTPHeaderField: "X-VoiceType-Dev-Credit-Key")
+        applyUserAuth(token, to: &request)
+        request.httpBody = try JSONEncoder().encode(DevCreditRequest(amountUSDMicros: amountUSDMicros))
+        return try await sendJSON(request)
+    }
+    #endif
+
     static func transcribe(fileURL: URL, duration: TimeInterval, token: String) async throws -> TranscriptionResponse {
         guard let baseURL else { throw BackendClientError.missingBackendURL }
         guard let audioData = try? Data(contentsOf: fileURL) else { throw BackendClientError.missingFile }

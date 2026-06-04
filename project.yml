@@ -10,6 +10,7 @@ settings:
     CURRENT_PROJECT_VERSION: 1
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     VOICETYPE_APP_GROUP: group.com.kyleqi.voicetype
+    VOICETYPE_DEV_CREDIT_KEY: ""
   configs:
     Debug:
       VOICETYPE_BACKEND_URL: http://192.168.2.63:8000
@@ -39,6 +40,7 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         VoiceTypeBackendURL: $(VOICETYPE_BACKEND_URL)
+        VoiceTypeDevCreditKey: $(VOICETYPE_DEV_CREDIT_KEY)
         VoiceTypeAppGroup: $(VOICETYPE_APP_GROUP)
         UILaunchStoryboardName: LaunchScreen
         UIRequiresFullScreen: true

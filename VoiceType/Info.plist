@@ -61,5 +61,7 @@
 	<string>$(VOICETYPE_APP_GROUP)</string>
 	<key>VoiceTypeBackendURL</key>
 	<string>$(VOICETYPE_BACKEND_URL)</string>
+	<key>VoiceTypeDevCreditKey</key>
+	<string>$(VOICETYPE_DEV_CREDIT_KEY)</string>
 </dict>
 </plist>

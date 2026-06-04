@@ -71,6 +71,9 @@ struct DashboardView: View {
             }
             .task {
                 await account.refresh()
+                #if DEBUG
+                await account.grantDeveloperCreditIfAvailable()
+                #endif
                 if account.isSignedIn {
                     await store.loadProducts()
                 }
@@ -174,6 +177,9 @@ private struct SignInPanel: View {
                 email: credential.email,
                 fullName: fullName
             )
+            #if DEBUG
+            await account.grantDeveloperCreditIfAvailable()
+            #endif
         case let .failure(error):
             account.errorMessage = error.localizedDescription
         }
@@ -441,6 +447,19 @@ private struct DeveloperToolsPanel: View {
             Text("Debug-only local preview. Release builds hide this panel.")
                 .font(.footnote)
                 .foregroundStyle(AppTheme.secondary)
+
+            Button {
+                Task { await account.grantDeveloperCreditIfAvailable() }
+            } label: {
+                Label("Grant Test API Credit", systemImage: "server.rack")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background(AppTheme.accent)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .disabled(!account.isSignedIn || account.isPreviewMode)
 
             Button {
                 if account.isPreviewMode {

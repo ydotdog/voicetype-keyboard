@@ -57,6 +57,7 @@ STOREKIT_VERIFICATION_MODE = os.getenv("STOREKIT_VERIFICATION_MODE", "strict").l
 ALLOW_UNVERIFIED_STOREKIT_JWS = os.getenv("ALLOW_UNVERIFIED_STOREKIT_JWS", "").lower() in {"1", "true", "yes"}
 REQUIRE_STOREKIT_APP_ACCOUNT_TOKEN = os.getenv("REQUIRE_STOREKIT_APP_ACCOUNT_TOKEN", "true").lower() in {"1", "true", "yes"}
 ALLOW_DEV_CREDIT = os.getenv("ALLOW_DEV_CREDIT", "").lower() in {"1", "true", "yes"}
+DEV_CREDIT_SHARED_SECRET = os.getenv("DEV_CREDIT_SHARED_SECRET", "")
 APPLE_STOREKIT_ENVIRONMENT = os.getenv("APPLE_STOREKIT_ENVIRONMENT", "PRODUCTION").upper()
 APPLE_ROOT_CERTIFICATE_PATHS = os.getenv("APPLE_ROOT_CERTIFICATE_PATHS", "")
 APPLE_ROOT_CERTIFICATE_PEMS_B64 = os.getenv("APPLE_ROOT_CERTIFICATE_PEMS_B64", "")
@@ -67,6 +68,7 @@ TARGET_PROFIT_MARGIN_BPS = int(os.getenv("TARGET_PROFIT_MARGIN_BPS", "2000"))
 MAX_AUDIO_BYTES = int(os.getenv("MAX_AUDIO_BYTES", str(24 * 1024 * 1024)))
 
 USD_MICROS = 1_000_000
+DEV_CREDIT_MAX_USD_MICROS = int(os.getenv("DEV_CREDIT_MAX_USD_MICROS", str(20 * USD_MICROS)))
 
 
 def default_cost_markup_bps() -> int:
@@ -825,9 +827,14 @@ def storekit_transaction(
 def grant_dev_credit(
     request: DevCreditRequest,
     user: Annotated[dict[str, Any], Depends(current_user)],
+    x_voicetype_dev_credit_key: Annotated[Optional[str], Header(alias="X-VoiceType-Dev-Credit-Key")] = None,
 ) -> PurchaseCreditResponse:
     if not ALLOW_DEV_CREDIT:
         raise HTTPException(status_code=404, detail="Dev credit is disabled.")
+    if DEV_CREDIT_SHARED_SECRET and x_voicetype_dev_credit_key != DEV_CREDIT_SHARED_SECRET:
+        raise HTTPException(status_code=404, detail="Dev credit is disabled.")
+    if request.amount_usd_micros > DEV_CREDIT_MAX_USD_MICROS:
+        raise HTTPException(status_code=400, detail=f"Dev credit is capped at {money(DEV_CREDIT_MAX_USD_MICROS)}.")
     with db() as conn:
         lock_user(conn, user["id"])
         insert_ledger(

@@ -73,6 +73,30 @@ final class AccountStore: ObservableObject {
         }
     }
 
+    #if DEBUG
+    func grantDeveloperCreditIfAvailable(amountUSDMicros: Int = 20_000_000) async {
+        guard isSignedIn, !isPreviewMode, balanceUSDMicros < 1_000_000 else { return }
+        guard
+            let key = Bundle.main.object(forInfoDictionaryKey: "VoiceTypeDevCreditKey") as? String,
+            !key.isEmpty,
+            !key.hasPrefix("$(")
+        else {
+            return
+        }
+
+        do {
+            let response = try await BackendClient.grantDevCredit(
+                amountUSDMicros: amountUSDMicros,
+                token: token,
+                key: key
+            )
+            apply(balance: response.balance)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+    #endif
+
     func apply(auth: AuthResponse) {
         token = auth.token
         userID = auth.user.id

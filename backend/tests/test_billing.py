@@ -120,6 +120,44 @@ def test_storekit_requires_app_account_token(tmp_path, monkeypatch):
         assert response.status_code == 400, response.text
 
 
+def test_dev_credit_can_require_shared_secret(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    main.DEV_CREDIT_SHARED_SECRET = "test-secret"
+    main.DEV_CREDIT_MAX_USD_MICROS = 2_000_000
+
+    with TestClient(main.app) as client:
+        user = auth(client, "alice")
+
+        missing_secret = client.post(
+            "/v1/billing/dev-credit",
+            headers=user["headers"],
+            json={"amount_usd_micros": 1_000_000},
+        )
+        assert missing_secret.status_code == 404, missing_secret.text
+
+        wrong_secret = client.post(
+            "/v1/billing/dev-credit",
+            headers={**user["headers"], "X-VoiceType-Dev-Credit-Key": "wrong"},
+            json={"amount_usd_micros": 1_000_000},
+        )
+        assert wrong_secret.status_code == 404, wrong_secret.text
+
+        too_much = client.post(
+            "/v1/billing/dev-credit",
+            headers={**user["headers"], "X-VoiceType-Dev-Credit-Key": "test-secret"},
+            json={"amount_usd_micros": 3_000_000},
+        )
+        assert too_much.status_code == 400, too_much.text
+
+        granted = client.post(
+            "/v1/billing/dev-credit",
+            headers={**user["headers"], "X-VoiceType-Dev-Credit-Key": "test-secret"},
+            json={"amount_usd_micros": 2_000_000},
+        )
+        assert granted.status_code == 200, granted.text
+        assert granted.json()["granted_usd_micros"] == 2_000_000
+
+
 def test_default_retail_markup_covers_app_store_commission_and_profit(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
 

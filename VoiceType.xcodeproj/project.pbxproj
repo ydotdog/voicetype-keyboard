@@ -440,6 +440,7 @@
 				SWIFT_VERSION = 6.0;
 				VOICETYPE_APP_GROUP = group.com.kyleqi.voicetype;
 				VOICETYPE_BACKEND_URL = "http://192.168.2.63:8000";
+				VOICETYPE_DEV_CREDIT_KEY = "";
 			};
 			name = Debug;
 		};
@@ -501,6 +502,7 @@
 				SWIFT_VERSION = 6.0;
 				VOICETYPE_APP_GROUP = group.com.kyleqi.voicetype;
 				VOICETYPE_BACKEND_URL = "https://voicetype.y.dog";
+				VOICETYPE_DEV_CREDIT_KEY = "";
 			};
 			name = Release;
 		};

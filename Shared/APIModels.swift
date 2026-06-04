@@ -47,6 +47,14 @@ struct StoreKitTransactionRequest: Encodable {
     }
 }
 
+struct DevCreditRequest: Encodable {
+    let amountUSDMicros: Int
+
+    enum CodingKeys: String, CodingKey {
+        case amountUSDMicros = "amount_usd_micros"
+    }
+}
+
 struct PurchaseCreditResponse: Decodable {
     let balance: BalancePayload
     let grantedUSDMicros: Int
