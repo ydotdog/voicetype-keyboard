@@ -32,11 +32,11 @@ final class KeyboardViewController: UIInputViewController {
             insert: { [weak self] text in
                 self?.textDocumentProxy.insertText(text)
             },
-            openRecorder: { [weak self] in
-                self?.openRecorder()
+            startClip: { [weak self] in
+                self?.startClip()
             },
-            stopRecording: {
-                RecordingBridgeStore.requestStop()
+            stopClip: {
+                RecordingBridgeStore.requestStopClip()
             },
             nextKeyboard: { [weak self] in
                 self?.advanceToNextInputMode()
@@ -59,10 +59,10 @@ final class KeyboardViewController: UIInputViewController {
         hostingController = host
     }
 
-    private func openRecorder() {
-        guard let url = URL(string: "\(AppConstants.appURLScheme)://record?autostart=1") else { return }
+    private func startClip() {
         KeyboardAutoInsertStore.arm(baselineTranscriptID: viewModel.snapshot.id)
-        extensionContext?.open(url)
+        RecordingBridgeStore.requestStartClip()
+        viewModel.refresh()
     }
 
     private func startRefreshing() {
@@ -96,6 +96,18 @@ final class KeyboardViewModel: ObservableObject {
 
     var isRecording: Bool {
         recordingState.isRecording
+    }
+
+    var isKeyboardReady: Bool {
+        recordingState.mode == .keyboardReady
+    }
+
+    var isKeyboardRecording: Bool {
+        recordingState.mode == .keyboardRecording
+    }
+
+    var isTranscribing: Bool {
+        recordingState.mode == .transcribing
     }
 
     func refresh() {

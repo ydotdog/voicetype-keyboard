@@ -1,22 +1,72 @@
 import Foundation
 
+enum RecordingBridgeMode: String, Codable, Equatable {
+    case standard
+    case keyboardReady
+    case keyboardRecording
+    case transcribing
+}
+
 struct RecordingBridgeState: Codable, Equatable {
     let sessionID: String
     let isRecording: Bool
     let startedAt: Date?
     let durationLimit: RecordingDurationLimit
+    let mode: RecordingBridgeMode
+
+    init(
+        sessionID: String,
+        isRecording: Bool,
+        startedAt: Date?,
+        durationLimit: RecordingDurationLimit,
+        mode: RecordingBridgeMode
+    ) {
+        self.sessionID = sessionID
+        self.isRecording = isRecording
+        self.startedAt = startedAt
+        self.durationLimit = durationLimit
+        self.mode = mode
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case sessionID
+        case isRecording
+        case startedAt
+        case durationLimit
+        case mode
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sessionID = try container.decode(String.self, forKey: .sessionID)
+        isRecording = try container.decode(Bool.self, forKey: .isRecording)
+        startedAt = try container.decodeIfPresent(Date.self, forKey: .startedAt)
+        durationLimit = try container.decode(RecordingDurationLimit.self, forKey: .durationLimit)
+        mode = try container.decodeIfPresent(RecordingBridgeMode.self, forKey: .mode) ?? .standard
+    }
 
     static let inactive = RecordingBridgeState(
         sessionID: "",
         isRecording: false,
         startedAt: nil,
-        durationLimit: .fiveMinutes
+        durationLimit: .fiveMinutes,
+        mode: .standard
     )
+
+    var isKeyboardReady: Bool {
+        mode == .keyboardReady || mode == .keyboardRecording || mode == .transcribing
+    }
+
+    var isKeyboardRecording: Bool {
+        mode == .keyboardRecording
+    }
 }
 
 struct RecordingBridgeCommand: Codable, Equatable {
     enum Action: String, Codable {
         case stop
+        case startClip
+        case stopClip
     }
 
     let id: String
@@ -53,7 +103,7 @@ enum RecordingBridgeStore {
         }
         set {
             guard let defaults = UserDefaults(suiteName: AppConstants.appGroup) else { return }
-            if newValue.isRecording, let data = try? encoder.encode(newValue) {
+            if (newValue.isRecording || newValue.isKeyboardReady), let data = try? encoder.encode(newValue) {
                 defaults.set(data, forKey: stateKey)
             } else {
                 defaults.removeObject(forKey: stateKey)
@@ -72,8 +122,20 @@ enum RecordingBridgeStore {
     }
 
     static func requestStop() {
+        writeCommand(.stop)
+    }
+
+    static func requestStartClip() {
+        writeCommand(.startClip)
+    }
+
+    static func requestStopClip() {
+        writeCommand(.stopClip)
+    }
+
+    private static func writeCommand(_ action: RecordingBridgeCommand.Action) {
         guard let defaults = UserDefaults(suiteName: AppConstants.appGroup) else { return }
-        let command = RecordingBridgeCommand(id: UUID().uuidString, action: .stop, createdAt: Date())
+        let command = RecordingBridgeCommand(id: UUID().uuidString, action: action, createdAt: Date())
         guard let data = try? encoder.encode(command) else { return }
         defaults.set(data, forKey: commandKey)
     }

@@ -4,19 +4,20 @@ import SwiftUI
 struct KeyboardRootView: View {
     @ObservedObject var viewModel: KeyboardViewModel
     let insert: (String) -> Void
-    let openRecorder: () -> Void
-    let stopRecording: () -> Void
+    let startClip: () -> Void
+    let stopClip: () -> Void
     let nextKeyboard: () -> Void
-    @State private var didBeginHold = false
 
     var body: some View {
         VStack(spacing: 12) {
             chrome
 
-            if viewModel.isRecording {
+            if viewModel.isKeyboardRecording {
                 recordingSurface
+            } else if viewModel.isTranscribing {
+                transcribingSurface
             } else {
-                holdSurface
+                tapSurface
                 helperLine
             }
         }
@@ -26,9 +27,6 @@ struct KeyboardRootView: View {
         .frame(maxWidth: .infinity)
         .frame(height: viewModel.isRecording ? 210 : 224)
         .background(KeyboardPalette.keyboard)
-        .onAppear {
-            didBeginHold = false
-        }
     }
 
     private var chrome: some View {
@@ -74,49 +72,32 @@ struct KeyboardRootView: View {
             .italic())
     }
 
-    private var holdSurface: some View {
-        VStack(spacing: 10) {
-            Circle()
-                .fill(KeyboardPalette.accent)
-                .frame(width: 52, height: 52)
+    private var tapSurface: some View {
+        Button {
+            guard viewModel.isKeyboardReady else { return }
+            startClip()
+        } label: {
+            VStack(spacing: 10) {
+                Circle()
+                    .fill(viewModel.isKeyboardReady ? KeyboardPalette.accent : KeyboardPalette.muted.opacity(0.38))
+                    .frame(width: 52, height: 52)
 
-            Text("Hold to talk")
-                .font(.system(size: 28, weight: .regular, design: .serif))
-                .foregroundStyle(KeyboardPalette.onInk)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 112)
-        .background(KeyboardPalette.ink)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .scaleEffect(didBeginHold ? 0.985 : 1)
-        .opacity(didBeginHold ? 0.82 : 1)
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    guard !didBeginHold else { return }
-                    didBeginHold = true
-                    openRecorder()
-                }
-                .onEnded { _ in
-                    didBeginHold = false
-                }
-        )
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Hold to talk")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction {
-            if !didBeginHold {
-                didBeginHold = true
-                openRecorder()
+                Text(viewModel.isKeyboardReady ? "Tap to talk" : "Open VoiceType")
+                    .font(.system(size: 28, weight: .regular, design: .serif))
+                    .foregroundStyle(KeyboardPalette.onInk)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
             }
+            .frame(maxWidth: .infinity)
+            .frame(height: 112)
         }
+        .buttonStyle(KeyboardTapButtonStyle(enabled: viewModel.isKeyboardReady))
+        .disabled(!viewModel.isKeyboardReady)
+        .accessibilityLabel(viewModel.isKeyboardReady ? "Tap to talk" : "Open VoiceType to turn on keyboard microphone")
     }
 
     private var helperLine: some View {
-        Text("Press & hold, speak, release — your words drop straight in.")
+        Text(viewModel.isKeyboardReady ? "Tap once to start a clip. Tap again to finish and insert." : "Turn on keyboard mic in VoiceType first.")
             .font(.system(size: 20, weight: .regular))
             .foregroundStyle(KeyboardPalette.muted)
             .multilineTextAlignment(.center)
@@ -127,12 +108,41 @@ struct KeyboardRootView: View {
     }
 
     private var recordingSurface: some View {
+        Button(action: stopClip) {
+            VStack(spacing: 12) {
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(KeyboardPalette.live)
+                        .frame(width: 8, height: 8)
+                    KeyboardKicker("Recording clip", color: KeyboardPalette.live)
+                    Spacer()
+                    Text(viewModel.recordingState.durationLimit.label)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(KeyboardPalette.muted)
+                }
+
+                KeyboardWaveform()
+                    .frame(height: 52)
+
+                Text("Tap to finish")
+                    .font(.system(size: 28, weight: .regular, design: .serif))
+                    .foregroundStyle(KeyboardPalette.live)
+                    .lineLimit(1)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(KeyboardRecordingButtonStyle())
+        .accessibilityLabel("Tap to finish recording")
+    }
+
+    private var transcribingSurface: some View {
         VStack(spacing: 12) {
             HStack(spacing: 7) {
                 Circle()
                     .fill(KeyboardPalette.live)
                     .frame(width: 8, height: 8)
-                KeyboardKicker("Recording", color: KeyboardPalette.live)
+                KeyboardKicker("Transcribing", color: KeyboardPalette.live)
                 Spacer()
                 Text(viewModel.recordingState.durationLimit.label)
                     .font(.system(size: 13, weight: .semibold))
@@ -142,13 +152,9 @@ struct KeyboardRootView: View {
             KeyboardWaveform()
                 .frame(height: 52)
 
-            Button(action: stopRecording) {
-                Label("Stop & transcribe", systemImage: "stop.fill")
-                    .font(.system(size: 15, weight: .bold))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-            }
-            .buttonStyle(KeyboardLiveButtonStyle())
+            Text("Setting your words in type")
+                .font(.system(size: 22, weight: .regular, design: .serif))
+                .foregroundStyle(KeyboardPalette.ink)
         }
         .padding(12)
         .frame(maxWidth: .infinity)
@@ -251,12 +257,27 @@ private struct KeyboardChromeButtonStyle: ButtonStyle {
     }
 }
 
-private struct KeyboardLiveButtonStyle: ButtonStyle {
+private struct KeyboardTapButtonStyle: ButtonStyle {
+    let enabled: Bool
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(.white)
-            .background(KeyboardPalette.live)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(enabled ? KeyboardPalette.ink : KeyboardPalette.ink.opacity(0.62))
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .opacity(configuration.isPressed ? 0.82 : 1)
+    }
+}
+
+private struct KeyboardRecordingButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(KeyboardPalette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(KeyboardPalette.live.opacity(0.18), lineWidth: 1)
+            }
             .opacity(configuration.isPressed ? 0.72 : 1)
     }
 }

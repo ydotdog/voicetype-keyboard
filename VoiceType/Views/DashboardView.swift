@@ -234,7 +234,9 @@ private struct RecorderPanel: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            if recorder.isRecording {
+            if recorder.isKeyboardReady {
+                keyboardMicCard
+            } else if recorder.isRecording {
                 recordingCard
             } else {
                 idleRecordButton
@@ -242,10 +244,19 @@ private struct RecorderPanel: View {
 
             RecordingLimitPicker(
                 selection: $recorder.durationLimit,
-                isDisabled: recorder.isRecording || recorder.isProcessing
+                isDisabled: recorder.isKeyboardReady || recorder.isRecording || recorder.isProcessing
             )
 
-            if recorder.isRecording {
+            if recorder.isKeyboardReady {
+                Button {
+                    recorder.stopKeyboardReady()
+                } label: {
+                    Label("Turn off keyboard mic", systemImage: "mic.slash.fill")
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                }
+                .buttonStyle(GhostButtonStyle())
+            } else if recorder.isRecording {
                 HStack(spacing: 10) {
                     Button {
                         Task { await recorder.stopAndTranscribe(account: account) }
@@ -292,7 +303,7 @@ private struct RecorderPanel: View {
 
     private var idleRecordButton: some View {
         Button {
-            Task { await recorder.startRecording(account: account) }
+            Task { await recorder.startKeyboardReady(account: account) }
         } label: {
             HStack(spacing: 14) {
                 ZStack {
@@ -305,9 +316,9 @@ private struct RecorderPanel: View {
                 .frame(width: 46, height: 46)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Record a clip")
+                    Text("Turn on keyboard mic")
                         .font(AppTheme.serif(22, weight: .medium))
-                    Text("Tap to dictate · charged by the second")
+                    Text("Keep VoiceType ready in other apps")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(AppTheme.surface.opacity(0.72))
                 }
@@ -322,6 +333,43 @@ private struct RecorderPanel: View {
         }
         .disabled(recorder.isProcessing)
         .opacity(recorder.isProcessing ? 0.72 : 1)
+    }
+
+    private var keyboardMicCard: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(recorder.isKeyboardRecording ? AppTheme.coral : AppTheme.accent)
+                    .frame(width: 7, height: 7)
+                KickerText(
+                    text: recorder.isKeyboardRecording ? "Saving clip" : recorder.isKeyboardTranscribing ? "Transcribing" : "Keyboard mic on",
+                    color: recorder.isKeyboardRecording || recorder.isKeyboardTranscribing ? AppTheme.coral : AppTheme.accentDeep
+                )
+                Spacer()
+                Text(timerText)
+                    .font(AppTheme.serif(24, weight: .regular))
+                    .foregroundStyle(AppTheme.ink)
+                    .monospacedDigit()
+            }
+
+            if recorder.isKeyboardRecording || recorder.isKeyboardTranscribing {
+                LiveWaveform(dense: true)
+                    .frame(height: 54)
+            } else {
+                Text("Now switch to any app and tap VoiceType Keyboard to start and finish a clip.")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(AppTheme.inkSoft)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .background(AppTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke((recorder.isKeyboardRecording ? AppTheme.coral : AppTheme.accent).opacity(0.22), lineWidth: 1)
+        }
     }
 
     private var recordingCard: some View {

@@ -24,8 +24,31 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     private var activeDurationLimit = RecordingPreferencesStore.durationLimit
     private var handledCommandID: String?
     private var isStopping = false
+    private var bridgeMode: RecordingBridgeMode = .standard
+    private var keyboardClipStartTime: TimeInterval?
+
+    var isKeyboardReady: Bool {
+        bridgeMode == .keyboardReady || bridgeMode == .keyboardRecording || bridgeMode == .transcribing
+    }
+
+    var isKeyboardRecording: Bool {
+        bridgeMode == .keyboardRecording
+    }
+
+    var isKeyboardTranscribing: Bool {
+        bridgeMode == .transcribing
+    }
 
     var statusText: String {
+        if isKeyboardRecording {
+            return "Keyboard recording \(Self.durationFormatter.string(from: elapsedSeconds) ?? "0:00")"
+        }
+        if isKeyboardTranscribing {
+            return "Transcribing"
+        }
+        if isKeyboardReady {
+            return "Keyboard mic ready"
+        }
         if isRecording {
             return "Recording \(Self.durationFormatter.string(from: elapsedSeconds) ?? "0:00")"
         }
@@ -54,19 +77,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.allowBluetoothHFP, .defaultToSpeaker])
             try session.setActive(true)
 
-            let fileURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent("voicetype-\(UUID().uuidString)")
-                .appendingPathExtension("m4a")
-            let settings: [String: Any] = [
-                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-                AVSampleRateKey: 44_100,
-                AVNumberOfChannelsKey: 1,
-                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
-            ]
-
-            let audioRecorder = try AVAudioRecorder(url: fileURL, settings: settings)
-            audioRecorder.isMeteringEnabled = true
-            audioRecorder.delegate = self
+            let (audioRecorder, fileURL) = try makeAudioRecorder()
             let didStartRecording: Bool
             if let maximumDuration = durationLimit.maximumDuration {
                 didStartRecording = audioRecorder.record(forDuration: maximumDuration)
@@ -88,12 +99,8 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             handledCommandID = RecordingBridgeStore.latestCommand?.id
             elapsedSeconds = 0
             isRecording = true
-            RecordingBridgeStore.state = RecordingBridgeState(
-                sessionID: activeSessionID,
-                isRecording: true,
-                startedAt: startedAt,
-                durationLimit: activeDurationLimit
-            )
+            bridgeMode = .standard
+            publishBridgeState()
             startTimer()
         } catch {
             RecordingBridgeStore.state = .inactive
@@ -103,7 +110,81 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         }
     }
 
+    func startKeyboardReady(account: AccountStore) async {
+        guard !isKeyboardReady, !isRecording, !isProcessing else { return }
+        errorMessage = nil
+
+        let hasPermission = await requestMicrophonePermission()
+        guard hasPermission else {
+            errorMessage = "Microphone permission is required."
+            return
+        }
+
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.allowBluetoothHFP, .defaultToSpeaker])
+            try session.setActive(true)
+
+            let (audioRecorder, fileURL) = try makeAudioRecorder()
+            guard audioRecorder.record() else {
+                try? FileManager.default.removeItem(at: fileURL)
+                throw RecorderError.failedToStart
+            }
+
+            recorder = audioRecorder
+            currentFileURL = fileURL
+            let startedAt = Date()
+            self.startedAt = startedAt
+            activeAccount = account
+            activeSessionID = UUID().uuidString
+            activeDurationLimit = durationLimit
+            handledCommandID = RecordingBridgeStore.latestCommand?.id
+            keyboardClipStartTime = nil
+            elapsedSeconds = 0
+            isRecording = false
+            isProcessing = false
+            bridgeMode = .keyboardReady
+            publishBridgeState()
+            startTimer()
+        } catch {
+            RecordingBridgeStore.state = .inactive
+            KeyboardAutoInsertStore.clear()
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func stopKeyboardReady() {
+        guard isKeyboardReady else { return }
+        isStopping = true
+        recorder?.stop()
+        recorder = nil
+        isStopping = false
+        isRecording = false
+        isProcessing = false
+        bridgeMode = .standard
+        keyboardClipStartTime = nil
+        stopTimer()
+        RecordingBridgeStore.state = .inactive
+        KeyboardAutoInsertStore.clear()
+        if let currentFileURL {
+            try? FileManager.default.removeItem(at: currentFileURL)
+        }
+        currentFileURL = nil
+        startedAt = nil
+        activeAccount = nil
+        activeSessionID = ""
+        activeDurationLimit = durationLimit
+        handledCommandID = nil
+        elapsedSeconds = 0
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
     func stopAndTranscribe(account: AccountStore) async {
+        if bridgeMode == .keyboardRecording {
+            await stopKeyboardClipAndTranscribe()
+            return
+        }
         guard isRecording, !isStopping, let fileURL = currentFileURL, let startedAt else { return }
         isStopping = true
         let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "VoiceTypeTranscription")
@@ -127,6 +208,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             activeSessionID = ""
             activeDurationLimit = durationLimit
             handledCommandID = nil
+            bridgeMode = .standard
             isStopping = false
             elapsedSeconds = 0
             isProcessing = false
@@ -164,6 +246,10 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     }
 
     func cancel() {
+        if isKeyboardReady {
+            stopKeyboardReady()
+            return
+        }
         guard isRecording else { return }
         isStopping = true
         recorder?.stop()
@@ -181,6 +267,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         activeSessionID = ""
         activeDurationLimit = durationLimit
         handledCommandID = nil
+        bridgeMode = .standard
         isStopping = false
         elapsedSeconds = 0
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -189,6 +276,10 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     nonisolated func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
         Task { @MainActor in
             guard self.isRecording, !self.isStopping, self.recorder === recorder else { return }
+            guard self.bridgeMode == .standard else {
+                self.stopKeyboardReady()
+                return
+            }
             guard flag, let activeAccount = self.activeAccount else {
                 self.cancel()
                 return
@@ -228,6 +319,33 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         timer = nil
     }
 
+    private func makeAudioRecorder() throws -> (AVAudioRecorder, URL) {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("voicetype-\(UUID().uuidString)")
+            .appendingPathExtension("m4a")
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: 16_000,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderBitRateKey: 32_000,
+            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+        ]
+        let audioRecorder = try AVAudioRecorder(url: fileURL, settings: settings)
+        audioRecorder.isMeteringEnabled = true
+        audioRecorder.delegate = self
+        return (audioRecorder, fileURL)
+    }
+
+    private func publishBridgeState() {
+        RecordingBridgeStore.state = RecordingBridgeState(
+            sessionID: activeSessionID,
+            isRecording: isRecording,
+            startedAt: startedAt,
+            durationLimit: activeDurationLimit,
+            mode: bridgeMode
+        )
+    }
+
     private static let durationFormatter: DateComponentsFormatter = {
         let formatter = DateComponentsFormatter()
         formatter.allowedUnits = [.minute, .second]
@@ -248,8 +366,17 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         switch command.action {
         case .stop:
             RecordingBridgeStore.clearCommand(id: command.id)
-            guard let activeAccount else { return }
-            await stopAndTranscribe(account: activeAccount)
+            if isKeyboardReady {
+                stopKeyboardReady()
+            } else if let activeAccount {
+                await stopAndTranscribe(account: activeAccount)
+            }
+        case .startClip:
+            RecordingBridgeStore.clearCommand(id: command.id)
+            beginKeyboardClip()
+        case .stopClip:
+            RecordingBridgeStore.clearCommand(id: command.id)
+            await stopKeyboardClipAndTranscribe()
         }
     }
 
@@ -262,14 +389,169 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         else {
             return
         }
+        if isKeyboardReady {
+            if bridgeMode == .keyboardRecording {
+                await stopKeyboardClipAndTranscribe()
+            }
+            stopKeyboardReady()
+            return
+        }
         await stopAndTranscribe(account: activeAccount)
+    }
+
+    private func beginKeyboardClip() {
+        guard
+            bridgeMode == .keyboardReady,
+            !isProcessing,
+            let recorder
+        else {
+            return
+        }
+        keyboardClipStartTime = recorder.currentTime
+        isRecording = true
+        bridgeMode = .keyboardRecording
+        publishBridgeState()
+    }
+
+    private func stopKeyboardClipAndTranscribe() async {
+        guard
+            bridgeMode == .keyboardRecording,
+            !isStopping,
+            let sourceURL = currentFileURL,
+            let recorder,
+            let clipStartTime = keyboardClipStartTime,
+            let activeAccount
+        else {
+            return
+        }
+
+        let clipEndTime = recorder.currentTime
+        let clipDuration = max(0, clipEndTime - clipStartTime)
+        keyboardClipStartTime = nil
+        isRecording = false
+
+        guard clipDuration >= 0.25 else {
+            bridgeMode = .keyboardReady
+            publishBridgeState()
+            return
+        }
+
+        isStopping = true
+        recorder.stop()
+        self.recorder = nil
+        isStopping = false
+        isProcessing = true
+        bridgeMode = .transcribing
+        publishBridgeState()
+
+        let clipURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("voicetype-clip-\(UUID().uuidString)")
+            .appendingPathExtension("m4a")
+
+        do {
+            try restartKeyboardReadyRecorder()
+            try await exportClip(sourceURL: sourceURL, outputURL: clipURL, start: clipStartTime, duration: clipDuration)
+
+            #if DEBUG
+            if activeAccount.isPreviewMode {
+                let snapshot = TranscriptSnapshot(
+                    id: UUID().uuidString,
+                    text: "This is a local preview transcript from VoiceType.",
+                    createdAt: Date(),
+                    chargeText: "0 credits"
+                )
+                SharedTranscriptStore.latest = snapshot
+                lastTranscript = snapshot
+            } else {
+                let response = try await BackendClient.transcribe(fileURL: clipURL, duration: clipDuration, token: activeAccount.token)
+                let snapshot = TranscriptSnapshot(
+                    id: response.id,
+                    text: response.transcript,
+                    createdAt: Date(),
+                    chargeText: response.charge.formatted
+                )
+                SharedTranscriptStore.latest = snapshot
+                lastTranscript = snapshot
+                activeAccount.apply(balance: response.balance)
+            }
+            #else
+            let response = try await BackendClient.transcribe(fileURL: clipURL, duration: clipDuration, token: activeAccount.token)
+            let snapshot = TranscriptSnapshot(
+                id: response.id,
+                text: response.transcript,
+                createdAt: Date(),
+                chargeText: response.charge.formatted
+            )
+            SharedTranscriptStore.latest = snapshot
+            lastTranscript = snapshot
+            activeAccount.apply(balance: response.balance)
+            #endif
+
+            isProcessing = false
+            bridgeMode = .keyboardReady
+            publishBridgeState()
+        } catch {
+            KeyboardAutoInsertStore.clear()
+            errorMessage = error.localizedDescription
+            isProcessing = false
+            if recorder == nil {
+                stopKeyboardReady()
+            } else {
+                bridgeMode = .keyboardReady
+                publishBridgeState()
+            }
+        }
+
+        try? FileManager.default.removeItem(at: sourceURL)
+        try? FileManager.default.removeItem(at: clipURL)
+    }
+
+    private func restartKeyboardReadyRecorder() throws {
+        let (audioRecorder, fileURL) = try makeAudioRecorder()
+        guard audioRecorder.record() else {
+            try? FileManager.default.removeItem(at: fileURL)
+            throw RecorderError.failedToStart
+        }
+        recorder = audioRecorder
+        currentFileURL = fileURL
+    }
+
+    private func exportClip(sourceURL: URL, outputURL: URL, start: TimeInterval, duration: TimeInterval) async throws {
+        let asset = AVURLAsset(url: sourceURL)
+        guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+            throw RecorderError.failedToExport
+        }
+        exportSession.outputURL = outputURL
+        exportSession.outputFileType = .m4a
+        let startTime = CMTime(seconds: start, preferredTimescale: 600)
+        let endTime = CMTime(seconds: start + duration, preferredTimescale: 600)
+        exportSession.timeRange = CMTimeRangeFromTimeToTime(start: startTime, end: endTime)
+
+        try await withCheckedThrowingContinuation { continuation in
+            exportSession.exportAsynchronously {
+                switch exportSession.status {
+                case .completed:
+                    continuation.resume()
+                case .failed, .cancelled:
+                    continuation.resume(throwing: exportSession.error ?? RecorderError.failedToExport)
+                default:
+                    continuation.resume(throwing: RecorderError.failedToExport)
+                }
+            }
+        }
     }
 }
 
 enum RecorderError: LocalizedError {
     case failedToStart
+    case failedToExport
 
     var errorDescription: String? {
+        switch self {
+        case .failedToStart:
         "Recording did not start. Check microphone permission and try again."
+        case .failedToExport:
+            "Recording could not be prepared for transcription."
+        }
     }
 }
