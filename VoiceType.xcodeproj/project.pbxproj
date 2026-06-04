@@ -500,7 +500,7 @@
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 6.0;
 				VOICETYPE_APP_GROUP = group.com.kyleqi.voicetype;
-				VOICETYPE_BACKEND_URL = "https://api.voicetype.example";
+				VOICETYPE_BACKEND_URL = "https://voicetype.y.dog";
 			};
 			name = Release;
 		};

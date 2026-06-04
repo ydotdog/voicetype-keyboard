@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - /opt/voicetype/env/db.env
+    volumes:
+      - /opt/voicetype/data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U voicetype -d voicetype"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ../../backend
+    restart: unless-stopped
+    env_file:
+      - /opt/voicetype/env/backend.env
+    volumes:
+      - /opt/voicetype/certs:/opt/voicetype/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /opt/voicetype/config/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/voicetype/data/caddy:/data
+      - /opt/voicetype/config/caddy:/config

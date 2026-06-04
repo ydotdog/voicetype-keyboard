@@ -1,0 +1,8 @@
+{
+  email kq@apeonwheels.com
+}
+
+voicetype.y.dog {
+	encode zstd gzip
+	reverse_proxy backend:8080
+}

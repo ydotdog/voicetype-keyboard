@@ -14,7 +14,7 @@ settings:
     Debug:
       VOICETYPE_BACKEND_URL: http://192.168.2.63:8000
     Release:
-      VOICETYPE_BACKEND_URL: https://api.voicetype.example
+      VOICETYPE_BACKEND_URL: https://voicetype.y.dog
 targets:
   VoiceType:
     type: application
