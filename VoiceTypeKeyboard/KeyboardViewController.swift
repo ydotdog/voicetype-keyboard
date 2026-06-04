@@ -4,12 +4,13 @@ import UIKit
 final class KeyboardViewController: UIInputViewController {
     private let viewModel = KeyboardViewModel()
     private var refreshTimer: Timer?
+    private var pendingAction: PendingKeyboardAction?
 
     private let chromeStack = UIStackView()
     private let markView = KeyboardMarkView()
     private let wordmarkLabel = UILabel()
     private let balanceLabel = UILabel()
-    private let actionControl = UIControl()
+    private let actionControl = KeyboardActionControl()
     private let actionStack = UIStackView()
     private let actionCircle = UIView()
     private let actionTitleLabel = UILabel()
@@ -105,6 +106,7 @@ final class KeyboardViewController: UIInputViewController {
         actionStack.axis = .vertical
         actionStack.alignment = .center
         actionStack.spacing = 10
+        actionStack.isUserInteractionEnabled = false
         actionStack.translatesAutoresizingMaskIntoConstraints = false
         actionControl.addSubview(actionStack)
         NSLayoutConstraint.activate([
@@ -117,10 +119,12 @@ final class KeyboardViewController: UIInputViewController {
         statusLabel.textColor = palette.muted
         statusLabel.textAlignment = .center
         statusLabel.numberOfLines = 1
+        statusLabel.isUserInteractionEnabled = false
 
         actionCircle.backgroundColor = palette.accent
         actionCircle.layer.cornerCurve = .continuous
         actionCircle.layer.cornerRadius = 26
+        actionCircle.isUserInteractionEnabled = false
         actionCircle.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             actionCircle.widthAnchor.constraint(equalToConstant: 52),
@@ -131,12 +135,14 @@ final class KeyboardViewController: UIInputViewController {
         waveStack.alignment = .center
         waveStack.distribution = .equalCentering
         waveStack.spacing = 4
+        waveStack.isUserInteractionEnabled = false
         waveStack.heightAnchor.constraint(equalToConstant: 52).isActive = true
         for height in [18, 30, 42, 24, 49, 35, 20, 45, 39, 26, 48, 31, 19, 40, 34, 22] as [CGFloat] {
             let bar = UIView()
             bar.backgroundColor = palette.live
             bar.layer.cornerCurve = .continuous
             bar.layer.cornerRadius = 1.5
+            bar.isUserInteractionEnabled = false
             bar.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
                 bar.widthAnchor.constraint(equalToConstant: 3),
@@ -150,6 +156,7 @@ final class KeyboardViewController: UIInputViewController {
         actionTitleLabel.adjustsFontSizeToFitWidth = true
         actionTitleLabel.minimumScaleFactor = 0.78
         actionTitleLabel.numberOfLines = 1
+        actionTitleLabel.isUserInteractionEnabled = false
 
         helperLabel.font = .systemFont(ofSize: 20, weight: .regular)
         helperLabel.textColor = palette.muted
@@ -220,6 +227,7 @@ final class KeyboardViewController: UIInputViewController {
     @MainActor
     private func refreshKeyboardState() {
         viewModel.refresh()
+        clearResolvedPendingAction()
         updateUI()
         guard !viewModel.isRecording, KeyboardAutoInsertStore.shouldInsert(viewModel.snapshot) else { return }
         textDocumentProxy.insertText(viewModel.snapshot.text)
@@ -236,13 +244,42 @@ final class KeyboardViewController: UIInputViewController {
         let canUseBridge = viewModel.isKeyboardReady && hasFullAccess
         actionControl.isEnabled = !viewModel.isTranscribing
 
-        if viewModel.isKeyboardRecording {
+        if pendingAction == .startingClip {
+            actionControl.backgroundColor = palette.surface
+            actionControl.layer.borderColor = palette.live.withAlphaComponent(0.18).cgColor
+            actionControl.layer.borderWidth = 1
+            statusLabel.text = "STARTING"
+            statusLabel.textColor = palette.live
+            actionTitleLabel.text = "Listening..."
+            actionTitleLabel.font = .systemFont(ofSize: 28, weight: .regular)
+            actionTitleLabel.textColor = palette.live
+            actionControl.accessibilityLabel = "Starting recording"
+            actionStack.addArrangedSubview(statusLabel)
+            actionStack.addArrangedSubview(waveStack)
+            actionStack.addArrangedSubview(actionTitleLabel)
+            helperLabel.isHidden = true
+        } else if pendingAction == .stoppingClip {
+            actionControl.backgroundColor = palette.surface
+            actionControl.layer.borderColor = palette.live.withAlphaComponent(0.18).cgColor
+            actionControl.layer.borderWidth = 1
+            statusLabel.text = "FINISHING"
+            statusLabel.textColor = palette.live
+            actionTitleLabel.text = "Sending..."
+            actionTitleLabel.font = .systemFont(ofSize: 28, weight: .regular)
+            actionTitleLabel.textColor = palette.live
+            actionControl.accessibilityLabel = "Finishing recording"
+            actionStack.addArrangedSubview(statusLabel)
+            actionStack.addArrangedSubview(waveStack)
+            actionStack.addArrangedSubview(actionTitleLabel)
+            helperLabel.isHidden = true
+        } else if viewModel.isKeyboardRecording {
             actionControl.backgroundColor = palette.surface
             actionControl.layer.borderColor = palette.live.withAlphaComponent(0.18).cgColor
             actionControl.layer.borderWidth = 1
             statusLabel.text = "RECORDING CLIP"
             statusLabel.textColor = palette.live
             actionTitleLabel.text = "Tap to finish"
+            actionTitleLabel.font = .systemFont(ofSize: 28, weight: .regular)
             actionTitleLabel.textColor = palette.live
             actionControl.accessibilityLabel = "Tap to finish recording"
             actionStack.addArrangedSubview(statusLabel)
@@ -304,16 +341,21 @@ final class KeyboardViewController: UIInputViewController {
 
     @objc private func actionTapped() {
         if viewModel.isKeyboardRecording {
+            pendingAction = .stoppingClip
             RecordingBridgeStore.requestStopClip()
         } else if !hasFullAccess {
+            pendingAction = nil
             openContainingApp()
         } else if viewModel.isKeyboardReady, hasFullAccess {
+            pendingAction = .startingClip
             KeyboardAutoInsertStore.arm(baselineTranscriptID: viewModel.snapshot.id)
             RecordingBridgeStore.requestStartClip()
         } else {
+            pendingAction = nil
             openContainingApp()
         }
         viewModel.refresh()
+        clearResolvedPendingAction()
         updateUI()
     }
 
@@ -324,6 +366,36 @@ final class KeyboardViewController: UIInputViewController {
     private func openContainingApp() {
         guard let url = URL(string: "\(AppConstants.appURLScheme)://keyboard") else { return }
         extensionContext?.open(url)
+    }
+
+    private func clearResolvedPendingAction() {
+        switch pendingAction {
+        case .startingClip where viewModel.isKeyboardRecording:
+            pendingAction = nil
+        case .stoppingClip where !viewModel.isKeyboardRecording:
+            pendingAction = nil
+        default:
+            break
+        }
+    }
+}
+
+private enum PendingKeyboardAction {
+    case startingClip
+    case stoppingClip
+}
+
+private final class KeyboardActionControl: UIControl {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard
+            isEnabled,
+            !isHidden,
+            alpha >= 0.01,
+            self.point(inside: point, with: event)
+        else {
+            return nil
+        }
+        return self
     }
 }
 
