@@ -68,6 +68,7 @@ TARGET_PROFIT_MARGIN_BPS = int(os.getenv("TARGET_PROFIT_MARGIN_BPS", "2000"))
 MAX_AUDIO_BYTES = int(os.getenv("MAX_AUDIO_BYTES", str(24 * 1024 * 1024)))
 
 USD_MICROS = 1_000_000
+CREDIT_UNITS_PER_USD = 1_000_000
 DEV_CREDIT_MAX_USD_MICROS = int(os.getenv("DEV_CREDIT_MAX_USD_MICROS", str(20 * USD_MICROS)))
 
 
@@ -85,21 +86,21 @@ COST_MARKUP_BPS = int(os.getenv("COST_MARKUP_BPS", str(DEFAULT_COST_MARKUP_BPS))
 DEFAULT_PRODUCTS = [
     {
         "id": "com.kyleqi.voicetype.credits.small",
-        "display_name": "$1 credit",
-        "credit_usd_micros": 1 * USD_MICROS,
-        "subtitle": "Starter pack",
+        "display_name": "990,000 credits",
+        "credit_usd_micros": 990_000,
+        "subtitle": "$0.99 pack",
     },
     {
         "id": "com.kyleqi.voicetype.credits.medium",
-        "display_name": "$5 credit",
-        "credit_usd_micros": 5 * USD_MICROS,
-        "subtitle": "Everyday pack",
+        "display_name": "4,990,000 credits",
+        "credit_usd_micros": 4_990_000,
+        "subtitle": "$4.99 pack",
     },
     {
         "id": "com.kyleqi.voicetype.credits.large",
-        "display_name": "$20 credit",
-        "credit_usd_micros": 20 * USD_MICROS,
-        "subtitle": "Heavy usage pack",
+        "display_name": "19,990,000 credits",
+        "credit_usd_micros": 19_990_000,
+        "subtitle": "$19.99 pack",
     },
 ]
 
@@ -143,6 +144,7 @@ class AuthUser(BaseModel):
 
 class BalancePayload(BaseModel):
     balance_usd_micros: int
+    balance_credit_units: int
     formatted: str
 
 
@@ -156,6 +158,7 @@ class CreditProduct(BaseModel):
     id: str
     display_name: str
     credit_usd_micros: int
+    credit_units: int
     subtitle: str
 
 
@@ -166,6 +169,7 @@ class StoreKitTransactionRequest(BaseModel):
 class PurchaseCreditResponse(BaseModel):
     balance: BalancePayload
     granted_usd_micros: int
+    granted_credit_units: int
     already_processed: bool
 
 
@@ -175,6 +179,7 @@ class DevCreditRequest(BaseModel):
 
 class ChargePayload(BaseModel):
     cost_usd_micros: int
+    cost_credit_units: int
     formatted: str
     pricing_basis: str
 
@@ -204,8 +209,12 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def money(micros: int) -> str:
-    return f"${micros / USD_MICROS:,.4f}"
+def credit_units_from_usd_micros(micros: int) -> int:
+    return math.ceil(micros * CREDIT_UNITS_PER_USD / USD_MICROS)
+
+
+def format_credits(micros: int) -> str:
+    return f"{credit_units_from_usd_micros(micros):,} credits"
 
 
 def is_postgres() -> bool:
@@ -220,6 +229,11 @@ def product_catalog() -> list[dict[str, Any]]:
             raise RuntimeError("CREDIT_PRODUCTS_JSON must be a JSON list.")
         return parsed
     return DEFAULT_PRODUCTS
+
+
+def product_payload(product: dict[str, Any]) -> dict[str, Any]:
+    credit = int(product["credit_usd_micros"])
+    return {**product, "credit_units": credit_units_from_usd_micros(credit)}
 
 
 def product_by_id(product_id: str) -> dict[str, Any]:
@@ -491,7 +505,11 @@ def balance_for_user(conn: Any, user_id: str) -> int:
 
 
 def balance_payload(balance: int) -> BalancePayload:
-    return BalancePayload(balance_usd_micros=balance, formatted=money(balance))
+    return BalancePayload(
+        balance_usd_micros=balance,
+        balance_credit_units=credit_units_from_usd_micros(balance),
+        formatted=format_credits(balance),
+    )
 
 
 def insert_ledger(
@@ -734,7 +752,7 @@ def me(user: Annotated[dict[str, Any], Depends(current_user)]) -> dict[str, Any]
 
 @app.get("/v1/billing/products")
 def products() -> dict[str, list[CreditProduct]]:
-    return {"products": [CreditProduct(**product) for product in product_catalog()]}
+    return {"products": [CreditProduct(**product_payload(product)) for product in product_catalog()]}
 
 
 @app.get("/v1/billing/ledger", response_model=LedgerResponse)
@@ -789,6 +807,7 @@ def storekit_transaction(
             return PurchaseCreditResponse(
                 balance=balance_payload(balance_for_user(conn, user["id"])),
                 granted_usd_micros=0,
+                granted_credit_units=0,
                 already_processed=True,
             )
         execute(
@@ -820,7 +839,12 @@ def storekit_transaction(
         )
         balance = balance_for_user(conn, user["id"])
 
-    return PurchaseCreditResponse(balance=balance_payload(balance), granted_usd_micros=credit, already_processed=False)
+    return PurchaseCreditResponse(
+        balance=balance_payload(balance),
+        granted_usd_micros=credit,
+        granted_credit_units=credit_units_from_usd_micros(credit),
+        already_processed=False,
+    )
 
 
 @app.post("/v1/billing/dev-credit", response_model=PurchaseCreditResponse)
@@ -834,7 +858,7 @@ def grant_dev_credit(
     if DEV_CREDIT_SHARED_SECRET and x_voicetype_dev_credit_key != DEV_CREDIT_SHARED_SECRET:
         raise HTTPException(status_code=404, detail="Dev credit is disabled.")
     if request.amount_usd_micros > DEV_CREDIT_MAX_USD_MICROS:
-        raise HTTPException(status_code=400, detail=f"Dev credit is capped at {money(DEV_CREDIT_MAX_USD_MICROS)}.")
+        raise HTTPException(status_code=400, detail=f"Dev credit is capped at {format_credits(DEV_CREDIT_MAX_USD_MICROS)}.")
     with db() as conn:
         lock_user(conn, user["id"])
         insert_ledger(
@@ -846,7 +870,12 @@ def grant_dev_credit(
             source_id=f"dev:{uuid.uuid4()}",
         )
         balance = balance_for_user(conn, user["id"])
-    return PurchaseCreditResponse(balance=balance_payload(balance), granted_usd_micros=request.amount_usd_micros, already_processed=False)
+    return PurchaseCreditResponse(
+        balance=balance_payload(balance),
+        granted_usd_micros=request.amount_usd_micros,
+        granted_credit_units=credit_units_from_usd_micros(request.amount_usd_micros),
+        already_processed=False,
+    )
 
 
 @app.post("/v1/transcriptions", response_model=TranscriptionResponse)
@@ -869,7 +898,7 @@ async def create_transcription(
         lock_user(conn, user["id"])
         balance = balance_for_user(conn, user["id"])
         if balance < preflight_cost:
-            raise HTTPException(status_code=402, detail=f"Insufficient credit. Need at least {money(preflight_cost)}.")
+            raise HTTPException(status_code=402, detail=f"Insufficient credit. Need at least {format_credits(preflight_cost)}.")
 
     payload = await transcribe_audio(audio, file.filename or "recording.m4a", file.content_type, selected_model, language)
     transcript = payload["text"].strip()
@@ -887,7 +916,7 @@ async def create_transcription(
         lock_user(conn, user["id"])
         balance = balance_for_user(conn, user["id"])
         if balance < cost:
-            raise HTTPException(status_code=402, detail=f"Insufficient credit after final usage calculation. Need {money(cost)}.")
+            raise HTTPException(status_code=402, detail=f"Insufficient credit after final usage calculation. Need {format_credits(cost)}.")
         execute(
             conn,
             """
@@ -925,7 +954,12 @@ async def create_transcription(
             id=transcription_id,
             transcript=transcript,
             model=selected_model,
-            charge=ChargePayload(cost_usd_micros=cost, formatted=money(cost), pricing_basis=pricing_basis),
+            charge=ChargePayload(
+                cost_usd_micros=cost,
+                cost_credit_units=credit_units_from_usd_micros(cost),
+                formatted=format_credits(cost),
+                pricing_basis=pricing_basis,
+            ),
             balance=balance_payload(balance),
         ).model_dump()
     )

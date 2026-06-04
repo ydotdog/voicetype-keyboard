@@ -35,12 +35,12 @@ final class AccountStore: ObservableObject {
         if storedToken == Self.previewToken {
             userID = UUID().uuidString
             email = "Local preview"
-            balanceText = "$5.0000"
+            balanceText = "5,000,000 credits"
             balanceUSDMicros = 5_000_000
         } else {
             userID = UserDefaults.standard.string(forKey: userIDKey) ?? ""
             email = UserDefaults.standard.string(forKey: emailKey) ?? ""
-            balanceText = "$0.0000"
+            balanceText = "0 credits"
             balanceUSDMicros = 0
         }
     }
@@ -122,7 +122,7 @@ final class AccountStore: ObservableObject {
         token = Self.previewToken
         userID = UUID().uuidString
         email = "Local preview"
-        balanceText = "$5.0000"
+        balanceText = "5,000,000 credits"
         balanceUSDMicros = 5_000_000
         errorMessage = nil
         KeychainStore.save(token, service: keychainService, account: tokenAccount)
@@ -137,7 +137,7 @@ final class AccountStore: ObservableObject {
         }
         email = "Local preview"
         balanceUSDMicros += 5_000_000
-        balanceText = String(format: "$%.4f", Double(balanceUSDMicros) / 1_000_000)
+        balanceText = Self.formatCredits(balanceUSDMicros)
         errorMessage = nil
         KeychainStore.save(token, service: keychainService, account: tokenAccount)
         UserDefaults.standard.set(userID, forKey: userIDKey)
@@ -153,11 +153,15 @@ final class AccountStore: ObservableObject {
         token = ""
         userID = ""
         email = ""
-        balanceText = "$0.0000"
+        balanceText = "0 credits"
         balanceUSDMicros = 0
         KeychainStore.delete(service: keychainService, account: tokenAccount)
         UserDefaults.standard.removeObject(forKey: userIDKey)
         UserDefaults.standard.removeObject(forKey: emailKey)
+    }
+
+    private static func formatCredits(_ credits: Int) -> String {
+        "\(credits.formatted()) credits"
     }
 }
 

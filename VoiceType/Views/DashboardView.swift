@@ -85,7 +85,7 @@ struct DashboardView: View {
     private var header: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(account.isSignedIn ? account.balanceText : "$0.0000")
+                Text(account.isSignedIn ? account.balanceText : "0 credits")
                     .font(.system(size: 36, weight: .bold, design: .rounded))
                     .foregroundStyle(AppTheme.ink)
                     .monospacedDigit()

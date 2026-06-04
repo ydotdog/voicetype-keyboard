@@ -97,7 +97,7 @@ final class RecordingController: NSObject, ObservableObject {
                     id: UUID().uuidString,
                     text: "This is a local preview transcript from VoiceType.",
                     createdAt: Date(),
-                    chargeText: "$0.0000"
+                    chargeText: "0 credits"
                 )
                 SharedTranscriptStore.latest = snapshot
                 lastTranscript = snapshot

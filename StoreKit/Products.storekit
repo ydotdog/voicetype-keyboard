@@ -10,13 +10,13 @@
       "internalID" : "voicetype-credit-small",
       "localizations" : [
         {
-          "description" : "$1 non-expiring VoiceType credit",
-          "displayName" : "$1 Credit",
+          "description" : "Non-expiring pay-as-you-go VoiceType credits.",
+          "displayName" : "990,000 Credits",
           "locale" : "en_US"
         }
       ],
       "productID" : "com.kyleqi.voicetype.credits.small",
-      "referenceName" : "$1 Credit",
+      "referenceName" : "990,000 Credits",
       "type" : "Consumable"
     },
     {
@@ -25,13 +25,13 @@
       "internalID" : "voicetype-credit-medium",
       "localizations" : [
         {
-          "description" : "$5 non-expiring VoiceType credit",
-          "displayName" : "$5 Credit",
+          "description" : "Non-expiring pay-as-you-go VoiceType credits.",
+          "displayName" : "4,990,000 Credits",
           "locale" : "en_US"
         }
       ],
       "productID" : "com.kyleqi.voicetype.credits.medium",
-      "referenceName" : "$5 Credit",
+      "referenceName" : "4,990,000 Credits",
       "type" : "Consumable"
     },
     {
@@ -40,13 +40,13 @@
       "internalID" : "voicetype-credit-large",
       "localizations" : [
         {
-          "description" : "$20 non-expiring VoiceType credit",
-          "displayName" : "$20 Credit",
+          "description" : "Non-expiring pay-as-you-go VoiceType credits.",
+          "displayName" : "19,990,000 Credits",
           "locale" : "en_US"
         }
       ],
       "productID" : "com.kyleqi.voicetype.credits.large",
-      "referenceName" : "$20 Credit",
+      "referenceName" : "19,990,000 Credits",
       "type" : "Consumable"
     }
   ],

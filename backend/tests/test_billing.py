@@ -57,6 +57,8 @@ def test_per_user_ledger_and_storekit_replay_protection(tmp_path, monkeypatch):
         )
         assert dev_credit.status_code == 200, dev_credit.text
         assert dev_credit.json()["balance"]["balance_usd_micros"] == 1_000_000
+        assert dev_credit.json()["balance"]["balance_credit_units"] == 1_000_000
+        assert dev_credit.json()["balance"]["formatted"] == "1,000,000 credits"
 
         transaction = fake_jws(
             {
@@ -75,8 +77,10 @@ def test_per_user_ledger_and_storekit_replay_protection(tmp_path, monkeypatch):
             json={"signed_transaction": transaction},
         )
         assert purchase.status_code == 200, purchase.text
-        assert purchase.json()["granted_usd_micros"] == 1_000_000
-        assert purchase.json()["balance"]["balance_usd_micros"] == 2_000_000
+        assert purchase.json()["granted_usd_micros"] == 990_000
+        assert purchase.json()["granted_credit_units"] == 990_000
+        assert purchase.json()["balance"]["balance_usd_micros"] == 1_990_000
+        assert purchase.json()["balance"]["balance_credit_units"] == 1_990_000
 
         duplicate = client.post(
             "/v1/billing/storekit/transactions",
@@ -85,7 +89,8 @@ def test_per_user_ledger_and_storekit_replay_protection(tmp_path, monkeypatch):
         )
         assert duplicate.status_code == 200, duplicate.text
         assert duplicate.json()["already_processed"] is True
-        assert duplicate.json()["balance"]["balance_usd_micros"] == 2_000_000
+        assert duplicate.json()["granted_credit_units"] == 0
+        assert duplicate.json()["balance"]["balance_usd_micros"] == 1_990_000
 
         cross_user = client.post(
             "/v1/billing/storekit/transactions",
@@ -97,6 +102,26 @@ def test_per_user_ledger_and_storekit_replay_protection(tmp_path, monkeypatch):
         bob_me = client.get("/v1/me", headers=bob["headers"])
         assert bob_me.status_code == 200, bob_me.text
         assert bob_me.json()["balance"]["balance_usd_micros"] == 0
+
+
+def test_product_catalog_uses_paid_price_credit_units(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+
+    with TestClient(main.app) as client:
+        response = client.get("/v1/billing/products")
+
+    assert response.status_code == 200, response.text
+    products = {product["id"]: product for product in response.json()["products"]}
+
+    small = products["com.kyleqi.voicetype.credits.small"]
+    medium = products["com.kyleqi.voicetype.credits.medium"]
+    large = products["com.kyleqi.voicetype.credits.large"]
+
+    assert small["display_name"] == "990,000 credits"
+    assert small["credit_usd_micros"] == 990_000
+    assert small["credit_units"] == 990_000
+    assert medium["credit_units"] == 4_990_000
+    assert large["credit_units"] == 19_990_000
 
 
 def test_storekit_requires_app_account_token(tmp_path, monkeypatch):
@@ -156,6 +181,7 @@ def test_dev_credit_can_require_shared_secret(tmp_path, monkeypatch):
         )
         assert granted.status_code == 200, granted.text
         assert granted.json()["granted_usd_micros"] == 2_000_000
+        assert granted.json()["granted_credit_units"] == 2_000_000
 
 
 def test_default_retail_markup_covers_app_store_commission_and_profit(tmp_path, monkeypatch):
