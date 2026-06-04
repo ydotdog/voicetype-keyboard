@@ -13,7 +13,11 @@ struct VoiceTypeApp: App {
                 .onOpenURL { url in
                     guard url.scheme == AppConstants.appURLScheme else { return }
                     if url.host == "record" || url.path == "/record" {
-                        appState.isRecorderPresented = true
+                        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+                        let autoStart = components?.queryItems?.contains {
+                            $0.name == "autostart" && $0.value == "1"
+                        } ?? false
+                        appState.presentRecorder(autoStart: autoStart)
                     }
                 }
         }
@@ -23,4 +27,18 @@ struct VoiceTypeApp: App {
 @MainActor
 final class AppState: ObservableObject {
     @Published var isRecorderPresented = false
+    @Published private(set) var recorderRequestID = UUID()
+    private(set) var shouldAutoStartRecorder = false
+
+    func presentRecorder(autoStart: Bool) {
+        shouldAutoStartRecorder = autoStart
+        recorderRequestID = UUID()
+        isRecorderPresented = true
+    }
+
+    func consumeRecorderAutoStart() -> Bool {
+        let value = shouldAutoStartRecorder
+        shouldAutoStartRecorder = false
+        return value
+    }
 }

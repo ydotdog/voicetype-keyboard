@@ -43,6 +43,7 @@ final class AccountStore: ObservableObject {
             balanceText = "0 credits"
             balanceUSDMicros = 0
         }
+        SharedAccountStore.balanceText = balanceText
     }
 
     func signInWithApple(identityToken: String, email: String?, fullName: String?) async {
@@ -125,6 +126,7 @@ final class AccountStore: ObservableObject {
         balanceText = "5,000,000 credits"
         balanceUSDMicros = 5_000_000
         errorMessage = nil
+        SharedAccountStore.balanceText = balanceText
         KeychainStore.save(token, service: keychainService, account: tokenAccount)
         UserDefaults.standard.set(userID, forKey: userIDKey)
         UserDefaults.standard.set(email, forKey: emailKey)
@@ -139,6 +141,7 @@ final class AccountStore: ObservableObject {
         balanceUSDMicros += 5_000_000
         balanceText = Self.formatCredits(balanceUSDMicros)
         errorMessage = nil
+        SharedAccountStore.balanceText = balanceText
         KeychainStore.save(token, service: keychainService, account: tokenAccount)
         UserDefaults.standard.set(userID, forKey: userIDKey)
         UserDefaults.standard.set(email, forKey: emailKey)
@@ -147,6 +150,7 @@ final class AccountStore: ObservableObject {
     func apply(balance: BalancePayload) {
         balanceUSDMicros = balance.balanceUSDMicros
         balanceText = balance.formatted
+        SharedAccountStore.balanceText = balanceText
     }
 
     func signOut() {
@@ -155,6 +159,8 @@ final class AccountStore: ObservableObject {
         email = ""
         balanceText = "0 credits"
         balanceUSDMicros = 0
+        SharedAccountStore.balanceText = ""
+        KeyboardAutoInsertStore.clear()
         KeychainStore.delete(service: keychainService, account: tokenAccount)
         UserDefaults.standard.removeObject(forKey: userIDKey)
         UserDefaults.standard.removeObject(forKey: emailKey)

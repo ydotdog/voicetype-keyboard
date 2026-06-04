@@ -7,9 +7,12 @@
 3. The user buys a consumable StoreKit credit pack.
 4. The app purchases with `Product.PurchaseOption.appAccountToken`, using the backend user UUID.
 5. The backend verifies the StoreKit signed transaction, checks the product, checks the bundle id, checks `appAccountToken`, and writes a credit ledger entry.
-6. The app records audio and sends it to `/v1/transcriptions`.
-7. The backend checks the user's balance, calls OpenAI, calculates the model cost, writes the transcription row, and writes a debit ledger entry.
-8. The app stores the latest transcript in the App Group. The keyboard extension reads it and inserts it into the active text field.
+6. The keyboard mic opens the containing app with `voicetype://record?autostart=1`; the app presents the recorder and starts recording.
+7. While recording is active, the app publishes recording bridge state to the App Group and can continue under the audio background mode. The active recording uses the user's selected duration: 5 minutes, 12 hours, or Forever.
+8. If the user taps Stop from the keyboard, the extension writes a stop command to the App Group and the recording app consumes it.
+9. The app records audio and sends it to `/v1/transcriptions`.
+10. The backend checks the user's balance, calls OpenAI, calculates the model cost, writes the transcription row, and writes a debit ledger entry.
+11. The app stores the latest transcript in the App Group. The keyboard extension reads it and inserts it into the active text field.
 
 ## User Accounting
 
@@ -28,7 +31,7 @@ User separation is enforced by:
 
 ## Credit Policy
 
-Credits do not expire. Credit amounts are retail USD balances, stored in USD micros. The ledger model records balance as the sum of immutable entries rather than a mutable number on the user row, so audits and refunds are straightforward.
+Credits do not expire. Credits are integer units, currently scaled as `1 USD = 1,000,000 credits`. The existing ledger column names retain `usd_micros` for compatibility, but API payloads expose credit-unit fields and user-facing UI displays credits. The ledger model records balance as the sum of immutable entries rather than a mutable number on the user row, so audits and refunds are straightforward.
 
 Transcription debits start from raw OpenAI model cost and apply `COST_MARKUP_BPS`. The production default assumes the standard App Store commission and a 20% target profit margin:
 
@@ -88,4 +91,4 @@ Scale-up path:
 
 ## Keyboard Constraints
 
-iOS custom keyboard extensions cannot use the microphone directly. VoiceType records in the containing app, then shares the completed transcript through the App Group. The keyboard asks the user to enable Full Access so it can read the shared container.
+iOS custom keyboard extensions cannot use the microphone directly or keep the containing app permanently resident in the background. VoiceType's keyboard mic opens the containing app into an auto-start recorder. During an active recording, the app uses the audio background mode and watches the App Group bridge for a keyboard stop command. Users can set active recordings to run for 5 minutes, for 12 hours, or forever until stopped. The keyboard asks the user to enable Full Access so it can read the shared container.

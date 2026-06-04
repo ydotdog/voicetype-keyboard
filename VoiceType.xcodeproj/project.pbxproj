@@ -8,12 +8,16 @@
 
 /* Begin PBXBuildFile section */
 		1DFC99E7A0D7D0AC5BC73A5A /* VoiceTypeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 602EAA3D00D683EEA5A50094 /* VoiceTypeApp.swift */; };
+		3218E7498F597D2A2DF4C899 /* RecordingPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C8BD93EBD9F56D128832098 /* RecordingPreferences.swift */; };
 		3A1F3FF1D36614A5EF6F535C /* SharedTranscriptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8F4AD47F05595247E23F21D /* SharedTranscriptStore.swift */; };
 		41F0582CC5B5C7B406855D03 /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66790ACA8CA6CAF9B0F71DE7 /* APIModels.swift */; };
+		502EFDC14FEFD8F8E64BA57A /* SharedAccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43D15ADDBAE32AD6CD904879 /* SharedAccountStore.swift */; };
 		57D3E35305C39026EBD6F782 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1278A65EC6455C886DEF798 /* AccountStore.swift */; };
 		614FB202309F1A996B56DF9D /* KeyboardViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B5A4DDC9C9E54B857D22CF9 /* KeyboardViewController.swift */; };
 		655F44FA771F48A8E184970C /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2735DB3CCADC0A8DD671ABF7 /* KeychainStore.swift */; };
+		67786FC486E07F95FD0A1E6F /* RecordingPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C8BD93EBD9F56D128832098 /* RecordingPreferences.swift */; };
 		6BEBD10B49C84F9054DD911C /* KeyboardRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F96B81D021C56427B8144C8 /* KeyboardRootView.swift */; };
+		6C684276D5D343B9E630FF83 /* RecordingBridgeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEE0A2CE8129DA11DB8761E2 /* RecordingBridgeStore.swift */; };
 		783AD5DDCA37DE660D35DC30 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE625B147986589D6AA872DD /* AppTheme.swift */; };
 		7893A27D21948DC61FAB9784 /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66790ACA8CA6CAF9B0F71DE7 /* APIModels.swift */; };
 		7E55C701AC87C9B10C5427CB /* AppConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8391ABDC935CC6701BE3282B /* AppConstants.swift */; };
@@ -22,7 +26,9 @@
 		B2973B5185EF8FD257AB4001 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 8EB855351EB24778695B1930 /* LaunchScreen.storyboard */; };
 		DA52E77CEC1771094A80F4C3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C313B410B133BB014584577E /* Assets.xcassets */; };
 		DCD7F2C2FBE1CAC99542A3F5 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A38A71FE30A70BD7E45C043 /* DashboardView.swift */; };
+		DFCB886077333B67AEAAA727 /* RecordingBridgeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEE0A2CE8129DA11DB8761E2 /* RecordingBridgeStore.swift */; };
 		E2D610D1927A14B60800E419 /* StoreKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5458544B9AC5E80B66CEE5EF /* StoreKitService.swift */; };
+		F07B5D32063597E2D2F89300 /* SharedAccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43D15ADDBAE32AD6CD904879 /* SharedAccountStore.swift */; };
 		F692E64B85CE2DC24A34CC65 /* SharedTranscriptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8F4AD47F05595247E23F21D /* SharedTranscriptStore.swift */; };
 		F887E25AEA7A2587231948A7 /* AppConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8391ABDC935CC6701BE3282B /* AppConstants.swift */; };
 		F897AFC47AD3CF298B5E0F78 /* VoiceTypeKeyboard.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C3E3EEAFA87EE1CCAAAF85C3 /* VoiceTypeKeyboard.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -57,6 +63,7 @@
 		0F96B81D021C56427B8144C8 /* KeyboardRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardRootView.swift; sourceTree = "<group>"; };
 		1A38A71FE30A70BD7E45C043 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		2735DB3CCADC0A8DD671ABF7 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
+		43D15ADDBAE32AD6CD904879 /* SharedAccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedAccountStore.swift; sourceTree = "<group>"; };
 		4B5A4DDC9C9E54B857D22CF9 /* KeyboardViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardViewController.swift; sourceTree = "<group>"; };
 		5458544B9AC5E80B66CEE5EF /* StoreKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitService.swift; sourceTree = "<group>"; };
 		602EAA3D00D683EEA5A50094 /* VoiceTypeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTypeApp.swift; sourceTree = "<group>"; };
@@ -66,10 +73,12 @@
 		837187363F5CCAD765471989 /* VoiceType.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = VoiceType.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8391ABDC935CC6701BE3282B /* AppConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConstants.swift; sourceTree = "<group>"; };
 		8EB855351EB24778695B1930 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		9C8BD93EBD9F56D128832098 /* RecordingPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingPreferences.swift; sourceTree = "<group>"; };
 		A25ACBF6F3F27D3B4905158B /* VoiceType.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = VoiceType.entitlements; sourceTree = "<group>"; };
 		C313B410B133BB014584577E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C3E3EEAFA87EE1CCAAAF85C3 /* VoiceTypeKeyboard.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = VoiceTypeKeyboard.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		D1278A65EC6455C886DEF798 /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
+		DEE0A2CE8129DA11DB8761E2 /* RecordingBridgeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingBridgeStore.swift; sourceTree = "<group>"; };
 		E659CD58760B905C4E8FD9A1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		E8F4AD47F05595247E23F21D /* SharedTranscriptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedTranscriptStore.swift; sourceTree = "<group>"; };
 		EE625B147986589D6AA872DD /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
@@ -155,6 +164,9 @@
 			children = (
 				66790ACA8CA6CAF9B0F71DE7 /* APIModels.swift */,
 				8391ABDC935CC6701BE3282B /* AppConstants.swift */,
+				DEE0A2CE8129DA11DB8761E2 /* RecordingBridgeStore.swift */,
+				9C8BD93EBD9F56D128832098 /* RecordingPreferences.swift */,
+				43D15ADDBAE32AD6CD904879 /* SharedAccountStore.swift */,
 				E8F4AD47F05595247E23F21D /* SharedTranscriptStore.swift */,
 			);
 			path = Shared;
@@ -260,6 +272,9 @@
 				7E55C701AC87C9B10C5427CB /* AppConstants.swift in Sources */,
 				6BEBD10B49C84F9054DD911C /* KeyboardRootView.swift in Sources */,
 				614FB202309F1A996B56DF9D /* KeyboardViewController.swift in Sources */,
+				6C684276D5D343B9E630FF83 /* RecordingBridgeStore.swift in Sources */,
+				3218E7498F597D2A2DF4C899 /* RecordingPreferences.swift in Sources */,
+				F07B5D32063597E2D2F89300 /* SharedAccountStore.swift in Sources */,
 				F692E64B85CE2DC24A34CC65 /* SharedTranscriptStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -275,7 +290,10 @@
 				8F93EC73F7C030FF210B0BC1 /* BackendClient.swift in Sources */,
 				DCD7F2C2FBE1CAC99542A3F5 /* DashboardView.swift in Sources */,
 				655F44FA771F48A8E184970C /* KeychainStore.swift in Sources */,
+				DFCB886077333B67AEAAA727 /* RecordingBridgeStore.swift in Sources */,
 				9F08C4C50438E6D1E17A254F /* RecordingController.swift in Sources */,
+				67786FC486E07F95FD0A1E6F /* RecordingPreferences.swift in Sources */,
+				502EFDC14FEFD8F8E64BA57A /* SharedAccountStore.swift in Sources */,
 				3A1F3FF1D36614A5EF6F535C /* SharedTranscriptStore.swift in Sources */,
 				E2D610D1927A14B60800E419 /* StoreKitService.swift in Sources */,
 				1DFC99E7A0D7D0AC5BC73A5A /* VoiceTypeApp.swift in Sources */,

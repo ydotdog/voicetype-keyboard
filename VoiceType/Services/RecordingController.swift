@@ -1,18 +1,29 @@
 import AVFoundation
 import Foundation
+import UIKit
 
 @MainActor
-final class RecordingController: NSObject, ObservableObject {
+final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDelegate {
     @Published private(set) var isRecording = false
     @Published private(set) var isProcessing = false
     @Published private(set) var elapsedSeconds: TimeInterval = 0
     @Published private(set) var lastTranscript = SharedTranscriptStore.latest
+    @Published var durationLimit = RecordingPreferencesStore.durationLimit {
+        didSet {
+            RecordingPreferencesStore.durationLimit = durationLimit
+        }
+    }
     @Published var errorMessage: String?
 
     private var recorder: AVAudioRecorder?
     private var timer: Timer?
     private var startedAt: Date?
     private var currentFileURL: URL?
+    private weak var activeAccount: AccountStore?
+    private var activeSessionID = ""
+    private var activeDurationLimit = RecordingPreferencesStore.durationLimit
+    private var handledCommandID: String?
+    private var isStopping = false
 
     var statusText: String {
         if isRecording {
@@ -28,7 +39,7 @@ final class RecordingController: NSObject, ObservableObject {
         lastTranscript = SharedTranscriptStore.latest
     }
 
-    func startRecording() async {
+    func startRecording(account: AccountStore) async {
         guard !isRecording, !isProcessing else { return }
         errorMessage = nil
 
@@ -55,37 +66,68 @@ final class RecordingController: NSObject, ObservableObject {
 
             let audioRecorder = try AVAudioRecorder(url: fileURL, settings: settings)
             audioRecorder.isMeteringEnabled = true
-            guard audioRecorder.record() else {
+            audioRecorder.delegate = self
+            let didStartRecording: Bool
+            if let maximumDuration = durationLimit.maximumDuration {
+                didStartRecording = audioRecorder.record(forDuration: maximumDuration)
+            } else {
+                didStartRecording = audioRecorder.record()
+            }
+            guard didStartRecording else {
                 try? FileManager.default.removeItem(at: fileURL)
                 throw RecorderError.failedToStart
             }
 
             recorder = audioRecorder
             currentFileURL = fileURL
-            startedAt = Date()
+            let startedAt = Date()
+            self.startedAt = startedAt
+            activeAccount = account
+            activeSessionID = UUID().uuidString
+            activeDurationLimit = durationLimit
+            handledCommandID = RecordingBridgeStore.latestCommand?.id
             elapsedSeconds = 0
             isRecording = true
+            RecordingBridgeStore.state = RecordingBridgeState(
+                sessionID: activeSessionID,
+                isRecording: true,
+                startedAt: startedAt,
+                durationLimit: activeDurationLimit
+            )
             startTimer()
         } catch {
+            RecordingBridgeStore.state = .inactive
+            KeyboardAutoInsertStore.clear()
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             errorMessage = error.localizedDescription
         }
     }
 
     func stopAndTranscribe(account: AccountStore) async {
-        guard isRecording, let fileURL = currentFileURL, let startedAt else { return }
+        guard isRecording, !isStopping, let fileURL = currentFileURL, let startedAt else { return }
+        isStopping = true
+        let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "VoiceTypeTranscription")
         recorder?.stop()
         recorder = nil
         isRecording = false
         isProcessing = true
         stopTimer()
+        RecordingBridgeStore.state = .inactive
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
 
         let duration = Date().timeIntervalSince(startedAt)
         defer {
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+            }
             try? FileManager.default.removeItem(at: fileURL)
             currentFileURL = nil
             self.startedAt = nil
+            activeAccount = nil
+            activeSessionID = ""
+            activeDurationLimit = durationLimit
+            handledCommandID = nil
+            isStopping = false
             elapsedSeconds = 0
             isProcessing = false
         }
@@ -116,23 +158,43 @@ final class RecordingController: NSObject, ObservableObject {
             lastTranscript = snapshot
             account.apply(balance: response.balance)
         } catch {
+            KeyboardAutoInsertStore.clear()
             errorMessage = error.localizedDescription
         }
     }
 
     func cancel() {
         guard isRecording else { return }
+        isStopping = true
         recorder?.stop()
         recorder = nil
         isRecording = false
         stopTimer()
+        RecordingBridgeStore.state = .inactive
+        KeyboardAutoInsertStore.clear()
         if let currentFileURL {
             try? FileManager.default.removeItem(at: currentFileURL)
         }
         currentFileURL = nil
         startedAt = nil
+        activeAccount = nil
+        activeSessionID = ""
+        activeDurationLimit = durationLimit
+        handledCommandID = nil
+        isStopping = false
         elapsedSeconds = 0
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    nonisolated func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
+        Task { @MainActor in
+            guard self.isRecording, !self.isStopping, self.recorder === recorder else { return }
+            guard flag, let activeAccount = self.activeAccount else {
+                self.cancel()
+                return
+            }
+            await self.stopAndTranscribe(account: activeAccount)
+        }
     }
 
     private func requestMicrophonePermission() async -> Bool {
@@ -155,6 +217,8 @@ final class RecordingController: NSObject, ObservableObject {
             Task { @MainActor in
                 guard let self, let startedAt = self.startedAt else { return }
                 self.elapsedSeconds = Date().timeIntervalSince(startedAt)
+                await self.stopIfDurationLimitReached()
+                await self.handleBridgeCommandIfNeeded()
             }
         }
     }
@@ -170,6 +234,36 @@ final class RecordingController: NSObject, ObservableObject {
         formatter.zeroFormattingBehavior = .pad
         return formatter
     }()
+
+    private func handleBridgeCommandIfNeeded() async {
+        guard
+            isRecording,
+            let command = RecordingBridgeStore.latestCommand,
+            command.id != handledCommandID
+        else {
+            return
+        }
+
+        handledCommandID = command.id
+        switch command.action {
+        case .stop:
+            RecordingBridgeStore.clearCommand(id: command.id)
+            guard let activeAccount else { return }
+            await stopAndTranscribe(account: activeAccount)
+        }
+    }
+
+    private func stopIfDurationLimitReached() async {
+        guard
+            isRecording,
+            let maximumDuration = activeDurationLimit.maximumDuration,
+            elapsedSeconds >= maximumDuration,
+            let activeAccount
+        else {
+            return
+        }
+        await stopAndTranscribe(account: activeAccount)
+    }
 }
 
 enum RecorderError: LocalizedError {

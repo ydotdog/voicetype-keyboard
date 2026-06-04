@@ -1,12 +1,12 @@
 # VoiceType Keyboard
 
-VoiceType is a pay-as-you-go iOS speech-to-text keyboard. The containing app owns recording, Sign in with Apple, StoreKit credit packs, and secure backend calls. The keyboard extension stays focused: it inserts the latest transcript from the shared App Group and opens the app when the user wants to record again.
+VoiceType is a pay-as-you-go iOS speech-to-text keyboard. The containing app owns recording, Sign in with Apple, StoreKit credit packs, and secure backend calls. The keyboard extension opens the app into recording when the user taps the keyboard mic, can send a stop command while recording is active, and inserts the latest transcript from the shared App Group.
 
 ## Product Model
 
 - No subscription.
 - Users buy consumable credit packs through StoreKit.
-- Credits are stored server-side in retail USD micros and do not expire.
+- Credits are non-expiring integer units. The current scale is `1 USD = 1,000,000 credits`.
 - Every credit/debit is written to a per-user immutable ledger.
 - The OpenAI API key is held by the backend only.
 - Transcription debits apply the configured retail markup to raw OpenAI model cost.
@@ -72,15 +72,15 @@ Build settings:
 - App Group: `group.com.kyleqi.voicetype`.
 - Bundle IDs: `com.kyleqi.voicetype` and `com.kyleqi.voicetype.keyboard`.
 
-The keyboard extension requests Full Access because it needs to read the latest transcript from the shared App Group container.
+The keyboard extension requests Full Access because it needs to read the latest transcript and recording bridge state from the shared App Group container. iOS custom keyboard extensions cannot access the microphone directly, so the keyboard mic opens the containing app and asks it to start recording. During an active recording, the containing app can continue under the audio background mode, and the keyboard can send a stop command through the shared bridge. Users can choose a recording duration of 5 minutes, 12 hours, or Forever.
 
 ## App Store Products
 
 Create consumable In-App Purchase products matching:
 
-- `com.kyleqi.voicetype.credits.small`: `$1 Credit`, USD 1.00
-- `com.kyleqi.voicetype.credits.medium`: `$5 Credit`, USD 5.00
-- `com.kyleqi.voicetype.credits.large`: `$20 Credit`, USD 20.00
+- `com.kyleqi.voicetype.credits.small`: `990,000 Credits`, USD 0.99
+- `com.kyleqi.voicetype.credits.medium`: `4,990,000 Credits`, USD 4.99
+- `com.kyleqi.voicetype.credits.large`: `19,990,000 Credits`, USD 19.99
 
 Keep the backend product catalog in sync through `CREDIT_PRODUCTS_JSON` if prices or pack sizes change.
 

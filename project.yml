@@ -44,6 +44,8 @@ targets:
         VoiceTypeAppGroup: $(VOICETYPE_APP_GROUP)
         UILaunchStoryboardName: LaunchScreen
         UIRequiresFullScreen: true
+        UIBackgroundModes:
+          - audio
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         UIApplicationSceneManifest:
