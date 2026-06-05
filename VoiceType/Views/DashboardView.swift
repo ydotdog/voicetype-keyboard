@@ -915,7 +915,7 @@ private struct SettingsScreen: View {
             }
             .buttonStyle(PlainHapticButtonStyle())
 
-            Text("VoiceType · v0.1")
+            Text("VoiceType · v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1")")
                 .font(.system(size: 11.5, weight: .medium))
                 .foregroundStyle(AppTheme.secondary)
                 .frame(maxWidth: .infinity)

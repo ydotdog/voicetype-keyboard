@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+import logging
 import math
 import os
+import re
 import sqlite3
+import time
 import uuid
-from contextlib import contextmanager
+from collections import deque
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Optional
 
 import httpx
 import jwt
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from jwt import PyJWKClient
 from pydantic import BaseModel, Field
@@ -81,6 +86,20 @@ def default_cost_markup_bps() -> int:
 
 DEFAULT_COST_MARKUP_BPS = default_cost_markup_bps()
 COST_MARKUP_BPS = int(os.getenv("COST_MARKUP_BPS", str(DEFAULT_COST_MARKUP_BPS)))
+MIN_TRANSCRIPTION_RESERVATION_USD_MICROS = int(os.getenv("MIN_TRANSCRIPTION_RESERVATION_USD_MICROS", "20000"))
+AUDIO_BYTES_PER_SECOND_FLOOR = max(1, int(os.getenv("AUDIO_BYTES_PER_SECOND_FLOOR", "2500")))
+CREDIT_RESERVATION_TTL_SECONDS = int(os.getenv("CREDIT_RESERVATION_TTL_SECONDS", "1800"))
+
+RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() in {"1", "true", "yes"}
+RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
+AUTH_RATE_LIMIT_PER_WINDOW = int(os.getenv("AUTH_RATE_LIMIT_PER_WINDOW", "20"))
+TRANSCRIPTION_RATE_LIMIT_PER_WINDOW = int(os.getenv("TRANSCRIPTION_RATE_LIMIT_PER_WINDOW", "30"))
+BILLING_RATE_LIMIT_PER_WINDOW = int(os.getenv("BILLING_RATE_LIMIT_PER_WINDOW", "60"))
+
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
+logger = logging.getLogger("voicetype.api")
+_rate_limit_hits: dict[str, deque[float]] = {}
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 DEFAULT_PRODUCTS = [
@@ -125,9 +144,50 @@ MODEL_PRICING = {
 }
 
 
-app = FastAPI(title="VoiceType API", version="0.2.0")
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> Any:
+    on_startup()
+    try:
+        yield
+    finally:
+        on_shutdown()
+
+
+app = FastAPI(title="VoiceType API", version="0.2.0", lifespan=lifespan)
 apple_jwks = PyJWKClient(APPLE_JWKS_URL)
 pg_pool: Optional[Any] = None
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next: Any) -> Any:
+    rate_limit = rate_limit_for_path(request.url.path)
+    if RATE_LIMIT_ENABLED and rate_limit:
+        allowed, retry_after = check_rate_limit(request, limit=rate_limit, window_seconds=RATE_LIMIT_WINDOW_SECONDS)
+        if not allowed:
+            logger.warning("rate_limit_exceeded", extra={"path": request.url.path, "retry_after": retry_after})
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests. Try again shortly."},
+                headers={"Retry-After": str(retry_after)},
+            )
+
+    started = time.monotonic()
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception("request_failed", extra={"path": request.url.path})
+        raise
+
+    if response.status_code >= 400 and request.url.path.startswith("/v1/"):
+        logger.warning(
+            "request_error_response",
+            extra={
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "duration_ms": round((time.monotonic() - started) * 1000, 2),
+            },
+        )
+    return response
 
 
 class AppleAuthRequest(BaseModel):
@@ -247,12 +307,59 @@ def sql(query: str) -> str:
     return query.replace("?", "%s") if is_postgres() else query
 
 
+def quote_identifier(identifier: str) -> str:
+    if not _IDENTIFIER_RE.match(identifier):
+        raise RuntimeError(f"Unsafe SQL identifier: {identifier}")
+    return f'"{identifier}"'
+
+
 def row_to_dict(row: Any) -> dict[str, Any]:
     return dict(row) if row is not None else {}
 
 
 def execute(conn: Any, query: str, params: tuple[Any, ...] = ()) -> Any:
     return conn.execute(sql(query), params)
+
+
+def rate_limit_for_path(path: str) -> Optional[int]:
+    if path == "/v1/auth/apple":
+        return AUTH_RATE_LIMIT_PER_WINDOW
+    if path == "/v1/transcriptions":
+        return TRANSCRIPTION_RATE_LIMIT_PER_WINDOW
+    if path.startswith("/v1/billing/"):
+        return BILLING_RATE_LIMIT_PER_WINDOW
+    return None
+
+
+def rate_limit_identity(request: Request) -> str:
+    authorization = request.headers.get("authorization", "")
+    if authorization.startswith("Bearer "):
+        digest = hashlib.sha256(authorization.encode("utf-8")).hexdigest()[:20]
+        return f"token:{digest}"
+    return f"ip:{client_ip_for_rate_limit(request)}"
+
+
+def client_ip_for_rate_limit(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip() or "unknown"
+    real_ip = request.headers.get("x-real-ip", "").strip()
+    if real_ip:
+        return real_ip
+    return request.client.host if request.client else "unknown"
+
+
+def check_rate_limit(request: Request, *, limit: int, window_seconds: int) -> tuple[bool, int]:
+    now = time.monotonic()
+    key = f"{request.url.path}:{rate_limit_identity(request)}"
+    hits = _rate_limit_hits.setdefault(key, deque())
+    while hits and now - hits[0] >= window_seconds:
+        hits.popleft()
+    if len(hits) >= limit:
+        retry_after = max(1, math.ceil(window_seconds - (now - hits[0])))
+        return False, retry_after
+    hits.append(now)
+    return True, 0
 
 
 def column_exists(conn: Any, table: str, column: str) -> bool:
@@ -269,13 +376,13 @@ def column_exists(conn: Any, table: str, column: str) -> bool:
         ).fetchone()
         return row is not None
 
-    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    rows = conn.execute(f"PRAGMA table_info({quote_identifier(table)})").fetchall()
     return any(row_to_dict(row).get("name") == column for row in rows)
 
 
 def add_column_if_missing(conn: Any, table: str, column: str, definition: str) -> None:
     if not column_exists(conn, table, column):
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        conn.execute(f"ALTER TABLE {quote_identifier(table)} ADD COLUMN {quote_identifier(column)} {definition}")
 
 
 def ensure_schema_migrations(conn: Any) -> None:
@@ -294,6 +401,7 @@ def ensure_schema_migrations(conn: Any) -> None:
     add_column_if_missing(conn, "transcriptions", "pricing_basis", "TEXT NOT NULL DEFAULT 'duration_estimate'")
 
     conn.execute("CREATE INDEX IF NOT EXISTS credit_ledger_user_created_idx ON credit_ledger(user_id, created_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS credit_reservations_user_created_idx ON credit_reservations(user_id, created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS transcriptions_user_created_idx ON transcriptions(user_id, created_at DESC)")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS credit_ledger_source_id_unique_idx ON credit_ledger(source_id) WHERE source_id IS NOT NULL")
 
@@ -352,6 +460,17 @@ def init_db() -> None:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS credit_reservations (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    amount_usd_micros BIGINT NOT NULL,
+                    kind TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS storekit_transactions (
                     transaction_id TEXT PRIMARY KEY,
                     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -404,6 +523,13 @@ def init_db() -> None:
                 source_id TEXT UNIQUE,
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS credit_reservations (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                amount_usd_micros INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS storekit_transactions (
                 transaction_id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -432,17 +558,28 @@ def init_db() -> None:
         ensure_schema_migrations(conn)
 
 
-@app.on_event("startup")
 def on_startup() -> None:
     global pg_pool
     if is_postgres():
         if ConnectionPool is None:
             raise RuntimeError("psycopg[binary,pool] is required when DATABASE_URL is Postgres.")
-        pg_pool = ConnectionPool(DATABASE_URL, kwargs={"row_factory": dict_row}, min_size=1, max_size=int(os.getenv("DATABASE_POOL_MAX_SIZE", "10")))
+        pg_pool = ConnectionPool(
+            DATABASE_URL,
+            kwargs={"row_factory": dict_row},
+            min_size=1,
+            max_size=int(os.getenv("DATABASE_POOL_MAX_SIZE", "10")),
+        )
     init_db()
+    logger.info(
+        "startup_complete",
+        extra={
+            "database": "postgres" if is_postgres() else "sqlite-local",
+            "rate_limit_enabled": RATE_LIMIT_ENABLED,
+            "reservation_ttl_seconds": CREDIT_RESERVATION_TTL_SECONDS,
+        },
+    )
 
 
-@app.on_event("shutdown")
 def on_shutdown() -> None:
     if pg_pool is not None:
         pg_pool.close()
@@ -494,7 +631,12 @@ def lock_user(conn: Any, user_id: str) -> None:
         execute(conn, "SELECT id FROM users WHERE id = ? FOR UPDATE", (user_id,)).fetchone()
 
 
-def balance_for_user(conn: Any, user_id: str) -> int:
+def clear_expired_credit_reservations(conn: Any) -> None:
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=CREDIT_RESERVATION_TTL_SECONDS)
+    execute(conn, "DELETE FROM credit_reservations WHERE created_at < ?", (cutoff.isoformat(),))
+
+
+def ledger_balance_for_user(conn: Any, user_id: str) -> int:
     row = execute(
         conn,
         "SELECT COALESCE(SUM(amount_usd_micros), 0) AS balance FROM credit_ledger WHERE user_id = ?",
@@ -502,6 +644,21 @@ def balance_for_user(conn: Any, user_id: str) -> int:
     ).fetchone()
     value = row_to_dict(row).get("balance", 0) if row else 0
     return int(value or 0)
+
+
+def reserved_balance_for_user(conn: Any, user_id: str) -> int:
+    row = execute(
+        conn,
+        "SELECT COALESCE(SUM(amount_usd_micros), 0) AS reserved FROM credit_reservations WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()
+    value = row_to_dict(row).get("reserved", 0) if row else 0
+    return int(value or 0)
+
+
+def balance_for_user(conn: Any, user_id: str) -> int:
+    clear_expired_credit_reservations(conn)
+    return ledger_balance_for_user(conn, user_id) - reserved_balance_for_user(conn, user_id)
 
 
 def balance_payload(balance: int) -> BalancePayload:
@@ -529,6 +686,28 @@ def insert_ledger(
         """,
         (str(uuid.uuid4()), user_id, amount_usd_micros, kind, description, source_id, utc_now()),
     )
+
+
+def reserve_credit(conn: Any, *, user_id: str, amount_usd_micros: int, kind: str) -> str:
+    lock_user(conn, user_id)
+    clear_expired_credit_reservations(conn)
+    balance = balance_for_user(conn, user_id)
+    if balance < amount_usd_micros:
+        raise HTTPException(status_code=402, detail=f"Insufficient credit. Need at least {format_credits(amount_usd_micros)}.")
+    reservation_id = str(uuid.uuid4())
+    execute(
+        conn,
+        """
+        INSERT INTO credit_reservations (id, user_id, amount_usd_micros, kind, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (reservation_id, user_id, amount_usd_micros, kind, utc_now()),
+    )
+    return reservation_id
+
+
+def release_credit_reservation(conn: Any, *, reservation_id: str, user_id: str) -> None:
+    execute(conn, "DELETE FROM credit_reservations WHERE id = ? AND user_id = ?", (reservation_id, user_id))
 
 
 def verify_apple_identity_token(identity_token: str) -> dict[str, Any]:
@@ -705,6 +884,12 @@ def estimate_preflight_cost(model: str, audio_seconds: float) -> int:
     return max(cost, 1)
 
 
+def estimate_reservation_cost(model: str, audio_seconds: float, audio_bytes: int) -> int:
+    inferred_seconds = max(audio_seconds, audio_bytes / AUDIO_BYTES_PER_SECOND_FLOOR)
+    estimated = estimate_preflight_cost(model, inferred_seconds)
+    return max(estimated, MIN_TRANSCRIPTION_RESERVATION_USD_MICROS)
+
+
 async def transcribe_audio(audio: bytes, filename: str, content_type: Optional[str], model: str, language: Optional[str]) -> dict[str, Any]:
     require_openai_key()
     headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
@@ -835,6 +1020,7 @@ def storekit_transaction(
             existing_user_id = row_to_dict(existing)["user_id"]
             if existing_user_id != user["id"]:
                 raise HTTPException(status_code=409, detail="Transaction was already processed for another user.")
+            logger.info("storekit_replay_ignored", extra={"user_id": user["id"], "transaction_id": transaction_id})
             return PurchaseCreditResponse(
                 balance=balance_payload(balance_for_user(conn, user["id"])),
                 granted_usd_micros=0,
@@ -870,6 +1056,10 @@ def storekit_transaction(
         )
         balance = balance_for_user(conn, user["id"])
 
+    logger.info(
+        "storekit_credit_granted",
+        extra={"user_id": user["id"], "transaction_id": transaction_id, "product_id": product_id, "credit_usd_micros": credit},
+    )
     return PurchaseCreditResponse(
         balance=balance_payload(balance),
         granted_usd_micros=credit,
@@ -901,6 +1091,7 @@ def grant_dev_credit(
             source_id=f"dev:{uuid.uuid4()}",
         )
         balance = balance_for_user(conn, user["id"])
+    logger.info("dev_credit_granted", extra={"user_id": user["id"], "amount_usd_micros": request.amount_usd_micros})
     return PurchaseCreditResponse(
         balance=balance_payload(balance),
         granted_usd_micros=request.amount_usd_micros,
@@ -924,14 +1115,23 @@ async def create_transcription(
     if len(audio) > MAX_AUDIO_BYTES:
         raise HTTPException(status_code=413, detail=f"Audio file exceeds {MAX_AUDIO_BYTES} bytes.")
 
-    preflight_cost = estimate_preflight_cost(selected_model, audio_seconds)
+    reservation_cost = estimate_reservation_cost(selected_model, audio_seconds, len(audio))
+    transcription_id = str(uuid.uuid4())
     with db() as conn:
-        lock_user(conn, user["id"])
-        balance = balance_for_user(conn, user["id"])
-        if balance < preflight_cost:
-            raise HTTPException(status_code=402, detail=f"Insufficient credit. Need at least {format_credits(preflight_cost)}.")
+        reservation_id = reserve_credit(
+            conn,
+            user_id=user["id"],
+            amount_usd_micros=reservation_cost,
+            kind="transcription",
+        )
 
-    payload = await transcribe_audio(audio, file.filename or "recording.m4a", file.content_type, selected_model, language)
+    try:
+        payload = await transcribe_audio(audio, file.filename or "recording.m4a", file.content_type, selected_model, language)
+    except Exception:
+        with db() as conn:
+            release_credit_reservation(conn, reservation_id=reservation_id, user_id=user["id"])
+        logger.exception("transcription_provider_failed", extra={"user_id": user["id"], "model": selected_model})
+        raise
     transcript = payload["text"].strip()
     input_tokens, output_tokens = extract_usage(payload)
     cost, pricing_basis, charged_input, charged_output = calculate_cost(
@@ -942,12 +1142,23 @@ async def create_transcription(
         output_tokens=output_tokens,
     )
 
-    transcription_id = str(uuid.uuid4())
+    charged_cost = cost
     with db() as conn:
         lock_user(conn, user["id"])
-        balance = balance_for_user(conn, user["id"])
-        if balance < cost:
-            raise HTTPException(status_code=402, detail=f"Insufficient credit after final usage calculation. Need {format_credits(cost)}.")
+        extra_cost = max(0, cost - reservation_cost)
+        available_balance = balance_for_user(conn, user["id"])
+        if extra_cost > available_balance:
+            charged_cost = reservation_cost + max(0, available_balance)
+            logger.warning(
+                "transcription_charge_capped_by_available_balance",
+                extra={
+                    "user_id": user["id"],
+                    "model": selected_model,
+                    "estimated_cost": reservation_cost,
+                    "calculated_cost": cost,
+                    "charged_cost": charged_cost,
+                },
+            )
         execute(
             conn,
             """
@@ -965,7 +1176,7 @@ async def create_transcription(
                 transcript,
                 charged_input,
                 charged_output,
-                cost,
+                charged_cost,
                 pricing_basis,
                 utc_now(),
             ),
@@ -973,22 +1184,32 @@ async def create_transcription(
         insert_ledger(
             conn,
             user_id=user["id"],
-            amount_usd_micros=-cost,
+            amount_usd_micros=-charged_cost,
             kind="transcription",
             description=f"{selected_model} transcription",
             source_id=f"transcription:{transcription_id}",
         )
+        release_credit_reservation(conn, reservation_id=reservation_id, user_id=user["id"])
         balance = balance_for_user(conn, user["id"])
 
+    logger.info(
+        "transcription_completed",
+        extra={
+            "user_id": user["id"],
+            "model": selected_model,
+            "cost_usd_micros": charged_cost,
+            "pricing_basis": pricing_basis,
+        },
+    )
     return JSONResponse(
         TranscriptionResponse(
             id=transcription_id,
             transcript=transcript,
             model=selected_model,
             charge=ChargePayload(
-                cost_usd_micros=cost,
-                cost_credit_units=credit_units_from_usd_micros(cost),
-                formatted=format_credits(cost),
+                cost_usd_micros=charged_cost,
+                cost_credit_units=credit_units_from_usd_micros(charged_cost),
+                formatted=format_credits(charged_cost),
                 pricing_basis=pricing_basis,
             ),
             balance=balance_payload(balance),

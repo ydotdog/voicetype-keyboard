@@ -414,9 +414,8 @@ final class KeyboardViewController: UIInputViewController {
         }
         clearResolvedPendingAction()
         updateUI()
-        guard !viewModel.isRecording, KeyboardAutoInsertStore.shouldInsert(viewModel.snapshot) else { return }
+        guard !viewModel.isRecording, KeyboardAutoInsertStore.claimForInsert(viewModel.snapshot) else { return }
         textDocumentProxy.insertText(viewModel.snapshot.text)
-        KeyboardAutoInsertStore.clear()
     }
 
     private func updateUI() {

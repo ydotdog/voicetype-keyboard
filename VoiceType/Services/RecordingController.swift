@@ -487,7 +487,6 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         isStopping = true
         recorder.stop()
         self.recorder = nil
-        isStopping = false
         isProcessing = true
         bridgeMode = .transcribing
         publishBridgeState()
@@ -495,6 +494,11 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         let clipURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("voicetype-clip-\(UUID().uuidString)")
             .appendingPathExtension("m4a")
+        defer {
+            isStopping = false
+            try? FileManager.default.removeItem(at: sourceURL)
+            try? FileManager.default.removeItem(at: clipURL)
+        }
 
         do {
             try restartKeyboardReadyRecorder()
@@ -525,9 +529,6 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
                 publishBridgeState()
             }
         }
-
-        try? FileManager.default.removeItem(at: sourceURL)
-        try? FileManager.default.removeItem(at: clipURL)
     }
 
     private func restartKeyboardReadyRecorder() throws {

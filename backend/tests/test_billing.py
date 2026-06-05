@@ -276,6 +276,47 @@ def test_transcription_debits_user_after_successful_provider_response(tmp_path, 
     assert payload["balance"]["balance_usd_micros"] == 996_999
 
 
+def test_transcription_reservation_blocks_second_provider_call_when_credit_is_held(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    main.MIN_TRANSCRIPTION_RESERVATION_USD_MICROS = 20_000
+    calls = 0
+
+    async def fake_transcribe_audio(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return {"text": "hello world", "usage": {"input_tokens": 1_000, "output_tokens": 100}}
+
+    monkeypatch.setattr(main, "transcribe_audio", fake_transcribe_audio)
+
+    with TestClient(main.app) as client:
+        user = auth(client, "alice")
+        credit = client.post(
+            "/v1/billing/dev-credit",
+            headers=user["headers"],
+            json={"amount_usd_micros": 20_000},
+        )
+        assert credit.status_code == 200, credit.text
+
+        first = client.post(
+            "/v1/transcriptions",
+            headers=user["headers"],
+            data={"audio_seconds": "1.0"},
+            files={"file": ("clip.m4a", b"fake audio", "audio/m4a")},
+        )
+        second = client.post(
+            "/v1/transcriptions",
+            headers=user["headers"],
+            data={"audio_seconds": "1.0"},
+            files={"file": ("clip.m4a", b"fake audio", "audio/m4a")},
+        )
+
+    assert first.status_code == 200, first.text
+    assert first.json()["charge"]["cost_usd_micros"] == 3_001
+    assert first.json()["balance"]["balance_usd_micros"] == 16_999
+    assert second.status_code == 402, second.text
+    assert calls == 1
+
+
 def test_transcription_provider_failure_does_not_debit_user(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
 
@@ -304,6 +345,53 @@ def test_transcription_provider_failure_does_not_debit_user(tmp_path, monkeypatc
     assert failed.status_code == 502, failed.text
     assert balance.status_code == 200, balance.text
     assert balance.json()["balance"]["balance_usd_micros"] == 1_000_000
+
+
+def test_auth_rate_limit_returns_429(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    main.AUTH_RATE_LIMIT_PER_WINDOW = 1
+    main._rate_limit_hits.clear()
+
+    with TestClient(main.app) as client:
+        first = client.post(
+            "/v1/auth/apple",
+            json={"identity_token": "dev:alice", "email": "alice@example.dev"},
+        )
+        second = client.post(
+            "/v1/auth/apple",
+            json={"identity_token": "dev:bob", "email": "bob@example.dev"},
+        )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 429, second.text
+    assert second.headers["Retry-After"]
+
+
+def test_auth_rate_limit_uses_forwarded_client_ip(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    main.AUTH_RATE_LIMIT_PER_WINDOW = 1
+    main._rate_limit_hits.clear()
+
+    with TestClient(main.app) as client:
+        first = client.post(
+            "/v1/auth/apple",
+            headers={"X-Forwarded-For": "203.0.113.10"},
+            json={"identity_token": "dev:alice", "email": "alice@example.dev"},
+        )
+        second = client.post(
+            "/v1/auth/apple",
+            headers={"X-Forwarded-For": "203.0.113.11"},
+            json={"identity_token": "dev:bob", "email": "bob@example.dev"},
+        )
+        third = client.post(
+            "/v1/auth/apple",
+            headers={"X-Forwarded-For": "203.0.113.10"},
+            json={"identity_token": "dev:carol", "email": "carol@example.dev"},
+        )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert third.status_code == 429, third.text
 
 
 def test_readiness_reports_development_configuration_as_not_ready(tmp_path, monkeypatch):
