@@ -265,7 +265,7 @@ private struct VoiceTypeTabBar: View {
                     .frame(maxWidth: .infinity)
                     .foregroundStyle(selection == tab ? AppTheme.accentDeep : AppTheme.secondary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PlainHapticButtonStyle())
             }
         }
         .padding(.horizontal, 16)
@@ -325,6 +325,9 @@ private struct SignInScreen: View {
                 .signInWithAppleButtonStyle(.black)
                 .frame(height: 56)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .simultaneousGesture(TapGesture().onEnded {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.85)
+                })
 
                 Text("No subscription. Buy credit only when you want it.")
                     .font(.system(size: 11.5, weight: .medium))
@@ -492,7 +495,7 @@ private struct HeaderRow: View {
                     .frame(width: 38, height: 38)
                     .foregroundStyle(AppTheme.inkSoft)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PlainHapticButtonStyle())
             .accessibilityLabel("Settings")
         }
     }
@@ -577,6 +580,7 @@ private struct LatestTranscriptCard: View {
                     Button("History", action: openHistory)
                         .font(.system(size: 12.5, weight: .semibold))
                         .foregroundStyle(AppTheme.accentDeep)
+                        .buttonStyle(PlainHapticButtonStyle())
                 }
             }
 
@@ -825,7 +829,7 @@ private struct CreditPackCard: View {
                     .stroke(isPopular ? Color.clear : AppTheme.border, lineWidth: 1)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PlainHapticButtonStyle())
     }
 }
 
@@ -909,6 +913,7 @@ private struct SettingsScreen: View {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(AppTheme.border, lineWidth: 1)
             }
+            .buttonStyle(PlainHapticButtonStyle())
 
             Text("VoiceType · v0.1")
                 .font(.system(size: 11.5, weight: .medium))
@@ -978,7 +983,7 @@ private struct SettingsRow: View {
             }
             .padding(.vertical, 15)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PlainHapticButtonStyle())
     }
 }
 
@@ -1022,7 +1027,7 @@ private struct KeyboardSetupScreen: View {
                         .foregroundStyle(AppTheme.ink)
                         .frame(width: 40, height: 40, alignment: .leading)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PlainHapticButtonStyle())
 
                 ScreenTitle(kicker: "Keyboard", title: "Add the keyboard\nin three steps")
 
@@ -1195,6 +1200,7 @@ private struct RecorderSheet: View {
                 }
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(AppTheme.secondary)
+                .buttonStyle(PlainHapticButtonStyle())
             } else {
                 VoiceTypeMark()
                     .frame(width: 42, height: 34)
@@ -1281,6 +1287,7 @@ private struct RecordingLimitPicker: View {
                             }
                     }
                     .disabled(isDisabled)
+                    .buttonStyle(PlainHapticButtonStyle())
                 }
             }
         }

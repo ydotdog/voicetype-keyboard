@@ -1,20 +1,30 @@
 import SwiftUI
+import UIKit
 
 enum AppTheme {
-    static let background = Color(red: 0.953, green: 0.929, blue: 0.882)
-    static let surface = Color(red: 0.984, green: 0.969, blue: 0.937)
-    static let surface2 = Color.white
-    static let ink = Color(red: 0.106, green: 0.094, blue: 0.075)
-    static let inkSoft = Color(red: 0.298, green: 0.275, blue: 0.231)
-    static let secondary = Color(red: 0.549, green: 0.522, blue: 0.463)
-    static let accent = Color(red: 0.369, green: 0.420, blue: 0.306)
-    static let accentDeep = Color(red: 0.290, green: 0.337, blue: 0.239)
-    static let accentTint = Color(red: 0.369, green: 0.420, blue: 0.306).opacity(0.16)
-    static let coral = Color(red: 0.812, green: 0.290, blue: 0.125)
-    static let liveTint = Color(red: 0.812, green: 0.290, blue: 0.125).opacity(0.12)
-    static let mint = Color(red: 0.369, green: 0.420, blue: 0.306)
-    static let border = Color(red: 0.106, green: 0.094, blue: 0.075).opacity(0.12)
-    static let borderSoft = Color(red: 0.106, green: 0.094, blue: 0.075).opacity(0.07)
+    static let background = dynamicColor(light: UIColor(red: 0.953, green: 0.929, blue: 0.882, alpha: 1),
+                                         dark: UIColor(red: 0.082, green: 0.075, blue: 0.055, alpha: 1))
+    static let surface = dynamicColor(light: UIColor(red: 0.984, green: 0.969, blue: 0.937, alpha: 1),
+                                      dark: UIColor(red: 0.118, green: 0.106, blue: 0.078, alpha: 1))
+    static let surface2 = dynamicColor(light: .white,
+                                       dark: UIColor(red: 0.149, green: 0.133, blue: 0.090, alpha: 1))
+    static let ink = dynamicColor(light: UIColor(red: 0.106, green: 0.094, blue: 0.075, alpha: 1),
+                                  dark: UIColor(red: 0.945, green: 0.922, blue: 0.863, alpha: 1))
+    static let inkSoft = dynamicColor(light: UIColor(red: 0.298, green: 0.275, blue: 0.231, alpha: 1),
+                                      dark: UIColor(red: 0.733, green: 0.698, blue: 0.627, alpha: 1))
+    static let secondary = dynamicColor(light: UIColor(red: 0.549, green: 0.522, blue: 0.463, alpha: 1),
+                                        dark: UIColor(red: 0.518, green: 0.486, blue: 0.424, alpha: 1))
+    static let accent = dynamicColor(light: UIColor(red: 0.878, green: 0.631, blue: 0.102, alpha: 1),
+                                     dark: UIColor(red: 0.941, green: 0.737, blue: 0.271, alpha: 1))
+    static let accentDeep = dynamicColor(light: UIColor(red: 0.290, green: 0.337, blue: 0.239, alpha: 1),
+                                         dark: UIColor(red: 0.941, green: 0.737, blue: 0.271, alpha: 1))
+    static let accentTint = accent.opacity(0.16)
+    static let coral = dynamicColor(light: UIColor(red: 0.812, green: 0.290, blue: 0.125, alpha: 1),
+                                    dark: UIColor(red: 0.941, green: 0.380, blue: 0.184, alpha: 1))
+    static let liveTint = coral.opacity(0.12)
+    static let mint = accentDeep
+    static let border = ink.opacity(0.12)
+    static let borderSoft = ink.opacity(0.07)
 
     static func serif(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight, design: .serif)
@@ -22,6 +32,12 @@ enum AppTheme {
 
     static func sans(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight, design: .default)
+    }
+
+    private static func dynamicColor(light: UIColor, dark: UIColor) -> Color {
+        Color(UIColor { traitCollection in
+            traitCollection.userInterfaceStyle == .dark ? dark : light
+        })
     }
 }
 
@@ -118,6 +134,7 @@ struct InkButtonStyle: ButtonStyle {
             .background(color)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .opacity(configuration.isPressed ? 0.72 : 1)
+            .modifier(HapticPressModifier(isPressed: configuration.isPressed, style: .medium))
     }
 }
 
@@ -133,5 +150,26 @@ struct GhostButtonStyle: ButtonStyle {
                     .stroke(AppTheme.border, lineWidth: 1)
             }
             .opacity(configuration.isPressed ? 0.72 : 1)
+            .modifier(HapticPressModifier(isPressed: configuration.isPressed, style: .light))
+    }
+}
+
+struct PlainHapticButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.72 : 1)
+            .modifier(HapticPressModifier(isPressed: configuration.isPressed, style: .light))
+    }
+}
+
+private struct HapticPressModifier: ViewModifier {
+    let isPressed: Bool
+    let style: UIImpactFeedbackGenerator.FeedbackStyle
+
+    func body(content: Content) -> some View {
+        content.onChange(of: isPressed) { _, newValue in
+            guard newValue else { return }
+            UIImpactFeedbackGenerator(style: style).impactOccurred(intensity: 0.85)
+        }
     }
 }
