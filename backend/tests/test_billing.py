@@ -367,12 +367,41 @@ def test_auth_rate_limit_returns_429(tmp_path, monkeypatch):
     assert second.headers["Retry-After"]
 
 
-def test_auth_rate_limit_uses_forwarded_client_ip(tmp_path, monkeypatch):
+def test_auth_rate_limit_uses_forwarded_client_ip_from_trusted_proxy(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
     main.AUTH_RATE_LIMIT_PER_WINDOW = 1
+    main._trusted_proxy_networks = [main.ipaddress.ip_network("172.16.0.0/12")]
     main._rate_limit_hits.clear()
 
-    with TestClient(main.app) as client:
+    with TestClient(main.app, client=("172.18.0.5", 49152)) as client:
+        first = client.post(
+            "/v1/auth/apple",
+            headers={"X-Forwarded-For": "198.51.100.1, 203.0.113.10"},
+            json={"identity_token": "dev:alice", "email": "alice@example.dev"},
+        )
+        second = client.post(
+            "/v1/auth/apple",
+            headers={"X-Forwarded-For": "198.51.100.1, 203.0.113.11"},
+            json={"identity_token": "dev:bob", "email": "bob@example.dev"},
+        )
+        third = client.post(
+            "/v1/auth/apple",
+            headers={"X-Forwarded-For": "198.51.100.99, 203.0.113.10"},
+            json={"identity_token": "dev:carol", "email": "carol@example.dev"},
+        )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert third.status_code == 429, third.text
+
+
+def test_auth_rate_limit_ignores_spoofed_forwarded_ip_from_untrusted_client(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    main.AUTH_RATE_LIMIT_PER_WINDOW = 1
+    main._trusted_proxy_networks = [main.ipaddress.ip_network("172.16.0.0/12")]
+    main._rate_limit_hits.clear()
+
+    with TestClient(main.app, client=("198.51.100.200", 49152)) as client:
         first = client.post(
             "/v1/auth/apple",
             headers={"X-Forwarded-For": "203.0.113.10"},
@@ -383,15 +412,9 @@ def test_auth_rate_limit_uses_forwarded_client_ip(tmp_path, monkeypatch):
             headers={"X-Forwarded-For": "203.0.113.11"},
             json={"identity_token": "dev:bob", "email": "bob@example.dev"},
         )
-        third = client.post(
-            "/v1/auth/apple",
-            headers={"X-Forwarded-For": "203.0.113.10"},
-            json={"identity_token": "dev:carol", "email": "carol@example.dev"},
-        )
 
     assert first.status_code == 200, first.text
-    assert second.status_code == 200, second.text
-    assert third.status_code == 429, third.text
+    assert second.status_code == 429, second.text
 
 
 def test_readiness_reports_development_configuration_as_not_ready(tmp_path, monkeypatch):

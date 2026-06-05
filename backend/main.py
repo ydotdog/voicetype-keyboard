@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import json
 import logging
 import math
@@ -95,11 +96,52 @@ RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 AUTH_RATE_LIMIT_PER_WINDOW = int(os.getenv("AUTH_RATE_LIMIT_PER_WINDOW", "20"))
 TRANSCRIPTION_RATE_LIMIT_PER_WINDOW = int(os.getenv("TRANSCRIPTION_RATE_LIMIT_PER_WINDOW", "30"))
 BILLING_RATE_LIMIT_PER_WINDOW = int(os.getenv("BILLING_RATE_LIMIT_PER_WINDOW", "60"))
+RATE_LIMIT_MAX_KEYS = int(os.getenv("RATE_LIMIT_MAX_KEYS", "20000"))
+RATE_LIMIT_CLEANUP_INTERVAL_SECONDS = int(os.getenv("RATE_LIMIT_CLEANUP_INTERVAL_SECONDS", "60"))
+TRUSTED_PROXY_CIDRS = os.getenv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32,::1/128")
 
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
+_STANDARD_LOG_RECORD_FIELDS = set(logging.makeLogRecord({}).__dict__.keys())
+
+
+class JsonExtraFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        for key, value in record.__dict__.items():
+            if key not in _STANDARD_LOG_RECORD_FIELDS and not key.startswith("_"):
+                payload[key] = value
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        return json.dumps(payload, default=str, separators=(",", ":"))
+
+
+def configure_logging() -> None:
+    level = os.getenv("LOG_LEVEL", "INFO").upper()
+    log_format = os.getenv("LOG_FORMAT", "json").lower()
+    handler = logging.StreamHandler()
+    if log_format == "json":
+        handler.setFormatter(JsonExtraFormatter())
+    else:
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    root_logger = logging.getLogger()
+    root_logger.handlers = [handler]
+    root_logger.setLevel(level)
+
+
+configure_logging()
 logger = logging.getLogger("voicetype.api")
 _rate_limit_hits: dict[str, deque[float]] = {}
+_rate_limit_last_cleanup = 0.0
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_trusted_proxy_networks = [
+    ipaddress.ip_network(value.strip())
+    for value in TRUSTED_PROXY_CIDRS.split(",")
+    if value.strip()
+]
 
 
 DEFAULT_PRODUCTS = [
@@ -340,17 +382,61 @@ def rate_limit_identity(request: Request) -> str:
 
 
 def client_ip_for_rate_limit(request: Request) -> str:
-    forwarded_for = request.headers.get("x-forwarded-for", "")
-    if forwarded_for:
-        return forwarded_for.split(",", 1)[0].strip() or "unknown"
-    real_ip = request.headers.get("x-real-ip", "").strip()
+    remote_host = request.client.host if request.client else "unknown"
+    if not is_trusted_proxy(remote_host):
+        return remote_host
+
+    real_ip = normalized_ip(request.headers.get("x-real-ip", ""))
     if real_ip:
         return real_ip
-    return request.client.host if request.client else "unknown"
+
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    forwarded_ips = [normalized_ip(value) for value in forwarded_for.split(",")]
+    forwarded_ips = [value for value in forwarded_ips if value]
+    if forwarded_ips:
+        return forwarded_ips[-1]
+    return remote_host
+
+
+def normalized_ip(value: str) -> Optional[str]:
+    candidate = value.strip()
+    if not candidate:
+        return None
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return None
+
+
+def is_trusted_proxy(host: str) -> bool:
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(address in network for network in _trusted_proxy_networks)
+
+
+def cleanup_rate_limit_hits(now: float, window_seconds: int) -> None:
+    for key, hits in list(_rate_limit_hits.items()):
+        while hits and now - hits[0] >= window_seconds:
+            hits.popleft()
+        if not hits:
+            del _rate_limit_hits[key]
+
+    if len(_rate_limit_hits) > RATE_LIMIT_MAX_KEYS:
+        overflow = len(_rate_limit_hits) - RATE_LIMIT_MAX_KEYS
+        oldest_keys = sorted(_rate_limit_hits, key=lambda key: _rate_limit_hits[key][-1] if _rate_limit_hits[key] else 0)[:overflow]
+        for key in oldest_keys:
+            _rate_limit_hits.pop(key, None)
 
 
 def check_rate_limit(request: Request, *, limit: int, window_seconds: int) -> tuple[bool, int]:
+    global _rate_limit_last_cleanup
     now = time.monotonic()
+    if now - _rate_limit_last_cleanup >= RATE_LIMIT_CLEANUP_INTERVAL_SECONDS:
+        cleanup_rate_limit_hits(now, window_seconds)
+        _rate_limit_last_cleanup = now
+
     key = f"{request.url.path}:{rate_limit_identity(request)}"
     hits = _rate_limit_hits.setdefault(key, deque())
     while hits and now - hits[0] >= window_seconds:
@@ -382,7 +468,16 @@ def column_exists(conn: Any, table: str, column: str) -> bool:
 
 def add_column_if_missing(conn: Any, table: str, column: str, definition: str) -> None:
     if not column_exists(conn, table, column):
-        conn.execute(f"ALTER TABLE {quote_identifier(table)} ADD COLUMN {quote_identifier(column)} {definition}")
+        conn.execute(
+            f"ALTER TABLE {quote_identifier(table)} "
+            f"ADD COLUMN {quote_identifier(column)} {safe_column_definition(definition)}"
+        )
+
+
+def safe_column_definition(definition: str) -> str:
+    if any(marker in definition for marker in (";", "--", "/*", "*/")):
+        raise RuntimeError("Unsafe SQL column definition.")
+    return definition
 
 
 def ensure_schema_migrations(conn: Any) -> None:
@@ -570,6 +665,8 @@ def on_startup() -> None:
             max_size=int(os.getenv("DATABASE_POOL_MAX_SIZE", "10")),
         )
     init_db()
+    with db() as conn:
+        clear_expired_credit_reservations(conn)
     logger.info(
         "startup_complete",
         extra={
@@ -632,8 +729,12 @@ def lock_user(conn: Any, user_id: str) -> None:
 
 
 def clear_expired_credit_reservations(conn: Any) -> None:
+    execute(conn, "DELETE FROM credit_reservations WHERE created_at < ?", (reservation_cutoff_iso(),))
+
+
+def reservation_cutoff_iso() -> str:
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=CREDIT_RESERVATION_TTL_SECONDS)
-    execute(conn, "DELETE FROM credit_reservations WHERE created_at < ?", (cutoff.isoformat(),))
+    return cutoff.isoformat()
 
 
 def ledger_balance_for_user(conn: Any, user_id: str) -> int:
@@ -649,15 +750,18 @@ def ledger_balance_for_user(conn: Any, user_id: str) -> int:
 def reserved_balance_for_user(conn: Any, user_id: str) -> int:
     row = execute(
         conn,
-        "SELECT COALESCE(SUM(amount_usd_micros), 0) AS reserved FROM credit_reservations WHERE user_id = ?",
-        (user_id,),
+        """
+        SELECT COALESCE(SUM(amount_usd_micros), 0) AS reserved
+        FROM credit_reservations
+        WHERE user_id = ? AND created_at >= ?
+        """,
+        (user_id, reservation_cutoff_iso()),
     ).fetchone()
     value = row_to_dict(row).get("reserved", 0) if row else 0
     return int(value or 0)
 
 
 def balance_for_user(conn: Any, user_id: str) -> int:
-    clear_expired_credit_reservations(conn)
     return ledger_balance_for_user(conn, user_id) - reserved_balance_for_user(conn, user_id)
 
 

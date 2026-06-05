@@ -6,6 +6,8 @@ This deployment runs the VoiceType backend on a single Debian VM with Docker Com
 - `postgres`: local Postgres database with a persistent host volume.
 - `caddy`: reverse proxy. Use `Caddyfile.http` before DNS points at the VM, then switch to `Caddyfile.https` for Let's Encrypt.
 
+Caddy overwrites `X-Real-IP` and `X-Forwarded-For` before proxying to the backend. The backend trusts those headers only from `TRUSTED_PROXY_CIDRS`, set in `docker-compose.yml` to the local loopback ranges plus Docker's bridge network range.
+
 Expected host paths:
 
 - `/opt/voicetype/app`: checked out or copied application source.

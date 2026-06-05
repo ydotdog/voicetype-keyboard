@@ -84,10 +84,11 @@ Scale-up path:
 
 1. Run Postgres with automated backups and point-in-time recovery.
 2. Run 2+ backend instances with `DATABASE_POOL_MAX_SIZE` sized to database capacity.
-3. Put the backend behind HTTPS with request size limits matching `MAX_AUDIO_BYTES`.
-4. Add metrics for auth errors, purchase grants, transcription costs, 402 insufficient-credit responses, OpenAI latency, and StoreKit verification failures.
-5. Add a background queue only if uploads or OpenAI latency require async job handling. The current synchronous path is simpler for v1.
-6. Add read replicas or ledger partitioning only after Postgres write volume proves it is needed.
+3. Move rate limiting to Redis, Caddy, or the load balancer before running multiple API workers. The built-in limiter is intentionally in-process for the single-VM v1 deployment.
+4. Put the backend behind HTTPS with request size limits matching `MAX_AUDIO_BYTES`.
+5. Add metrics for auth errors, purchase grants, transcription costs, 402 insufficient-credit responses, OpenAI latency, and StoreKit verification failures.
+6. Add a background queue only if uploads or OpenAI latency require async job handling. The current synchronous path is simpler for v1.
+7. Add read replicas or ledger partitioning only after Postgres write volume proves it is needed.
 
 ## Keyboard Constraints
 
