@@ -45,7 +45,8 @@ Expected response:
 {"ok":true,"service":"voicetype-api","model":"gpt-4o-mini-transcribe","database":"postgres","storekit_verification_mode":"strict"}
 ```
 
-`/health/ready` should return HTTP 200 with all production checks true:
+`/health/ready` returns HTTP 200 only when all production and App Store release
+checks are true:
 
 - JWT secret configured.
 - OpenAI API key configured.
@@ -53,6 +54,7 @@ Expected response:
 - StoreKit strict verification enabled.
 - `appAccountToken` required.
 - Apple App ID and root certificate material configured.
+- Sign in with Apple token revoke credentials configured.
 - Dev credit disabled.
 
 Latest deployment sync:
@@ -63,8 +65,8 @@ Latest deployment sync:
 - Rebuilt backend image and restarted `backend` and `caddy`.
 - Verified `backend/main.py`, `deploy/gcp-vm/docker-compose.yml`, and
   `deploy/gcp-vm/Caddyfile.https` SHA-256 hashes match local files.
-- Verified `https://voicetype.y.dog/health/ready` returns HTTP 200 with all
-  production checks true.
+- Verified `https://voicetype.y.dog/health/ready` reports all runtime checks and
+  the App Store release-only Sign in with Apple revoke credential check.
 - Verified `https://voicetype.y.dog/privacy` returns HTTP 200 for GET and HEAD.
 - Verified `https://voicetype.y.dog/v1/billing/products` returns the three
   consumable credit products.
@@ -123,8 +125,9 @@ HTTP/1.1 308 Permanent Redirect
 ## Secrets
 
 `OPENAI_API_KEY` is configured on the VM in `/opt/voicetype/env/backend.env`.
-`APPLE_APP_APPLE_ID`, Apple root certificate material, strict StoreKit flags, and
-`ALLOW_DEV_CREDIT=false` are confirmed by `/health/ready`.
+`APPLE_APP_APPLE_ID`, Apple root certificate material, strict StoreKit flags,
+`ALLOW_DEV_CREDIT=false`, and Sign in with Apple revoke credentials are confirmed
+by `/health/ready`.
 
 To rotate it later:
 

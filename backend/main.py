@@ -1344,6 +1344,7 @@ def readiness() -> JSONResponse:
         "storekit_app_account_token_required": REQUIRE_STOREKIT_APP_ACCOUNT_TOKEN,
         "apple_app_id": bool(APPLE_APP_APPLE_ID),
         "apple_root_certificates": bool(APPLE_ROOT_CERTIFICATE_PATHS or APPLE_ROOT_CERTIFICATE_PEMS_B64),
+        "apple_signin_revoke_credentials": apple_signin_configured(),
         "dev_credit_disabled": not ALLOW_DEV_CREDIT,
     }
     try:

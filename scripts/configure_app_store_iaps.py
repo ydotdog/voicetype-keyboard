@@ -26,6 +26,7 @@ import jwt
 
 API_BASE = "https://api.appstoreconnect.apple.com"
 DEFAULT_APP_ID = "6776679139"
+DEFAULT_PRIVATE_KEY_DIR = Path.home() / ".appstoreconnect" / "private_keys"
 USA_TERRITORY_ID = "USA"
 
 
@@ -186,6 +187,20 @@ def load_env(name: str, fallback: str | None = None) -> str:
     if not value:
         raise SystemExit(f"Missing required env var or arg: {name}")
     return value
+
+
+def key_id_from_private_key_path(path: Path) -> str | None:
+    match = re.fullmatch(r"AuthKey_(?P<key_id>[A-Z0-9]+)\.p8", path.name)
+    return match.group("key_id") if match else None
+
+
+def discover_private_key_path(key_id: str | None) -> Path | None:
+    if key_id:
+        path = DEFAULT_PRIVATE_KEY_DIR / f"AuthKey_{key_id}.p8"
+        return path if path.exists() else None
+
+    candidates = sorted(DEFAULT_PRIVATE_KEY_DIR.glob("AuthKey_*.p8"))
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def list_iaps(client: AppStoreConnectClient, app_id: str) -> dict[str, dict[str, Any]]:
@@ -679,7 +694,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--private-key-path",
         default=os.environ.get("ASC_PRIVATE_KEY_PATH"),
-        help="Path to AuthKey_<KEY_ID>.p8",
+        help=(
+            "Path to AuthKey_<KEY_ID>.p8. Defaults to the matching key in "
+            "~/.appstoreconnect/private_keys, or the only AuthKey_*.p8 file there."
+        ),
     )
     parser.add_argument(
         "--apply",
@@ -696,9 +714,19 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    key_id = args.key_id or load_env("ASC_KEY_ID")
+    key_id = args.key_id or os.environ.get("ASC_KEY_ID")
+    private_key_path = (
+        Path(args.private_key_path)
+        if args.private_key_path
+        else discover_private_key_path(key_id)
+    )
+    if private_key_path and not key_id:
+        key_id = key_id_from_private_key_path(private_key_path)
+
+    key_id = key_id or load_env("ASC_KEY_ID")
     issuer_id = args.issuer_id or load_env("ASC_ISSUER_ID")
-    private_key_path = Path(args.private_key_path or load_env("ASC_PRIVATE_KEY_PATH"))
+    if private_key_path is None:
+        private_key_path = Path(load_env("ASC_PRIVATE_KEY_PATH"))
     if not private_key_path.exists():
         raise SystemExit(f"Private key not found: {private_key_path}")
     review_screenshot_path = (

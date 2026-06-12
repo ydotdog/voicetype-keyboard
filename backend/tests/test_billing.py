@@ -39,11 +39,24 @@ def load_main(tmp_path, monkeypatch):
     return importlib.import_module("main")
 
 
-def load_production_main(tmp_path, monkeypatch):
+def load_production_main(tmp_path, monkeypatch, *, apple_signin_credentials=True):
     monkeypatch.setenv("JWT_SECRET", "test-secret")
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
     monkeypatch.setenv("APPLE_APP_APPLE_ID", "1234567890")
     monkeypatch.setenv("APPLE_ROOT_CERTIFICATE_PEMS_B64", base64.b64encode(b"cert").decode())
+    if apple_signin_credentials:
+        monkeypatch.setenv("APPLE_SIGNIN_TEAM_ID", "TEAMID1234")
+        monkeypatch.setenv("APPLE_SIGNIN_KEY_ID", "KEYID12345")
+        monkeypatch.setenv(
+            "APPLE_SIGNIN_PRIVATE_KEY",
+            "-----BEGIN PRIVATE KEY-----\\ntest\\n-----END PRIVATE KEY-----",
+        )
+    else:
+        monkeypatch.delenv("APPLE_SIGNIN_TEAM_ID", raising=False)
+        monkeypatch.delenv("APPLE_SIGNIN_KEY_ID", raising=False)
+        monkeypatch.delenv("APPLE_SIGNIN_PRIVATE_KEY", raising=False)
+        monkeypatch.delenv("APPLE_SIGNIN_PRIVATE_KEY_B64", raising=False)
+        monkeypatch.delenv("APPLE_SIGNIN_PRIVATE_KEY_PATH", raising=False)
     monkeypatch.setenv("STOREKIT_VERIFICATION_MODE", "strict")
     monkeypatch.setenv("ALLOW_UNVERIFIED_STOREKIT_JWS", "false")
     monkeypatch.setenv("REQUIRE_STOREKIT_APP_ACCOUNT_TOKEN", "true")
@@ -442,6 +455,23 @@ def test_readiness_accepts_production_configuration(tmp_path, monkeypatch):
 
     assert response.status_code == 200, response.text
     assert response.json()["ok"] is True
+    assert response.json()["checks"]["apple_signin_revoke_credentials"] is True
+
+
+def test_readiness_requires_apple_signin_revoke_credentials(tmp_path, monkeypatch):
+    main = load_production_main(
+        tmp_path,
+        monkeypatch,
+        apple_signin_credentials=False,
+    )
+
+    with TestClient(main.app) as client:
+        response = client.get("/health/ready")
+
+    assert response.status_code == 503, response.text
+    checks = response.json()["checks"]
+    assert checks["apple_signin_revoke_credentials"] is False
+    assert checks["storekit_strict"] is True
 
 
 def test_privacy_policy_is_public(tmp_path, monkeypatch):
