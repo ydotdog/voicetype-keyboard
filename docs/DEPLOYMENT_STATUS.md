@@ -66,8 +66,10 @@ Latest deployment sync:
 - Rebuilt backend image and restarted `backend` and `caddy`.
 - Verified `backend/main.py`, `deploy/gcp-vm/docker-compose.yml`, and
   `deploy/gcp-vm/Caddyfile.https` SHA-256 hashes match local files.
-- Verified `https://voicetype.y.dog/health/ready` returns HTTP 503 because
-  `apple_signin_revoke_credentials=false`; all other checks are true.
+- Created a Sign in with Apple server-to-server key and deployed the revoke
+  credentials to the VM.
+- Verified `https://voicetype.y.dog/health/ready` returns HTTP 200 with
+  `apple_signin_revoke_credentials=true`.
 - Verified `https://voicetype.y.dog/privacy` returns HTTP 200 for GET and HEAD.
 - Verified `https://voicetype.y.dog/support` returns HTTP 200 for GET and HEAD.
 - Verified `https://voicetype.y.dog/v1/billing/products` returns the three
@@ -106,15 +108,10 @@ App Store Connect configuration completed:
 - Age rating declaration is set.
 - Primary category is set to Productivity.
 - iPhone 6.7-inch and iPad Pro 12.9-inch screenshots uploaded and processed.
-
-Still required in Apple backends:
-
-- Create and configure the Sign in with Apple server-to-server key, then deploy
-  `APPLE_SIGNIN_TEAM_ID`, `APPLE_SIGNIN_KEY_ID`, and the `.p8` through
-  `APPLE_SIGNIN_PRIVATE_KEY` / `_B64` / `_PATH`.
-- Complete App Privacy in App Store Connect. The intended nutrition label should
-  match `PrivacyInfo.xcprivacy` and the backend privacy policy.
-- Add App Review contact phone number and final App Review information.
+- App Review contact details and review notes are set.
+- App Privacy is published. The nutrition label lists Name, Email Address,
+  Audio Data, Other User Content, User ID, and Purchase History as linked to the
+  user, used for App Functionality, and not used for tracking.
 - Run StoreKit sandbox/TestFlight validation before submitting for review.
 
 ## DNS
@@ -168,8 +165,8 @@ HTTP/1.1 308 Permanent Redirect
 `APPLE_APP_APPLE_ID`, Apple root certificate material, strict StoreKit flags, and
 `ALLOW_DEV_CREDIT=false` are confirmed by `/health/ready`.
 
-Sign in with Apple revoke credentials are not yet configured on the VM; this is
-why `/health/ready` returns HTTP 503 while `/health` stays healthy.
+Sign in with Apple revoke credentials are configured on the VM and confirmed by
+`/health/ready`.
 
 To rotate it later:
 
@@ -183,9 +180,6 @@ sudo docker compose -f deploy/gcp-vm/docker-compose.yml restart backend
 
 Still required for App Store release:
 
-- Sign in with Apple server-to-server credentials for token grant revocation on
-  account deletion: `APPLE_SIGNIN_TEAM_ID`, `APPLE_SIGNIN_KEY_ID`, and the `.p8`
-  through `APPLE_SIGNIN_PRIVATE_KEY` / `_B64` / `_PATH`.
 - StoreKit sandbox/TestFlight validation.
-- App Store Connect App Privacy, App Review contact phone, and final review
-  submission fields.
+- Final App Store review submission after the remaining App Store Connect review
+  form fields are checked.

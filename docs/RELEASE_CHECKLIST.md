@@ -5,9 +5,8 @@
 - Create or confirm App ID `com.kyleqi.voicetype`.
 - Create or confirm App Extension ID `com.kyleqi.voicetype.keyboard`.
 - Enable Sign in with Apple on the containing app.
-- Create a **Sign in with Apple key** (Keys → enable Sign in with Apple), download
-  the `.p8`, and note the Key ID and Team ID. The backend needs these to revoke the
-  Apple token grant on account deletion (Guideline 5.1.1(v)).
+- Sign in with Apple key is created and deployed to the backend so account
+  deletion revokes the Apple token grant (Guideline 5.1.1(v)).
 - Enable App Groups on both targets.
 - Add App Group `group.com.kyleqi.voicetype` to both targets.
 - Confirm the keyboard extension is embedded in the containing app.
@@ -32,13 +31,12 @@
 - iPhone 6.7-inch and iPad Pro 12.9-inch screenshots are uploaded and processed.
 - Age rating declaration is set.
 - Primary category is set to Productivity.
-- Complete the **App Privacy** nutrition label to match the privacy manifest:
+- App Privacy nutrition label is published and matches the privacy manifest:
   Name (if shared at sign-in), Email Address, User ID, Audio Data, Other User
   Content (transcripts), and Purchase History — all linked to the user, used for
   App Functionality, not used for tracking.
-- Add App Review contact phone number and paste `docs/APP_REVIEW_NOTES.md` into
-  App Review Information (covers Full Access, the audio background mode, the
-  welcome credit for testing, account deletion, and how to test the keyboard flow).
+- App Review contact phone number is set, and `docs/APP_REVIEW_NOTES.md` has
+  been pasted into App Review Information.
 - Confirm account deletion is reachable in-app (Settings → Delete account) for
   Guideline 5.1.1(v).
 - Use StoreKit sandbox/TestFlight before production launch.
@@ -54,10 +52,9 @@
 - Configure `APPLE_CLIENT_ID=com.kyleqi.voicetype`.
 - Configure `APPLE_BUNDLE_ID=com.kyleqi.voicetype`.
 - Configure `APPLE_APP_APPLE_ID` from App Store Connect.
-- Configure Sign in with Apple server credentials so account deletion revokes the
-  Apple token grant: `APPLE_SIGNIN_TEAM_ID`, `APPLE_SIGNIN_KEY_ID`, and the `.p8`
-  via `APPLE_SIGNIN_PRIVATE_KEY` / `_B64` / `_PATH`. (Deletion still works without
-  these; the token simply is not revoked.)
+- Sign in with Apple server credentials are configured so account deletion
+  revokes the Apple token grant: `APPLE_SIGNIN_TEAM_ID`, `APPLE_SIGNIN_KEY_ID`,
+  and the `.p8` via `APPLE_SIGNIN_PRIVATE_KEY` / `_B64` / `_PATH`.
 - Decide the welcome-credit policy: `SIGNUP_GRANT_ENABLED` (default true) and
   `SIGNUP_GRANT_USD_MICROS` (default 100000 = ~US$0.10). Keep it enabled so App
   Review can test transcription without a purchase.
@@ -77,7 +74,8 @@
 - Run `xcodegen generate`.
 - Archived and uploaded `1.0.0 (2)` on 2026-06-13 through `xcodebuild
   -exportArchive` with App Store Connect upload destination. App Store Connect
-  package processing started.
+  package processing completed as `VALID`, and version `1.0` is linked to build
+  `2`.
 - Test on device:
   - Sign in with Apple succeeds.
   - First sign-in grants the welcome credit (balance is non-zero without a purchase).
