@@ -8,5 +8,13 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY main.py .
 
+# Run as a non-root user. /data keeps the SQLite fallback usable in
+# development; production uses Postgres via DATABASE_URL.
+RUN useradd --create-home --uid 10001 appuser \
+    && mkdir -p /data \
+    && chown appuser:appuser /data
+ENV DATABASE_PATH=/data/voicetype.sqlite3
+USER appuser
+
 ENV PORT=8080
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT}"]

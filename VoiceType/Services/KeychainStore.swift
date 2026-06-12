@@ -25,11 +25,15 @@ enum KeychainStore {
             kSecAttrAccount as String: account
         ]
 
-        let attributes: [String: Any] = [kSecValueData as String: data]
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+        ]
         let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
         if status == errSecItemNotFound {
             var item = query
             item[kSecValueData as String] = data
+            item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
             SecItemAdd(item as CFDictionary, nil)
         }
     }

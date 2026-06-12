@@ -27,9 +27,9 @@
 - Publish `docs/PRIVACY_POLICY.md` at a public HTTPS URL and set it as the app's
   Privacy Policy URL.
 - Complete the **App Privacy** nutrition label to match the privacy manifest:
-  Email Address, User ID, Audio Data, Other User Content (transcripts), and
-  Purchase History — all linked to the user, used for App Functionality, not used
-  for tracking.
+  Name (if shared at sign-in), Email Address, User ID, Audio Data, Other User
+  Content (transcripts), and Purchase History — all linked to the user, used for
+  App Functionality, not used for tracking.
 - Confirm account deletion is reachable in-app (Settings → Delete account) for
   Guideline 5.1.1(v).
 - Use StoreKit sandbox/TestFlight before production launch.

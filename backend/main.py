@@ -379,8 +379,16 @@ def execute(conn: Any, query: str, params: tuple[Any, ...] = ()) -> Any:
     return conn.execute(sql(query), params)
 
 
+def is_unique_violation(exc: BaseException) -> bool:
+    if isinstance(exc, sqlite3.IntegrityError):
+        return "UNIQUE constraint failed" in str(exc)
+    if psycopg is not None and isinstance(exc, psycopg.errors.UniqueViolation):
+        return True
+    return False
+
+
 def rate_limit_for_path(path: str) -> Optional[int]:
-    if path == "/v1/auth/apple":
+    if path in ("/v1/auth/apple", "/v1/account"):
         return AUTH_RATE_LIMIT_PER_WINDOW
     if path == "/v1/transcriptions":
         return TRANSCRIPTION_RATE_LIMIT_PER_WINDOW
@@ -924,18 +932,32 @@ def revoke_apple_token(refresh_token: str) -> bool:
     return True
 
 
-def grant_signup_credit(conn: Any, user_id: str) -> None:
-    # One-time welcome credit. Idempotent via the unique source_id.
+def grant_signup_credit_if_needed(user_id: str) -> None:
+    # One-time welcome credit, idempotent via the unique source_id. Applied on
+    # every sign-in that finds it missing so a grant that failed (or a crash
+    # right after account creation) self-heals on the next sign-in. Runs in its
+    # own transaction: on Postgres a failed statement aborts the enclosing
+    # transaction, so this must never share one with the sign-in flow.
     if not SIGNUP_GRANT_ENABLED or SIGNUP_GRANT_USD_MICROS <= 0:
         return
-    insert_ledger(
-        conn,
-        user_id=user_id,
-        amount_usd_micros=SIGNUP_GRANT_USD_MICROS,
-        kind="signup_grant",
-        description="Welcome credit",
-        source_id=f"signup:{user_id}",
-    )
+    source_id = f"signup:{user_id}"
+    try:
+        with db() as conn:
+            row = execute(conn, "SELECT 1 FROM credit_ledger WHERE source_id = ?", (source_id,)).fetchone()
+            if row:
+                return
+            insert_ledger(
+                conn,
+                user_id=user_id,
+                amount_usd_micros=SIGNUP_GRANT_USD_MICROS,
+                kind="signup_grant",
+                description="Welcome credit",
+                source_id=source_id,
+            )
+    except Exception as exc:  # noqa: BLE001 - signup credit must never block sign-in
+        if is_unique_violation(exc):
+            return
+        logger.exception("signup_grant_failed", extra={"user_id": user_id})
 
 
 def verify_apple_identity_token(identity_token: str) -> dict[str, Any]:
@@ -959,36 +981,43 @@ def upsert_apple_user(
     payload: dict[str, Any],
     request: AppleAuthRequest,
     refresh_token: Optional[str] = None,
-) -> tuple[dict[str, Any], bool]:
+) -> dict[str, Any]:
     apple_sub = str(payload.get("sub") or "").strip()
     if not apple_sub:
         raise HTTPException(status_code=401, detail="Apple identity token is missing sub.")
     email = request.email or payload.get("email")
     full_name = request.full_name
 
-    with db() as conn:
-        row = execute(conn, "SELECT * FROM users WHERE apple_sub = ?", (apple_sub,)).fetchone()
-        if row:
-            user = row_to_dict(row)
-            execute(
-                conn,
-                "UPDATE users SET email = COALESCE(?, email), full_name = COALESCE(?, full_name), "
-                "apple_refresh_token = COALESCE(?, apple_refresh_token), updated_at = ? WHERE id = ?",
-                (email, full_name, refresh_token, utc_now(), user["id"]),
-            )
-            updated = row_to_dict(execute(conn, "SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone())
-            return updated, False
+    for attempt in (0, 1):
+        try:
+            with db() as conn:
+                row = execute(conn, "SELECT * FROM users WHERE apple_sub = ?", (apple_sub,)).fetchone()
+                if row:
+                    user = row_to_dict(row)
+                    execute(
+                        conn,
+                        "UPDATE users SET email = COALESCE(?, email), full_name = COALESCE(?, full_name), "
+                        "apple_refresh_token = COALESCE(?, apple_refresh_token), updated_at = ? WHERE id = ?",
+                        (email, full_name, refresh_token, utc_now(), user["id"]),
+                    )
+                    return row_to_dict(execute(conn, "SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone())
 
-        user_id = str(uuid.uuid4())
-        now = utc_now()
-        execute(
-            conn,
-            "INSERT INTO users (id, apple_sub, email, full_name, apple_refresh_token, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (user_id, apple_sub, email, full_name, refresh_token, now, now),
-        )
-        created = row_to_dict(execute(conn, "SELECT * FROM users WHERE id = ?", (user_id,)).fetchone())
-        return created, True
+                user_id = str(uuid.uuid4())
+                now = utc_now()
+                execute(
+                    conn,
+                    "INSERT INTO users (id, apple_sub, email, full_name, apple_refresh_token, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (user_id, apple_sub, email, full_name, refresh_token, now, now),
+                )
+                return row_to_dict(execute(conn, "SELECT * FROM users WHERE id = ?", (user_id,)).fetchone())
+        except Exception as exc:
+            # A concurrent first sign-in can win the INSERT race on apple_sub;
+            # retry once so the UPDATE path picks up the existing row.
+            if attempt == 0 and is_unique_violation(exc):
+                continue
+            raise
+    raise HTTPException(status_code=500, detail="Could not create the user account.")
 
 
 def decode_unverified_storekit_payload(jws: str) -> dict[str, Any]:
@@ -1136,7 +1165,13 @@ async def transcribe_audio(audio: bytes, filename: str, content_type: Optional[s
     async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
         response = await client.post(f"{OPENAI_BASE_URL}/v1/audio/transcriptions", headers=headers, data=data, files=files)
     if response.status_code >= 400:
-        raise HTTPException(status_code=502, detail=response.text)
+        # Log the provider response server-side only; its body can include
+        # account-specific details that must not reach the client.
+        logger.error(
+            "transcription_provider_error",
+            extra={"status_code": response.status_code, "body": response.text[:500]},
+        )
+        raise HTTPException(status_code=502, detail="Transcription provider request failed.")
     payload = response.json()
     transcript = (payload.get("text") or "").strip()
     if not transcript:
@@ -1190,13 +1225,9 @@ def readiness() -> JSONResponse:
 def auth_apple(request: AppleAuthRequest) -> AuthResponse:
     apple_payload = verify_apple_identity_token(request.identity_token)
     refresh_token = exchange_apple_authorization_code(request.authorization_code) if request.authorization_code else None
-    user, created = upsert_apple_user(apple_payload, request, refresh_token=refresh_token)
+    user = upsert_apple_user(apple_payload, request, refresh_token=refresh_token)
+    grant_signup_credit_if_needed(user["id"])
     with db() as conn:
-        if created:
-            try:
-                grant_signup_credit(conn, user["id"])
-            except Exception:  # noqa: BLE001 - signup credit must never block sign-in
-                logger.exception("signup_grant_failed", extra={"user_id": user["id"]})
         balance = balance_for_user(conn, user["id"])
     return AuthResponse(token=create_token(user), user=AuthUser(id=user["id"], email=user.get("email")), balance=balance_payload(balance))
 
@@ -1360,7 +1391,7 @@ def grant_dev_credit(
 async def create_transcription(
     user: Annotated[dict[str, Any], Depends(current_user)],
     file: Annotated[UploadFile, File()],
-    audio_seconds: Annotated[float, Form()] = 0,
+    audio_seconds: Annotated[float, Form(ge=0, le=86400, allow_inf_nan=False)] = 0,
     language: Annotated[Optional[str], Form()] = None,
     model: Annotated[Optional[str], Form()] = None,
 ) -> JSONResponse:

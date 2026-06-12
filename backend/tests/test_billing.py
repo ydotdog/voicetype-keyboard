@@ -463,6 +463,27 @@ def test_signup_grant_is_applied_once_on_account_creation(tmp_path, monkeypatch)
         assert me.json()["balance"]["balance_usd_micros"] == 100_000
 
 
+def test_signup_grant_backfills_on_next_sign_in(tmp_path, monkeypatch):
+    # If the grant was never written (failed grant, crash after account
+    # creation, or the account predates the feature), the next sign-in
+    # self-heals by applying it exactly once.
+    main = load_main(tmp_path, monkeypatch)
+
+    with TestClient(main.app) as client:
+        first = auth(client, "alice")
+        assert first["payload"]["balance"]["balance_usd_micros"] == 0
+
+        main.SIGNUP_GRANT_ENABLED = True
+        main.SIGNUP_GRANT_USD_MICROS = 100_000
+
+        second = auth(client, "alice")
+        assert second["payload"]["user"]["id"] == first["payload"]["user"]["id"]
+        assert second["payload"]["balance"]["balance_usd_micros"] == 100_000
+
+        third = auth(client, "alice")
+        assert third["payload"]["balance"]["balance_usd_micros"] == 100_000
+
+
 def test_account_deletion_removes_user_and_cascades_credit(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
 
