@@ -29,6 +29,7 @@ final class KeyboardViewController: UIInputViewController {
     private var deleteRepeatTimer: Timer?
     private var openAppFallbackWorkItem: DispatchWorkItem?
     private var styleTraitRegistration: UITraitChangeRegistration?
+    private var renderedUIState: KeyboardUIState?
 
     private let palette = KeyboardPalette()
     private let keyboardHeight: CGFloat = 188
@@ -38,7 +39,7 @@ final class KeyboardViewController: UIInputViewController {
         styleTraitRegistration = registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
             (controller: KeyboardViewController, _: UITraitCollection) in
             controller.applyPalette()
-            controller.updateUI()
+            controller.updateUI(force: true)
         }
         setupKeyboard()
         refreshKeyboardState()
@@ -46,7 +47,13 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        applyKeyboardAppearanceOverride()
         refreshKeyboardState()
+    }
+
+    override func textDidChange(_ textInput: UITextInput?) {
+        super.textDidChange(textInput)
+        applyKeyboardAppearanceOverride()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -65,6 +72,23 @@ final class KeyboardViewController: UIInputViewController {
         cancelOpenAppFallback()
         stopDeleteRepeat()
         stopRefreshing()
+        // Sever auto-insert when the keyboard leaves this field so a transcript
+        // finished later cannot land in another app's text field.
+        KeyboardAutoInsertStore.clear()
+    }
+
+    private func applyKeyboardAppearanceOverride() {
+        let style: UIUserInterfaceStyle
+        switch textDocumentProxy.keyboardAppearance ?? .default {
+        case .dark:
+            style = .dark
+        case .light:
+            style = .light
+        default:
+            style = .unspecified
+        }
+        guard overrideUserInterfaceStyle != style else { return }
+        overrideUserInterfaceStyle = style
     }
 
     private func setupKeyboard() {
@@ -125,10 +149,13 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func paintKeyboardHostBackgrounds() {
+        // Host ancestors sit outside this controller's trait override, so hand
+        // them a color already resolved against the keyboard's own appearance.
+        let background = palette.keyboard.resolvedColor(with: view.traitCollection)
         var ancestor = view.superview
         var depth = 0
         while let current = ancestor, depth < 6 {
-            current.backgroundColor = palette.keyboard
+            current.backgroundColor = background
             current.isOpaque = true
             ancestor = current.superview
             depth += 1
@@ -137,7 +164,7 @@ final class KeyboardViewController: UIInputViewController {
         var inputAncestor = inputView?.superview
         depth = 0
         while let current = inputAncestor, depth < 6 {
-            current.backgroundColor = palette.keyboard
+            current.backgroundColor = background
             current.isOpaque = true
             inputAncestor = current.superview
             depth += 1
@@ -418,7 +445,18 @@ final class KeyboardViewController: UIInputViewController {
         textDocumentProxy.insertText(viewModel.snapshot.text)
     }
 
-    private func updateUI() {
+    private func updateUI(force: Bool = false) {
+        let uiState = KeyboardUIState(
+            pendingAction: pendingAction,
+            isKeyboardRecording: viewModel.isKeyboardRecording,
+            isTranscribing: viewModel.isTranscribing,
+            isKeyboardReady: viewModel.isKeyboardReady,
+            hasFullAccess: hasFullAccess,
+            notice: actionNotice
+        )
+        guard force || uiState != renderedUIState else { return }
+        renderedUIState = uiState
+
         actionStack.arrangedSubviews.forEach { view in
             actionStack.removeArrangedSubview(view)
             view.removeFromSuperview()
@@ -476,6 +514,10 @@ final class KeyboardViewController: UIInputViewController {
 
         if viewModel.isKeyboardRecording {
             setPendingAction(.stoppingClip)
+            // Re-arm here: the armed state is cleared whenever the keyboard
+            // disappears, so the transcript follows the field where the user
+            // actually finished the clip.
+            KeyboardAutoInsertStore.arm(baselineTranscriptID: viewModel.snapshot.id)
             RecordingBridgeStore.requestStopClip()
         } else if !hasFullAccess {
             setPendingAction(nil)
@@ -658,6 +700,15 @@ final class KeyboardViewController: UIInputViewController {
             actionNotice = pendingAction.timeoutMessage
         }
     }
+}
+
+private struct KeyboardUIState: Equatable {
+    let pendingAction: PendingKeyboardAction?
+    let isKeyboardRecording: Bool
+    let isTranscribing: Bool
+    let isKeyboardReady: Bool
+    let hasFullAccess: Bool
+    let notice: String?
 }
 
 private enum PendingKeyboardAction {

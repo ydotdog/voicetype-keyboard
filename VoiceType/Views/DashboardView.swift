@@ -12,6 +12,7 @@ struct DashboardView: View {
     @State private var isKeyboardSetupPresented = false
     @State private var transcriptHistory = SharedTranscriptStore.history
     @State private var toastMessage: String?
+    @State private var toastDismissID = UUID()
 
     var body: some View {
         NavigationStack {
@@ -200,16 +201,17 @@ struct DashboardView: View {
     }
 
     private func showToast(_ message: String) {
+        let dismissID = UUID()
+        toastDismissID = dismissID
         withAnimation(.snappy) {
             toastMessage = message
         }
         Task {
             try? await Task.sleep(for: .seconds(1.25))
             await MainActor.run {
+                guard toastDismissID == dismissID else { return }
                 withAnimation(.snappy) {
-                    if toastMessage == message {
-                        toastMessage = nil
-                    }
+                    toastMessage = nil
                 }
             }
         }
@@ -281,6 +283,7 @@ private struct VoiceTypeTabBar: View {
 
 private struct SignInScreen: View {
     @EnvironmentObject private var account: AccountStore
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -321,7 +324,7 @@ private struct SignInScreen: View {
                 } onCompletion: { result in
                     Task { await handle(result) }
                 }
-                .signInWithAppleButtonStyle(.black)
+                .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
                 .frame(height: 56)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .simultaneousGesture(TapGesture().onEnded {
@@ -1182,11 +1185,23 @@ private struct RecorderSheet: View {
     let onTranscript: () -> Void
 
     var body: some View {
-        VStack(spacing: 18) {
-            Capsule()
-                .fill(AppTheme.border)
-                .frame(width: 44, height: 5)
+        ScrollView {
+            recorderContent
+                .padding(.horizontal, 24)
+                .padding(.top, 22)
+                .padding(.bottom, 24)
+                .frame(maxWidth: .infinity)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .background(AppTheme.surface)
+        .task(id: appState.recorderRequestID) {
+            await handleRecorderRequest()
+        }
+    }
 
+    @ViewBuilder
+    private var recorderContent: some View {
+        VStack(spacing: 18) {
             if recorder.isProcessing {
                 ProgressView()
                     .tint(AppTheme.coral)
@@ -1262,14 +1277,6 @@ private struct RecorderSheet: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        }
-        .padding(.horizontal, 24)
-        .padding(.top, 10)
-        .padding(.bottom, 24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(AppTheme.surface)
-        .task(id: appState.recorderRequestID) {
-            await handleRecorderRequest()
         }
     }
 
