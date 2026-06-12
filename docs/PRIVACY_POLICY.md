@@ -1,13 +1,11 @@
 # VoiceType Privacy Policy
 
-_Last updated: 2026-06-12_
+_Last updated: 2026-06-13_
 
 VoiceType ("the app", "we") turns your speech into text. This policy explains what
 we collect, why, who processes it, and how you can delete it.
 
-> Before submitting to the App Store, publish this document at a public HTTPS URL
-> and enter that URL in App Store Connect. Replace the contact address below with a
-> monitored mailbox.
+Public URL: https://voicetype.y.dog/privacy
 
 ## Summary
 
@@ -78,4 +76,4 @@ updated" date above.
 
 ## Contact
 
-Questions or requests: **<your support email>**
+Questions or requests: **kq@apeonwheels.com**

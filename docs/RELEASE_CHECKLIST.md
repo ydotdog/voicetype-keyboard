@@ -24,8 +24,7 @@
 - Add screenshots and paste `docs/APP_REVIEW_NOTES.md` into App Review Information
   (covers Full Access, the audio background mode, the welcome credit for testing,
   account deletion, and how to test the keyboard flow).
-- Publish `docs/PRIVACY_POLICY.md` at a public HTTPS URL and set it as the app's
-  Privacy Policy URL.
+- Set the app's Privacy Policy URL to `https://voicetype.y.dog/privacy`.
 - Complete the **App Privacy** nutrition label to match the privacy manifest:
   Name (if shared at sign-in), Email Address, User ID, Audio Data, Other User
   Content (transcripts), and Purchase History — all linked to the user, used for

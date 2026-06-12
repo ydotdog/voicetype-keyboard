@@ -19,7 +19,7 @@ from typing import Annotated, Any, Optional
 import httpx
 import jwt
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from jwt import PyJWKClient
 from pydantic import BaseModel, Field
 
@@ -44,6 +44,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com").rstrip("/")
 OPENAI_TRANSCRIBE_MODEL = os.getenv("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
 OPENAI_PROVIDER_ACCOUNT_ID = os.getenv("OPENAI_PROVIDER_ACCOUNT_ID", "openai-primary")
+SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "kq@apeonwheels.com")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 DATABASE_PATH = os.getenv("DATABASE_PATH", "./voicetype.sqlite3")
@@ -214,6 +215,141 @@ async def lifespan(_: FastAPI) -> Any:
 app = FastAPI(title="VoiceType API", version="0.2.0", lifespan=lifespan)
 apple_jwks = PyJWKClient(APPLE_JWKS_URL)
 pg_pool: Optional[Any] = None
+
+
+def privacy_policy_html() -> str:
+    support_email = SUPPORT_EMAIL
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VoiceType Privacy Policy</title>
+  <style>
+    :root {{
+      color-scheme: light dark;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+      color: #1f1b16;
+      background: #f4efe5;
+    }}
+    body {{
+      margin: 0;
+      padding: 40px 20px;
+    }}
+    main {{
+      max-width: 760px;
+      margin: 0 auto;
+    }}
+    h1, h2 {{
+      line-height: 1.2;
+    }}
+    table {{
+      border-collapse: collapse;
+      width: 100%;
+      margin: 16px 0;
+      font-size: 0.95rem;
+    }}
+    th, td {{
+      border: 1px solid rgba(80, 70, 54, 0.25);
+      padding: 10px;
+      text-align: left;
+      vertical-align: top;
+    }}
+    a {{
+      color: #8b5200;
+    }}
+    @media (prefers-color-scheme: dark) {{
+      :root {{
+        color: #f1eadb;
+        background: #16120d;
+      }}
+      th, td {{
+        border-color: rgba(241, 234, 219, 0.22);
+      }}
+      a {{
+        color: #f0bf61;
+      }}
+    }}
+  </style>
+</head>
+<body>
+<main>
+  <h1>VoiceType Privacy Policy</h1>
+  <p><em>Last updated: 2026-06-13</em></p>
+
+  <p>VoiceType turns your speech into text. This policy explains what we collect,
+  why, who processes it, and how you can delete it.</p>
+
+  <h2>Summary</h2>
+  <ul>
+    <li>We do not track you across other apps or websites.</li>
+    <li>We do not sell your data or share it with data brokers or advertisers.</li>
+    <li>You can delete your account and all associated data from inside the app at any time.</li>
+  </ul>
+
+  <h2>What we collect and why</h2>
+  <table>
+    <thead>
+      <tr><th>Data</th><th>Why</th><th>Linked to you</th><th>Kept</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Apple account identifier and email</td><td>Create and sign in to your account</td><td>Yes</td><td>Until you delete your account</td></tr>
+      <tr><td>Name, only if shared at sign-in</td><td>Personalize your account</td><td>Yes</td><td>Until you delete your account</td></tr>
+      <tr><td>Audio you record</td><td>Sent to our transcription provider to produce text</td><td>Yes, in transit</td><td>Streamed for processing; not retained as audio files by default</td></tr>
+      <tr><td>Transcribed text</td><td>Returned to you and shown in your history</td><td>Yes</td><td>Until you delete your account</td></tr>
+      <tr><td>Purchase records</td><td>Verify credit purchases and prevent duplicate grants</td><td>Yes</td><td>Until you delete your account</td></tr>
+    </tbody>
+  </table>
+
+  <p>We never ask for your Apple password. Sign in with Apple lets you hide your
+  email with Apple's private relay; we support that.</p>
+
+  <h2>How transcription works</h2>
+  <p>When you record, the app keeps an audio session active so the VoiceType
+  keyboard can mark the speech to transcribe. Audio is sent over an encrypted
+  connection to our backend, which forwards it to OpenAI solely to generate the
+  transcript. Audio is processed transiently and is not stored as files by
+  default. The resulting transcript is stored in your account so you can reuse it
+  and is cached in a shared container on your device so the keyboard can insert
+  it into the current text field.</p>
+
+  <h2>Third parties</h2>
+  <ul>
+    <li>Apple: Sign in with Apple and App Store payments.</li>
+    <li>OpenAI: speech-to-text processing of audio you submit.</li>
+  </ul>
+  <p>We do not integrate advertising or analytics SDKs.</p>
+
+  <h2>Microphone and Full Access</h2>
+  <ul>
+    <li>Microphone: used only to capture the speech you choose to transcribe.</li>
+    <li>Keyboard Full Access: used so the VoiceType keyboard can read the latest
+    transcript and recording state from the app's shared container. The keyboard
+    does not transmit your keystrokes to us.</li>
+  </ul>
+
+  <h2>Data retention and deletion</h2>
+  <p>Your account data is kept until you delete it. To delete everything, open
+  VoiceType, go to Settings, choose Delete account, and confirm. This permanently
+  removes your user record, remaining credit, transcription history, and stored
+  purchase records, and revokes the app's Sign in with Apple token grant.
+  Deletion cannot be undone. Purchases already consumed are not refundable
+  through deletion; refunds are handled by Apple.</p>
+
+  <h2>Children</h2>
+  <p>VoiceType is not directed to children under 13 and does not knowingly collect
+  their data.</p>
+
+  <h2>Changes</h2>
+  <p>We may update this policy. Material changes will be reflected by the Last
+  updated date above.</p>
+
+  <h2>Contact</h2>
+  <p>Questions or requests: <a href="mailto:{support_email}">{support_email}</a></p>
+</main>
+</body>
+</html>"""
 
 
 @app.middleware("http")
@@ -1188,6 +1324,14 @@ def health() -> dict[str, Any]:
         "database": "postgres" if is_postgres() else "sqlite-local",
         "storekit_verification_mode": STOREKIT_VERIFICATION_MODE,
     }
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+@app.get("/privacy-policy", response_class=HTMLResponse, include_in_schema=False)
+@app.head("/privacy", response_class=HTMLResponse, include_in_schema=False)
+@app.head("/privacy-policy", response_class=HTMLResponse, include_in_schema=False)
+def privacy_policy() -> HTMLResponse:
+    return HTMLResponse(content=privacy_policy_html())
 
 
 @app.get("/health/ready")

@@ -1,6 +1,6 @@
 # Deployment Status
 
-Last updated: 2026-06-05
+Last updated: 2026-06-13
 
 ## GCP
 
@@ -35,6 +35,8 @@ Current public smoke tests:
 curl http://34.10.43.168/health
 curl https://voicetype.y.dog/health
 curl https://voicetype.y.dog/health/ready
+curl -I https://voicetype.y.dog/privacy
+curl https://voicetype.y.dog/v1/billing/products
 ```
 
 Expected response:
@@ -52,6 +54,20 @@ Expected response:
 - `appAccountToken` required.
 - Apple App ID and root certificate material configured.
 - Dev credit disabled.
+
+Latest deployment sync:
+
+- Date: 2026-06-13.
+- Source: local `main` worktree after App Store readiness fixes.
+- Updated VM paths: `/opt/voicetype/app/backend`, `/opt/voicetype/app/deploy/gcp-vm`.
+- Rebuilt backend image and restarted `backend` and `caddy`.
+- Verified `backend/main.py`, `deploy/gcp-vm/docker-compose.yml`, and
+  `deploy/gcp-vm/Caddyfile.https` SHA-256 hashes match local files.
+- Verified `https://voicetype.y.dog/health/ready` returns HTTP 200 with all
+  production checks true.
+- Verified `https://voicetype.y.dog/privacy` returns HTTP 200 for GET and HEAD.
+- Verified `https://voicetype.y.dog/v1/billing/products` returns the three
+  consumable credit products.
 
 Latest real transcription smoke test:
 
@@ -107,6 +123,8 @@ HTTP/1.1 308 Permanent Redirect
 ## Secrets
 
 `OPENAI_API_KEY` is configured on the VM in `/opt/voicetype/env/backend.env`.
+`APPLE_APP_APPLE_ID`, Apple root certificate material, strict StoreKit flags, and
+`ALLOW_DEV_CREDIT=false` are confirmed by `/health/ready`.
 
 To rotate it later:
 
@@ -118,8 +136,10 @@ sudo docker compose -f deploy/gcp-vm/docker-compose.yml restart backend
 '
 ```
 
-Still required for production purchase grants:
+Still required for App Store release:
 
-- `APPLE_APP_APPLE_ID` in `/opt/voicetype/env/backend.env`.
 - App Store Connect consumable IAP products.
 - StoreKit sandbox/TestFlight validation.
+- Sign in with Apple server-to-server credentials for token grant revocation on
+  account deletion: `APPLE_SIGNIN_TEAM_ID`, `APPLE_SIGNIN_KEY_ID`, and the `.p8`
+  through `APPLE_SIGNIN_PRIVATE_KEY` / `_B64` / `_PATH`.
