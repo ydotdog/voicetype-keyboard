@@ -16,25 +16,29 @@
 ## App Store Connect
 
 - Create the app record for bundle id `com.kyleqi.voicetype`.
-- Create consumable IAP products:
+- Consumable IAP products are created and `READY_TO_SUBMIT`:
   - `com.kyleqi.voicetype.credits.small`, reference name `990,000 Credits`, USD 0.99.
   - `com.kyleqi.voicetype.credits.medium`, reference name `4,990,000 Credits`, USD 4.99.
   - `com.kyleqi.voicetype.credits.large`, reference name `19,990,000 Credits`, USD 19.99.
-- The repo includes `scripts/configure_app_store_iaps.py` to create or update the
-  products through the App Store Connect API. It auto-discovers
+- The repo includes `scripts/configure_app_store_iaps.py` to create or update
+  the products through the App Store Connect API. It auto-discovers
   `~/.appstoreconnect/private_keys/AuthKey_*.p8` when there is exactly one local
-  key. After copying the issuer ID from App Store Connect, dry-run first:
-  `ASC_ISSUER_ID=<issuer-id> python3 scripts/configure_app_store_iaps.py`, then
-  apply with `--apply`.
+  key. Dry-run first with `ASC_ISSUER_ID=<issuer-id> python3
+  scripts/configure_app_store_iaps.py`, then apply with `--apply`.
 - Match product display names and credit pack sizes with backend `CREDIT_PRODUCTS_JSON` if changed.
-- Add screenshots and paste `docs/APP_REVIEW_NOTES.md` into App Review Information
-  (covers Full Access, the audio background mode, the welcome credit for testing,
-  account deletion, and how to test the keyboard flow).
-- Set the app's Privacy Policy URL to `https://voicetype.y.dog/privacy`.
+- App Store version `1.0` is linked to uploaded build `1.0.0 (2)`.
+- English description, keywords, support URL, marketing URL, privacy policy URL,
+  subtitle, and promotional text are set.
+- iPhone 6.7-inch and iPad Pro 12.9-inch screenshots are uploaded and processed.
+- Age rating declaration is set.
+- Set primary category to Productivity in App Store Connect.
 - Complete the **App Privacy** nutrition label to match the privacy manifest:
   Name (if shared at sign-in), Email Address, User ID, Audio Data, Other User
   Content (transcripts), and Purchase History — all linked to the user, used for
   App Functionality, not used for tracking.
+- Add App Review contact phone number and paste `docs/APP_REVIEW_NOTES.md` into
+  App Review Information (covers Full Access, the audio background mode, the
+  welcome credit for testing, account deletion, and how to test the keyboard flow).
 - Confirm account deletion is reachable in-app (Settings → Delete account) for
   Guideline 5.1.1(v).
 - Use StoreKit sandbox/TestFlight before production launch.

@@ -221,8 +221,40 @@ def ensure_iap(
 ) -> str:
     current = existing.get(product.product_id)
     if current:
-        print(f"[iap] exists {product.product_id} -> {current['id']}")
-        return current["id"]
+        iap_id = current["id"]
+        attrs = current.get("attributes", {})
+        desired_attrs = {
+            "name": product.reference_name,
+            "familySharable": False,
+            "reviewNote": (
+                "Purchasing grants non-expiring VoiceType credit. "
+                "The backend verifies the StoreKit transaction and records "
+                "credit in the user's server-side ledger."
+            ),
+        }
+        patch_attrs = {
+            key: value
+            for key, value in desired_attrs.items()
+            if attrs.get(key) != value
+        }
+        if patch_attrs:
+            payload = {
+                "data": {
+                    "type": "inAppPurchases",
+                    "id": iap_id,
+                    "attributes": patch_attrs,
+                }
+            }
+            client.request(
+                "PATCH",
+                f"/v2/inAppPurchases/{iap_id}",
+                json_body=payload,
+                expected={200},
+            )
+            print(f"[iap] updated {product.product_id} -> {iap_id}")
+        else:
+            print(f"[iap] exists {product.product_id} -> {iap_id}")
+        return iap_id
 
     payload = {
         "data": {

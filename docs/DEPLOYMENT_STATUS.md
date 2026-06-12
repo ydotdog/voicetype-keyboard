@@ -36,6 +36,7 @@ curl http://34.10.43.168/health
 curl https://voicetype.y.dog/health
 curl https://voicetype.y.dog/health/ready
 curl -I https://voicetype.y.dog/privacy
+curl -I https://voicetype.y.dog/support
 curl https://voicetype.y.dog/v1/billing/products
 ```
 
@@ -68,6 +69,7 @@ Latest deployment sync:
 - Verified `https://voicetype.y.dog/health/ready` returns HTTP 503 because
   `apple_signin_revoke_credentials=false`; all other checks are true.
 - Verified `https://voicetype.y.dog/privacy` returns HTTP 200 for GET and HEAD.
+- Verified `https://voicetype.y.dog/support` returns HTTP 200 for GET and HEAD.
 - Verified `https://voicetype.y.dog/v1/billing/products` returns the three
   consumable credit products.
 
@@ -90,8 +92,31 @@ Latest upload:
 - Upload method: `xcodebuild -exportArchive` with `method=app-store-connect`,
   `destination=upload`, and automatic signing.
 - Result: Xcode reported `Uploaded VoiceType` and `Upload succeeded`; App Store
-  Connect package processing started. Delivery UUID:
+  Connect package processing completed as `VALID`. Delivery UUID:
   `b5f49526-aad5-4eec-a7ee-4992a35d88c8`.
+- App Store Connect version `1.0` is linked to build `2`.
+
+App Store Connect configuration completed:
+
+- Consumable IAP products exist and are `READY_TO_SUBMIT`:
+  - `com.kyleqi.voicetype.credits.small`: reference name `990,000 Credits`, USD 0.99.
+  - `com.kyleqi.voicetype.credits.medium`: reference name `4,990,000 Credits`, USD 4.99.
+  - `com.kyleqi.voicetype.credits.large`: reference name `19,990,000 Credits`, USD 19.99.
+- English metadata, privacy policy URL, support URL, and marketing URL are set.
+- Age rating declaration is set.
+- iPhone 6.7-inch and iPad Pro 12.9-inch screenshots uploaded and processed.
+
+Still required in Apple backends:
+
+- Create and configure the Sign in with Apple server-to-server key, then deploy
+  `APPLE_SIGNIN_TEAM_ID`, `APPLE_SIGNIN_KEY_ID`, and the `.p8` through
+  `APPLE_SIGNIN_PRIVATE_KEY` / `_B64` / `_PATH`.
+- Set the app's primary category in App Store Connect. The intended category is
+  Productivity; the API rejected direct category relationship updates.
+- Complete App Privacy in App Store Connect. The intended nutrition label should
+  match `PrivacyInfo.xcprivacy` and the backend privacy policy.
+- Add App Review contact phone number and final App Review information.
+- Run StoreKit sandbox/TestFlight validation before submitting for review.
 
 ## DNS
 
@@ -159,8 +184,9 @@ sudo docker compose -f deploy/gcp-vm/docker-compose.yml restart backend
 
 Still required for App Store release:
 
-- App Store Connect consumable IAP products.
-- StoreKit sandbox/TestFlight validation.
 - Sign in with Apple server-to-server credentials for token grant revocation on
   account deletion: `APPLE_SIGNIN_TEAM_ID`, `APPLE_SIGNIN_KEY_ID`, and the `.p8`
   through `APPLE_SIGNIN_PRIVATE_KEY` / `_B64` / `_PATH`.
+- StoreKit sandbox/TestFlight validation.
+- App Store Connect category, App Privacy, App Review contact phone, and final
+  review submission fields.

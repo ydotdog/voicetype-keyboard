@@ -493,6 +493,25 @@ def test_privacy_policy_is_public(tmp_path, monkeypatch):
     assert "text/html" in head_response.headers["content-type"]
 
 
+def test_support_page_is_public(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+
+    with TestClient(main.app) as client:
+        response = client.get("/support")
+
+    assert response.status_code == 200, response.text
+    assert "text/html" in response.headers["content-type"]
+    assert "VoiceType Support" in response.text
+    assert "kq@apeonwheels.com" in response.text
+    assert "/privacy" in response.text
+
+    with TestClient(main.app) as client:
+        head_response = client.head("/support")
+
+    assert head_response.status_code == 200
+    assert "text/html" in head_response.headers["content-type"]
+
+
 def test_signup_grant_is_applied_once_on_account_creation(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
     # The helper disables the grant for exact-balance tests; enable it here.

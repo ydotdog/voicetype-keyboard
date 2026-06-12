@@ -352,6 +352,74 @@ def privacy_policy_html() -> str:
 </html>"""
 
 
+def support_page_html() -> str:
+    support_email = SUPPORT_EMAIL
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VoiceType Support</title>
+  <style>
+    :root {{
+      color-scheme: light dark;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+      color: #1f1b16;
+      background: #f4efe5;
+    }}
+    body {{
+      margin: 0;
+      padding: 40px 20px;
+    }}
+    main {{
+      max-width: 760px;
+      margin: 0 auto;
+    }}
+    h1, h2 {{
+      line-height: 1.2;
+    }}
+    a {{
+      color: #8b5200;
+    }}
+    @media (prefers-color-scheme: dark) {{
+      :root {{
+        color: #f1eadb;
+        background: #16120d;
+      }}
+      a {{
+        color: #f0bf61;
+      }}
+    }}
+  </style>
+</head>
+<body>
+<main>
+  <h1>VoiceType Support</h1>
+  <p>VoiceType is a pay-as-you-go speech-to-text keyboard for iPhone.</p>
+
+  <h2>Contact</h2>
+  <p>For support, account deletion questions, billing questions, or privacy
+  requests, email <a href="mailto:{support_email}">{support_email}</a>.</p>
+
+  <h2>Common Issues</h2>
+  <ul>
+    <li>Enable Full Access for the VoiceType keyboard so it can read the latest
+    transcript from the app's shared container.</li>
+    <li>Start keyboard mic inside the VoiceType app before using the keyboard in
+    another app.</li>
+    <li>Purchases are consumable credit packs. If credit does not appear after a
+    purchase, relaunch VoiceType while signed in so pending StoreKit transactions
+    can be replayed.</li>
+  </ul>
+
+  <h2>Privacy</h2>
+  <p>Read the <a href="/privacy">VoiceType Privacy Policy</a>.</p>
+</main>
+</body>
+</html>"""
+
+
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next: Any) -> Any:
     rate_limit = rate_limit_for_path(request.url.path)
@@ -1332,6 +1400,14 @@ def health() -> dict[str, Any]:
 @app.head("/privacy-policy", response_class=HTMLResponse, include_in_schema=False)
 def privacy_policy() -> HTMLResponse:
     return HTMLResponse(content=privacy_policy_html())
+
+
+@app.get("/support", response_class=HTMLResponse)
+@app.get("/help", response_class=HTMLResponse, include_in_schema=False)
+@app.head("/support", response_class=HTMLResponse, include_in_schema=False)
+@app.head("/help", response_class=HTMLResponse, include_in_schema=False)
+def support_page() -> HTMLResponse:
+    return HTMLResponse(content=support_page_html())
 
 
 @app.get("/health/ready")
