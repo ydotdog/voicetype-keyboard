@@ -71,8 +71,9 @@
 
 - Replace Release `VOICETYPE_BACKEND_URL` in `project.yml` with the production HTTPS host.
 - Run `xcodegen generate`.
-- Archive the `VoiceType` scheme.
-- Upload through Xcode Organizer or an App Store Connect API-based CI lane.
+- Archived and uploaded `1.0.0 (1)` on 2026-06-13 through `xcodebuild
+  -exportArchive` with App Store Connect upload destination. App Store Connect
+  package processing started.
 - Test on device:
   - Sign in with Apple succeeds.
   - First sign-in grants the welcome credit (balance is non-zero without a purchase).

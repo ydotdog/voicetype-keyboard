@@ -77,6 +77,21 @@ Latest real transcription smoke test:
 - Model: `gpt-4o-mini-transcribe`.
 - Result: HTTP 200, transcript returned, ledger debited, temporary smoke user deleted.
 
+## App Store Build
+
+Latest upload:
+
+- Date: 2026-06-13.
+- Version/build: `1.0.0 (1)`.
+- Archive path: `/tmp/VoiceType.xcarchive`.
+- Exported IPA: `/tmp/VoiceTypeExport/VoiceType.ipa`.
+- Signing: `Apple Distribution: jialu qi (WC3PWB5R2J)` for both the containing
+  app and keyboard extension.
+- Upload method: `xcodebuild -exportArchive` with `method=app-store-connect`,
+  `destination=upload`, and automatic signing.
+- Result: Xcode reported `Uploaded VoiceType` and `Upload succeeded`; App Store
+  Connect package processing started.
+
 ## DNS
 
 Target production hostname: `voicetype.y.dog`.
