@@ -6,7 +6,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: 6.0
-    MARKETING_VERSION: 0.1.0
+    MARKETING_VERSION: 1.0.0
     CURRENT_PROJECT_VERSION: 1
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     VOICETYPE_APP_GROUP: group.com.kyleqi.voicetype
@@ -34,8 +34,7 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
-        NSMicrophoneUsageDescription: VoiceType records your speech only when you press record so it can turn it into text.
-        NSSpeechRecognitionUsageDescription: VoiceType sends recorded audio to your private transcription backend for speech-to-text.
+        NSMicrophoneUsageDescription: VoiceType uses the microphone to turn your speech into text. While you keep keyboard mic on, the app records audio so the VoiceType keyboard can transcribe what you say in other apps.
         NSLocalNetworkUsageDescription: VoiceType connects to your configured transcription backend.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true

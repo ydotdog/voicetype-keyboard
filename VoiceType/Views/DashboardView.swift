@@ -74,47 +74,46 @@ struct DashboardView: View {
                 }
             }
         } else {
-            VStack(spacing: 0) {
-                ScrollView {
-                    Group {
-                        switch selectedTab {
-                        case .home:
-                            HomeScreen(
-                                account: account,
-                                recorder: recorder,
-                                latest: recorder.lastTranscript,
-                                copyLatest: copyLatestTranscript,
-                                openHistory: {
-                                    withAnimation(.snappy) { selectedTab = .history }
-                                },
-                                openSettings: {
-                                    withAnimation(.snappy) { selectedTab = .settings }
-                                },
-                                openRecorder: {
-                                    appState.presentRecorder(autoStart: false)
+            ScrollView {
+                Group {
+                    switch selectedTab {
+                    case .home:
+                        HomeScreen(
+                            account: account,
+                            recorder: recorder,
+                            latest: recorder.lastTranscript,
+                            copyLatest: copyLatestTranscript,
+                            openHistory: {
+                                withAnimation(.snappy) { selectedTab = .history }
+                            },
+                            openSettings: {
+                                withAnimation(.snappy) { selectedTab = .settings }
+                            },
+                            openRecorder: {
+                                appState.presentRecorder(autoStart: false)
+                            }
+                        )
+                    case .history:
+                        HistoryScreen(history: transcriptHistory, copy: copyTranscript)
+                    case .credit:
+                        CreditScreen(store: store, account: account)
+                    case .settings:
+                        SettingsScreen(
+                            account: account,
+                            store: store,
+                            openKeyboardSetup: {
+                                withAnimation(.snappy) {
+                                    isKeyboardSetupPresented = true
                                 }
-                            )
-                        case .history:
-                            HistoryScreen(history: transcriptHistory, copy: copyTranscript)
-                        case .credit:
-                            CreditScreen(store: store, account: account)
-                        case .settings:
-                            SettingsScreen(
-                                account: account,
-                                store: store,
-                                openKeyboardSetup: {
-                                    withAnimation(.snappy) {
-                                        isKeyboardSetupPresented = true
-                                    }
-                                }
-                            )
-                        }
+                            }
+                        )
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.top, 18)
-                    .padding(.bottom, 106)
                 }
-
+                .padding(.horizontal, 24)
+                .padding(.top, 18)
+                .padding(.bottom, 24)
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
                 VoiceTypeTabBar(selection: $selectedTab)
             }
         }
@@ -270,8 +269,8 @@ private struct VoiceTypeTabBar: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 9)
-        .padding(.bottom, 22)
-        .background(.ultraThinMaterial)
+        .padding(.bottom, 8)
+        .background(.ultraThinMaterial, ignoresSafeAreaEdges: .bottom)
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(AppTheme.borderSoft)
@@ -365,8 +364,11 @@ private struct SignInScreen: View {
 
             let formatter = PersonNameComponentsFormatter()
             let fullName = credential.fullName.map { formatter.string(from: $0) }
+            let authorizationCode = credential.authorizationCode
+                .flatMap { String(data: $0, encoding: .utf8) }
             await account.signInWithApple(
                 identityToken: identityToken,
+                authorizationCode: authorizationCode,
                 email: credential.email,
                 fullName: fullName
             )
@@ -860,6 +862,8 @@ private struct SettingsScreen: View {
     @ObservedObject var store: StoreKitService
     let openKeyboardSetup: () -> Void
 
+    @State private var isConfirmingDelete = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             ScreenTitle(kicker: "Account", title: "Settings")
@@ -915,11 +919,31 @@ private struct SettingsScreen: View {
             }
             .buttonStyle(PlainHapticButtonStyle())
 
+            Button(role: .destructive) {
+                isConfirmingDelete = true
+            } label: {
+                Text("Delete account")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(AppTheme.coral)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+            }
+            .buttonStyle(PlainHapticButtonStyle())
+            .disabled(account.isLoading)
+
             Text("VoiceType · v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1")")
                 .font(.system(size: 11.5, weight: .medium))
                 .foregroundStyle(AppTheme.secondary)
                 .frame(maxWidth: .infinity)
                 .padding(.top, 4)
+        }
+        .alert("Delete account?", isPresented: $isConfirmingDelete) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                Task { await account.deleteAccount() }
+            }
+        } message: {
+            Text("This permanently deletes your VoiceType account, your remaining credit, and your transcription history. This can't be undone.")
         }
     }
 }

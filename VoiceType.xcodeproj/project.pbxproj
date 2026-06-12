@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1B6134FCC2CD6C9224AEE5A4 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 49B477CB48459575E489F396 /* PrivacyInfo.xcprivacy */; };
 		1DFC99E7A0D7D0AC5BC73A5A /* VoiceTypeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 602EAA3D00D683EEA5A50094 /* VoiceTypeApp.swift */; };
 		3218E7498F597D2A2DF4C899 /* RecordingPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C8BD93EBD9F56D128832098 /* RecordingPreferences.swift */; };
 		3A1F3FF1D36614A5EF6F535C /* SharedTranscriptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8F4AD47F05595247E23F21D /* SharedTranscriptStore.swift */; };
@@ -28,6 +29,7 @@
 		DFCB886077333B67AEAAA727 /* RecordingBridgeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEE0A2CE8129DA11DB8761E2 /* RecordingBridgeStore.swift */; };
 		E2D610D1927A14B60800E419 /* StoreKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5458544B9AC5E80B66CEE5EF /* StoreKitService.swift */; };
 		F07B5D32063597E2D2F89300 /* SharedAccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43D15ADDBAE32AD6CD904879 /* SharedAccountStore.swift */; };
+		F46368354E85A963ACB53AAA /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 630F802BA78FB06A2DD4F7B0 /* PrivacyInfo.xcprivacy */; };
 		F692E64B85CE2DC24A34CC65 /* SharedTranscriptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8F4AD47F05595247E23F21D /* SharedTranscriptStore.swift */; };
 		F887E25AEA7A2587231948A7 /* AppConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8391ABDC935CC6701BE3282B /* AppConstants.swift */; };
 		F897AFC47AD3CF298B5E0F78 /* VoiceTypeKeyboard.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C3E3EEAFA87EE1CCAAAF85C3 /* VoiceTypeKeyboard.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -62,9 +64,11 @@
 		1A38A71FE30A70BD7E45C043 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		2735DB3CCADC0A8DD671ABF7 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		43D15ADDBAE32AD6CD904879 /* SharedAccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedAccountStore.swift; sourceTree = "<group>"; };
+		49B477CB48459575E489F396 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		4B5A4DDC9C9E54B857D22CF9 /* KeyboardViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardViewController.swift; sourceTree = "<group>"; };
 		5458544B9AC5E80B66CEE5EF /* StoreKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitService.swift; sourceTree = "<group>"; };
 		602EAA3D00D683EEA5A50094 /* VoiceTypeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTypeApp.swift; sourceTree = "<group>"; };
+		630F802BA78FB06A2DD4F7B0 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		66790ACA8CA6CAF9B0F71DE7 /* APIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIModels.swift; sourceTree = "<group>"; };
 		777D0FA0657535D7F279567F /* VoiceTypeKeyboard.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = VoiceTypeKeyboard.entitlements; sourceTree = "<group>"; };
 		783E5F55BB73794744018C60 /* RecordingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingController.swift; sourceTree = "<group>"; };
@@ -138,6 +142,7 @@
 			children = (
 				E659CD58760B905C4E8FD9A1 /* Info.plist */,
 				4B5A4DDC9C9E54B857D22CF9 /* KeyboardViewController.swift */,
+				49B477CB48459575E489F396 /* PrivacyInfo.xcprivacy */,
 				777D0FA0657535D7F279567F /* VoiceTypeKeyboard.entitlements */,
 			);
 			path = VoiceTypeKeyboard;
@@ -147,6 +152,7 @@
 			isa = PBXGroup;
 			children = (
 				F4619BC76F581BC0D9848D23 /* Info.plist */,
+				630F802BA78FB06A2DD4F7B0 /* PrivacyInfo.xcprivacy */,
 				A25ACBF6F3F27D3B4905158B /* VoiceType.entitlements */,
 				602EAA3D00D683EEA5A50094 /* VoiceTypeApp.swift */,
 				2A534B22708915DD5871B19C /* Resources */,
@@ -177,6 +183,7 @@
 			buildConfigurationList = DA60D2269AA5D15C5B65231C /* Build configuration list for PBXNativeTarget "VoiceTypeKeyboard" */;
 			buildPhases = (
 				063767514181EECCC60ED96A /* Sources */,
+				A52548A264E658F3031BE03F /* Resources */,
 			);
 			buildRules = (
 			);
@@ -249,12 +256,21 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A52548A264E658F3031BE03F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1B6134FCC2CD6C9224AEE5A4 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D9D4727009F48FDE956BD33F /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				DA52E77CEC1771094A80F4C3 /* Assets.xcassets in Resources */,
 				B2973B5185EF8FD257AB4001 /* LaunchScreen.storyboard in Resources */,
+				F46368354E85A963ACB53AAA /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -443,7 +459,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 1.0.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -506,7 +522,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 1.0.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

@@ -5,6 +5,9 @@
 - Create or confirm App ID `com.kyleqi.voicetype`.
 - Create or confirm App Extension ID `com.kyleqi.voicetype.keyboard`.
 - Enable Sign in with Apple on the containing app.
+- Create a **Sign in with Apple key** (Keys → enable Sign in with Apple), download
+  the `.p8`, and note the Key ID and Team ID. The backend needs these to revoke the
+  Apple token grant on account deletion (Guideline 5.1.1(v)).
 - Enable App Groups on both targets.
 - Add App Group `group.com.kyleqi.voicetype` to both targets.
 - Confirm the keyboard extension is embedded in the containing app.
@@ -18,7 +21,17 @@
   - `com.kyleqi.voicetype.credits.medium`, reference name `4,990,000 Credits`, USD 4.99.
   - `com.kyleqi.voicetype.credits.large`, reference name `19,990,000 Credits`, USD 19.99.
 - Match product display names and credit pack sizes with backend `CREDIT_PRODUCTS_JSON` if changed.
-- Add screenshots and review notes explaining why the keyboard requires Full Access: it reads the latest transcript from the app's shared container.
+- Add screenshots and paste `docs/APP_REVIEW_NOTES.md` into App Review Information
+  (covers Full Access, the audio background mode, the welcome credit for testing,
+  account deletion, and how to test the keyboard flow).
+- Publish `docs/PRIVACY_POLICY.md` at a public HTTPS URL and set it as the app's
+  Privacy Policy URL.
+- Complete the **App Privacy** nutrition label to match the privacy manifest:
+  Email Address, User ID, Audio Data, Other User Content (transcripts), and
+  Purchase History — all linked to the user, used for App Functionality, not used
+  for tracking.
+- Confirm account deletion is reachable in-app (Settings → Delete account) for
+  Guideline 5.1.1(v).
 - Use StoreKit sandbox/TestFlight before production launch.
 
 ## Backend
@@ -32,6 +45,13 @@
 - Configure `APPLE_CLIENT_ID=com.kyleqi.voicetype`.
 - Configure `APPLE_BUNDLE_ID=com.kyleqi.voicetype`.
 - Configure `APPLE_APP_APPLE_ID` from App Store Connect.
+- Configure Sign in with Apple server credentials so account deletion revokes the
+  Apple token grant: `APPLE_SIGNIN_TEAM_ID`, `APPLE_SIGNIN_KEY_ID`, and the `.p8`
+  via `APPLE_SIGNIN_PRIVATE_KEY` / `_B64` / `_PATH`. (Deletion still works without
+  these; the token simply is not revoked.)
+- Decide the welcome-credit policy: `SIGNUP_GRANT_ENABLED` (default true) and
+  `SIGNUP_GRANT_USD_MICROS` (default 100000 = ~US$0.10). Keep it enabled so App
+  Review can test transcription without a purchase.
 - Provide Apple root certificates through `APPLE_ROOT_CERTIFICATE_PATHS` or `APPLE_ROOT_CERTIFICATE_PEMS_B64`.
 - Keep production StoreKit flags:
   - `STOREKIT_VERIFICATION_MODE=strict`
@@ -50,6 +70,9 @@
 - Upload through Xcode Organizer or an App Store Connect API-based CI lane.
 - Test on device:
   - Sign in with Apple succeeds.
+  - First sign-in grants the welcome credit (balance is non-zero without a purchase).
+  - Settings → Delete account removes the account; signing in again creates a fresh
+    account and the protected endpoints reject the old session token.
   - StoreKit sandbox purchase grants credit.
   - Interrupted or unfinished StoreKit purchases are granted after relaunch/sign-in.
   - Zero-credit transcription returns an insufficient-credit message.

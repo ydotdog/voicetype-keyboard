@@ -49,15 +49,34 @@ enum BackendClient {
         return URL(string: "http://127.0.0.1:8000")
     }
 
-    static func signInWithApple(identityToken: String, email: String?, fullName: String?) async throws -> AuthResponse {
+    static func signInWithApple(
+        identityToken: String,
+        authorizationCode: String?,
+        email: String?,
+        fullName: String?
+    ) async throws -> AuthResponse {
         guard let baseURL else { throw BackendClientError.missingBackendURL }
         var request = URLRequest(url: baseURL.appending(path: "v1/auth/apple"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(
-            AppleAuthRequest(identityToken: identityToken, email: email, fullName: fullName)
+            AppleAuthRequest(
+                identityToken: identityToken,
+                authorizationCode: authorizationCode,
+                email: email,
+                fullName: fullName
+            )
         )
         return try await sendJSON(request)
+    }
+
+    static func deleteAccount(token: String) async throws {
+        guard let baseURL else { throw BackendClientError.missingBackendURL }
+        var request = URLRequest(url: baseURL.appending(path: "v1/account"))
+        request.httpMethod = "DELETE"
+        applyUserAuth(token, to: &request)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let _: DeleteAccountResponse = try decode(data: data, response: response)
     }
 
     static func me(token: String) async throws -> MeResponse {
@@ -197,14 +216,20 @@ private struct BackendValidationError: Decodable {
 
 private struct AppleAuthRequest: Encodable {
     let identityToken: String
+    let authorizationCode: String?
     let email: String?
     let fullName: String?
 
     enum CodingKeys: String, CodingKey {
         case identityToken = "identity_token"
+        case authorizationCode = "authorization_code"
         case email
         case fullName = "full_name"
     }
+}
+
+private struct DeleteAccountResponse: Decodable {
+    let ok: Bool
 }
 
 private extension Data {

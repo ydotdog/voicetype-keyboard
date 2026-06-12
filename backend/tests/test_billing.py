@@ -27,6 +27,9 @@ def load_main(tmp_path, monkeypatch):
     monkeypatch.setenv("ALLOW_DEV_CREDIT", "true")
     monkeypatch.setenv("STOREKIT_VERIFICATION_MODE", "development")
     monkeypatch.setenv("ALLOW_UNVERIFIED_STOREKIT_JWS", "true")
+    # Disable the welcome credit so balance assertions below stay exact; the
+    # signup grant has its own dedicated tests.
+    monkeypatch.setenv("SIGNUP_GRANT_ENABLED", "false")
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "voicetype.sqlite3"))
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("COST_MARKUP_BPS", raising=False)
@@ -45,6 +48,7 @@ def load_production_main(tmp_path, monkeypatch):
     monkeypatch.setenv("ALLOW_UNVERIFIED_STOREKIT_JWS", "false")
     monkeypatch.setenv("REQUIRE_STOREKIT_APP_ACCOUNT_TOKEN", "true")
     monkeypatch.setenv("ALLOW_DEV_CREDIT", "false")
+    monkeypatch.setenv("SIGNUP_GRANT_ENABLED", "false")
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "voicetype.sqlite3"))
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("COST_MARKUP_BPS", raising=False)
@@ -438,3 +442,63 @@ def test_readiness_accepts_production_configuration(tmp_path, monkeypatch):
 
     assert response.status_code == 200, response.text
     assert response.json()["ok"] is True
+
+
+def test_signup_grant_is_applied_once_on_account_creation(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    # The helper disables the grant for exact-balance tests; enable it here.
+    main.SIGNUP_GRANT_ENABLED = True
+    main.SIGNUP_GRANT_USD_MICROS = 100_000
+
+    with TestClient(main.app) as client:
+        first = auth(client, "alice")
+        assert first["payload"]["balance"]["balance_usd_micros"] == 100_000
+
+        # Signing in again must not grant the welcome credit a second time.
+        second = auth(client, "alice")
+        assert second["payload"]["balance"]["balance_usd_micros"] == 100_000
+
+        me = client.get("/v1/me", headers=second["headers"])
+        assert me.status_code == 200, me.text
+        assert me.json()["balance"]["balance_usd_micros"] == 100_000
+
+
+def test_account_deletion_removes_user_and_cascades_credit(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+
+    with TestClient(main.app) as client:
+        alice = auth(client, "alice")
+        original_id = alice["payload"]["user"]["id"]
+
+        credit = client.post(
+            "/v1/billing/dev-credit",
+            headers=alice["headers"],
+            json={"amount_usd_micros": 1_000_000},
+        )
+        assert credit.status_code == 200, credit.text
+        assert credit.json()["balance"]["balance_usd_micros"] == 1_000_000
+
+        deleted = client.delete("/v1/account", headers=alice["headers"])
+        assert deleted.status_code == 200, deleted.text
+        assert deleted.json()["ok"] is True
+        # No Sign in with Apple server credentials are configured in tests, so the
+        # token cannot be revoked, but deletion still succeeds.
+        assert deleted.json()["apple_token_revoked"] is False
+
+        # The old session token is now invalid because the user row is gone.
+        after = client.get("/v1/me", headers=alice["headers"])
+        assert after.status_code == 401, after.text
+
+        # Re-signing in creates a brand new user (new id) with no leftover credit,
+        # proving the prior ledger rows were removed by ON DELETE CASCADE.
+        again = auth(client, "alice")
+        assert again["payload"]["user"]["id"] != original_id
+        assert again["payload"]["balance"]["balance_usd_micros"] == 0
+
+
+def test_account_deletion_requires_authentication(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+
+    with TestClient(main.app) as client:
+        response = client.delete("/v1/account")
+        assert response.status_code == 401, response.text

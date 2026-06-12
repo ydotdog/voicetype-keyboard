@@ -50,7 +50,7 @@ final class AccountStore: ObservableObject {
         SharedAccountStore.balanceText = balanceText
     }
 
-    func signInWithApple(identityToken: String, email: String?, fullName: String?) async {
+    func signInWithApple(identityToken: String, authorizationCode: String?, email: String?, fullName: String?) async {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
@@ -58,6 +58,7 @@ final class AccountStore: ObservableObject {
         do {
             let response = try await BackendClient.signInWithApple(
                 identityToken: identityToken,
+                authorizationCode: authorizationCode,
                 email: email,
                 fullName: fullName
             )
@@ -127,6 +128,23 @@ final class AccountStore: ObservableObject {
         balanceUSDMicros = balance.balanceUSDMicros
         balanceText = balance.formatted
         SharedAccountStore.balanceText = balanceText
+    }
+
+    func deleteAccount() async {
+        // Preview/local sessions have no server account; just clear local state.
+        guard isSignedIn, !isPreviewMode else {
+            signOut()
+            return
+        }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            try await BackendClient.deleteAccount(token: token)
+            signOut()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     func signOut() {

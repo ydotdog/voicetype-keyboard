@@ -59,6 +59,17 @@ APPLE_BUNDLE_ID = os.getenv("APPLE_BUNDLE_ID", APPLE_CLIENT_ID)
 APPLE_APP_APPLE_ID = os.getenv("APPLE_APP_APPLE_ID", "")
 APPLE_AUTH_DEV_BYPASS = os.getenv("APPLE_AUTH_DEV_BYPASS", "").lower() in {"1", "true", "yes"}
 
+# Sign in with Apple server-to-server credentials. Used to exchange the
+# authorization code for a refresh token at sign-in and to revoke that token
+# when the user deletes their account (App Store Guideline 5.1.1(v)).
+APPLE_TOKEN_URL = os.getenv("APPLE_TOKEN_URL", "https://appleid.apple.com/auth/token")
+APPLE_REVOKE_URL = os.getenv("APPLE_REVOKE_URL", "https://appleid.apple.com/auth/revoke")
+APPLE_SIGNIN_TEAM_ID = os.getenv("APPLE_SIGNIN_TEAM_ID", "")
+APPLE_SIGNIN_KEY_ID = os.getenv("APPLE_SIGNIN_KEY_ID", "")
+APPLE_SIGNIN_PRIVATE_KEY = os.getenv("APPLE_SIGNIN_PRIVATE_KEY", "")
+APPLE_SIGNIN_PRIVATE_KEY_PATH = os.getenv("APPLE_SIGNIN_PRIVATE_KEY_PATH", "")
+APPLE_SIGNIN_PRIVATE_KEY_B64 = os.getenv("APPLE_SIGNIN_PRIVATE_KEY_B64", "")
+
 STOREKIT_VERIFICATION_MODE = os.getenv("STOREKIT_VERIFICATION_MODE", "strict").lower()
 ALLOW_UNVERIFIED_STOREKIT_JWS = os.getenv("ALLOW_UNVERIFIED_STOREKIT_JWS", "").lower() in {"1", "true", "yes"}
 REQUIRE_STOREKIT_APP_ACCOUNT_TOKEN = os.getenv("REQUIRE_STOREKIT_APP_ACCOUNT_TOKEN", "true").lower() in {"1", "true", "yes"}
@@ -76,6 +87,11 @@ MAX_AUDIO_BYTES = int(os.getenv("MAX_AUDIO_BYTES", str(24 * 1024 * 1024)))
 USD_MICROS = 1_000_000
 CREDIT_UNITS_PER_USD = 1_000_000
 DEV_CREDIT_MAX_USD_MICROS = int(os.getenv("DEV_CREDIT_MAX_USD_MICROS", str(20 * USD_MICROS)))
+
+# One-time welcome credit granted the first time a user signs in. Gives App
+# Review (and real first-run users) something to transcribe without a purchase.
+SIGNUP_GRANT_ENABLED = os.getenv("SIGNUP_GRANT_ENABLED", "true").lower() in {"1", "true", "yes"}
+SIGNUP_GRANT_USD_MICROS = int(os.getenv("SIGNUP_GRANT_USD_MICROS", "100000"))
 
 
 def default_cost_markup_bps() -> int:
@@ -484,6 +500,7 @@ def ensure_schema_migrations(conn: Any) -> None:
     # Keeps existing local/dev databases usable as the ledger schema evolves.
     add_column_if_missing(conn, "users", "updated_at", "TEXT")
     execute(conn, "UPDATE users SET updated_at = COALESCE(updated_at, created_at)")
+    add_column_if_missing(conn, "users", "apple_refresh_token", "TEXT")
 
     add_column_if_missing(conn, "credit_ledger", "source_id", "TEXT")
     add_column_if_missing(conn, "storekit_transactions", "environment", "TEXT")
@@ -535,6 +552,7 @@ def init_db() -> None:
                     apple_sub TEXT NOT NULL UNIQUE,
                     email TEXT,
                     full_name TEXT,
+                    apple_refresh_token TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -606,6 +624,7 @@ def init_db() -> None:
                 apple_sub TEXT NOT NULL UNIQUE,
                 email TEXT,
                 full_name TEXT,
+                apple_refresh_token TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -814,6 +833,111 @@ def release_credit_reservation(conn: Any, *, reservation_id: str, user_id: str) 
     execute(conn, "DELETE FROM credit_reservations WHERE id = ? AND user_id = ?", (reservation_id, user_id))
 
 
+def apple_signin_private_key_pem() -> str:
+    if APPLE_SIGNIN_PRIVATE_KEY:
+        return APPLE_SIGNIN_PRIVATE_KEY.replace("\\n", "\n")
+    if APPLE_SIGNIN_PRIVATE_KEY_B64:
+        return base64.b64decode(APPLE_SIGNIN_PRIVATE_KEY_B64).decode("utf-8")
+    if APPLE_SIGNIN_PRIVATE_KEY_PATH:
+        with open(APPLE_SIGNIN_PRIVATE_KEY_PATH, "r", encoding="utf-8") as handle:
+            return handle.read()
+    return ""
+
+
+def apple_signin_configured() -> bool:
+    return bool(APPLE_SIGNIN_TEAM_ID and APPLE_SIGNIN_KEY_ID and apple_signin_private_key_pem())
+
+
+def generate_apple_client_secret() -> str:
+    # ES256 JWT used as the client_secret for Apple's token and revoke endpoints.
+    now = datetime.now(timezone.utc)
+    claims = {
+        "iss": APPLE_SIGNIN_TEAM_ID,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(minutes=10)).timestamp()),
+        "aud": APPLE_ISSUER,
+        "sub": APPLE_CLIENT_ID,
+    }
+    return jwt.encode(
+        claims,
+        apple_signin_private_key_pem(),
+        algorithm="ES256",
+        headers={"kid": APPLE_SIGNIN_KEY_ID},
+    )
+
+
+def exchange_apple_authorization_code(authorization_code: str) -> Optional[str]:
+    # Trades the one-time auth code from Sign in with Apple for a refresh token
+    # so the account can later be revoked on deletion. Best-effort: returns None
+    # if credentials are not configured or Apple rejects the exchange.
+    if not authorization_code or not apple_signin_configured():
+        return None
+    try:
+        response = httpx.post(
+            APPLE_TOKEN_URL,
+            data={
+                "client_id": APPLE_CLIENT_ID,
+                "client_secret": generate_apple_client_secret(),
+                "code": authorization_code,
+                "grant_type": "authorization_code",
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=10.0,
+        )
+    except httpx.HTTPError as exc:
+        logger.warning("apple_code_exchange_failed", extra={"error": str(exc)})
+        return None
+    if response.status_code != 200:
+        logger.warning(
+            "apple_code_exchange_rejected",
+            extra={"status_code": response.status_code, "body": response.text[:500]},
+        )
+        return None
+    return response.json().get("refresh_token")
+
+
+def revoke_apple_token(refresh_token: str) -> bool:
+    # Revokes the user's Apple token grant on account deletion. Best-effort.
+    if not refresh_token or not apple_signin_configured():
+        return False
+    try:
+        response = httpx.post(
+            APPLE_REVOKE_URL,
+            data={
+                "client_id": APPLE_CLIENT_ID,
+                "client_secret": generate_apple_client_secret(),
+                "token": refresh_token,
+                "token_type_hint": "refresh_token",
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=10.0,
+        )
+    except httpx.HTTPError as exc:
+        logger.warning("apple_token_revoke_failed", extra={"error": str(exc)})
+        return False
+    if response.status_code != 200:
+        logger.warning(
+            "apple_token_revoke_rejected",
+            extra={"status_code": response.status_code, "body": response.text[:500]},
+        )
+        return False
+    return True
+
+
+def grant_signup_credit(conn: Any, user_id: str) -> None:
+    # One-time welcome credit. Idempotent via the unique source_id.
+    if not SIGNUP_GRANT_ENABLED or SIGNUP_GRANT_USD_MICROS <= 0:
+        return
+    insert_ledger(
+        conn,
+        user_id=user_id,
+        amount_usd_micros=SIGNUP_GRANT_USD_MICROS,
+        kind="signup_grant",
+        description="Welcome credit",
+        source_id=f"signup:{user_id}",
+    )
+
+
 def verify_apple_identity_token(identity_token: str) -> dict[str, Any]:
     if APPLE_AUTH_DEV_BYPASS and identity_token.startswith("dev:"):
         sub = identity_token.removeprefix("dev:") or "local-dev-user"
@@ -831,7 +955,11 @@ def verify_apple_identity_token(identity_token: str) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail="Invalid Apple identity token.") from exc
 
 
-def upsert_apple_user(payload: dict[str, Any], request: AppleAuthRequest) -> dict[str, Any]:
+def upsert_apple_user(
+    payload: dict[str, Any],
+    request: AppleAuthRequest,
+    refresh_token: Optional[str] = None,
+) -> tuple[dict[str, Any], bool]:
     apple_sub = str(payload.get("sub") or "").strip()
     if not apple_sub:
         raise HTTPException(status_code=401, detail="Apple identity token is missing sub.")
@@ -844,19 +972,23 @@ def upsert_apple_user(payload: dict[str, Any], request: AppleAuthRequest) -> dic
             user = row_to_dict(row)
             execute(
                 conn,
-                "UPDATE users SET email = COALESCE(?, email), full_name = COALESCE(?, full_name), updated_at = ? WHERE id = ?",
-                (email, full_name, utc_now(), user["id"]),
+                "UPDATE users SET email = COALESCE(?, email), full_name = COALESCE(?, full_name), "
+                "apple_refresh_token = COALESCE(?, apple_refresh_token), updated_at = ? WHERE id = ?",
+                (email, full_name, refresh_token, utc_now(), user["id"]),
             )
-            return row_to_dict(execute(conn, "SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone())
+            updated = row_to_dict(execute(conn, "SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone())
+            return updated, False
 
         user_id = str(uuid.uuid4())
         now = utc_now()
         execute(
             conn,
-            "INSERT INTO users (id, apple_sub, email, full_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (user_id, apple_sub, email, full_name, now, now),
+            "INSERT INTO users (id, apple_sub, email, full_name, apple_refresh_token, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, apple_sub, email, full_name, refresh_token, now, now),
         )
-        return row_to_dict(execute(conn, "SELECT * FROM users WHERE id = ?", (user_id,)).fetchone())
+        created = row_to_dict(execute(conn, "SELECT * FROM users WHERE id = ?", (user_id,)).fetchone())
+        return created, True
 
 
 def decode_unverified_storekit_payload(jws: str) -> dict[str, Any]:
@@ -1057,8 +1189,14 @@ def readiness() -> JSONResponse:
 @app.post("/v1/auth/apple", response_model=AuthResponse)
 def auth_apple(request: AppleAuthRequest) -> AuthResponse:
     apple_payload = verify_apple_identity_token(request.identity_token)
-    user = upsert_apple_user(apple_payload, request)
+    refresh_token = exchange_apple_authorization_code(request.authorization_code) if request.authorization_code else None
+    user, created = upsert_apple_user(apple_payload, request, refresh_token=refresh_token)
     with db() as conn:
+        if created:
+            try:
+                grant_signup_credit(conn, user["id"])
+            except Exception:  # noqa: BLE001 - signup credit must never block sign-in
+                logger.exception("signup_grant_failed", extra={"user_id": user["id"]})
         balance = balance_for_user(conn, user["id"])
     return AuthResponse(token=create_token(user), user=AuthUser(id=user["id"], email=user.get("email")), balance=balance_payload(balance))
 
@@ -1068,6 +1206,20 @@ def me(user: Annotated[dict[str, Any], Depends(current_user)]) -> dict[str, Any]
     with db() as conn:
         balance = balance_for_user(conn, user["id"])
     return {"user": AuthUser(id=user["id"], email=user.get("email")), "balance": balance_payload(balance)}
+
+
+@app.delete("/v1/account")
+def delete_account(user: Annotated[dict[str, Any], Depends(current_user)]) -> dict[str, Any]:
+    # App Store Guideline 5.1.1(v): account deletion from inside the app.
+    # Revokes the Apple token grant (best-effort) then removes the user row.
+    # Ledger, reservations, StoreKit transactions, and transcriptions are
+    # removed by ON DELETE CASCADE.
+    refresh_token = user.get("apple_refresh_token")
+    revoked = revoke_apple_token(refresh_token) if refresh_token else False
+    with db() as conn:
+        execute(conn, "DELETE FROM users WHERE id = ?", (user["id"],))
+    logger.info("account_deleted", extra={"user_id": user["id"], "apple_token_revoked": revoked})
+    return {"ok": True, "apple_token_revoked": revoked}
 
 
 @app.get("/v1/billing/products")
