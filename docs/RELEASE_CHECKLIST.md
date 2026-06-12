@@ -31,7 +31,7 @@
   subtitle, and promotional text are set.
 - iPhone 6.7-inch and iPad Pro 12.9-inch screenshots are uploaded and processed.
 - Age rating declaration is set.
-- Set primary category to Productivity in App Store Connect.
+- Primary category is set to Productivity.
 - Complete the **App Privacy** nutrition label to match the privacy manifest:
   Name (if shared at sign-in), Email Address, User ID, Audio Data, Other User
   Content (transcripts), and Purchase History — all linked to the user, used for

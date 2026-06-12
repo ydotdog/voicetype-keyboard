@@ -104,6 +104,7 @@ App Store Connect configuration completed:
   - `com.kyleqi.voicetype.credits.large`: reference name `19,990,000 Credits`, USD 19.99.
 - English metadata, privacy policy URL, support URL, and marketing URL are set.
 - Age rating declaration is set.
+- Primary category is set to Productivity.
 - iPhone 6.7-inch and iPad Pro 12.9-inch screenshots uploaded and processed.
 
 Still required in Apple backends:
@@ -111,8 +112,6 @@ Still required in Apple backends:
 - Create and configure the Sign in with Apple server-to-server key, then deploy
   `APPLE_SIGNIN_TEAM_ID`, `APPLE_SIGNIN_KEY_ID`, and the `.p8` through
   `APPLE_SIGNIN_PRIVATE_KEY` / `_B64` / `_PATH`.
-- Set the app's primary category in App Store Connect. The intended category is
-  Productivity; the API rejected direct category relationship updates.
 - Complete App Privacy in App Store Connect. The intended nutrition label should
   match `PrivacyInfo.xcprivacy` and the backend privacy policy.
 - Add App Review contact phone number and final App Review information.
@@ -188,5 +187,5 @@ Still required for App Store release:
   account deletion: `APPLE_SIGNIN_TEAM_ID`, `APPLE_SIGNIN_KEY_ID`, and the `.p8`
   through `APPLE_SIGNIN_PRIVATE_KEY` / `_B64` / `_PATH`.
 - StoreKit sandbox/TestFlight validation.
-- App Store Connect category, App Privacy, App Review contact phone, and final
-  review submission fields.
+- App Store Connect App Privacy, App Review contact phone, and final review
+  submission fields.
