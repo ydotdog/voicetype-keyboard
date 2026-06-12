@@ -82,15 +82,16 @@ Latest real transcription smoke test:
 Latest upload:
 
 - Date: 2026-06-13.
-- Version/build: `1.0.0 (1)`.
-- Archive path: `/tmp/VoiceType.xcarchive`.
-- Exported IPA: `/tmp/VoiceTypeExport/VoiceType.ipa`.
+- Version/build: `1.0.0 (2)`.
+- Archive path: latest build-2 archive recorded in `/tmp/voicetype_latest_archive_path`.
+- Exported IPA: latest build-2 export recorded in `/tmp/voicetype_latest_export_path`.
 - Signing: `Apple Distribution: jialu qi (WC3PWB5R2J)` for both the containing
   app and keyboard extension.
 - Upload method: `xcodebuild -exportArchive` with `method=app-store-connect`,
   `destination=upload`, and automatic signing.
 - Result: Xcode reported `Uploaded VoiceType` and `Upload succeeded`; App Store
-  Connect package processing started.
+  Connect package processing started. Delivery UUID:
+  `b5f49526-aad5-4eec-a7ee-4992a35d88c8`.
 
 ## DNS
 
