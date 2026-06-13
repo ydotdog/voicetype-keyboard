@@ -99,8 +99,8 @@ Latest upload:
 - The exported distribution IPA was verified as `CFBundleVersion` `6`,
   backend `https://voicetype.y.dog`, `get-task-allow=false`, and the containing
   app includes the Sign in with Apple entitlement.
-- App Store Connect version `1.0` was previously linked to build `2`; select or
-  distribute build `6` after Apple processing completes.
+- App Store Connect version `1.0` is linked to build `6`, and App Store Connect
+  reports build `6` as `VALID`.
 
 App Store Connect configuration completed:
 
@@ -108,6 +108,8 @@ App Store Connect configuration completed:
   - `com.kyleqi.voicetype.credits.small`: reference name `990,000 Credits`, USD 0.99.
   - `com.kyleqi.voicetype.credits.medium`: reference name `4,990,000 Credits`, USD 4.99.
   - `com.kyleqi.voicetype.credits.large`: reference name `19,990,000 Credits`, USD 19.99.
+- Each consumable has availability enabled for new territories and a permanent
+  manual price schedule in App Store Connect.
 - English metadata, privacy policy URL, support URL, and marketing URL are set.
 - Age rating declaration is set.
 - Primary category is set to Productivity.

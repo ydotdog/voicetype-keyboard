@@ -25,7 +25,7 @@
   key. Dry-run first with `ASC_ISSUER_ID=<issuer-id> python3
   scripts/configure_app_store_iaps.py`, then apply with `--apply`.
 - Match product display names and credit pack sizes with backend `CREDIT_PRODUCTS_JSON` if changed.
-- App Store version `1.0` is linked to uploaded build `1.0.0 (2)`.
+- App Store version `1.0` is linked to uploaded build `1.0.0 (6)`.
 - English description, keywords, support URL, marketing URL, privacy policy URL,
   subtitle, and promotional text are set.
 - iPhone 6.7-inch and iPad Pro 12.9-inch screenshots are uploaded and processed.
@@ -77,9 +77,8 @@
   always-visible Add Credit purchase buttons, stronger keyboard app-open
   dispatch, no extra keyboard globe key, system keyboard background passthrough,
   fallback haptic/audio feedback, and immediate keyboard `Finishing` state after
-  tapping Stop. Apple accepted the package and reported upload state
-  `PROCESSING`; select or distribute build `6`
-  after processing completes.
+  tapping Stop. Apple accepted the package, App Store Connect reports build `6`
+  as `VALID`, and version `1.0` is linked to build `6`.
 - Test on device:
   - Sign in with Apple succeeds.
   - First sign-in grants the welcome credit (balance is non-zero without a purchase).
