@@ -27,6 +27,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private let deleteButton = UIButton(type: .system)
     private let keyFeedback = UIImpactFeedbackGenerator(style: .light)
     private let actionFeedback = UIImpactFeedbackGenerator(style: .medium)
+    private let selectionFeedback = UISelectionFeedbackGenerator()
     private var deleteRepeatTimer: Timer?
     private var openAppFallbackWorkItem: DispatchWorkItem?
     private var styleTraitRegistration: UITraitChangeRegistration?
@@ -97,10 +98,10 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     }
 
     private func setupKeyboard() {
-        view.backgroundColor = .clear
+        view.backgroundColor = palette.keyboardBackground
         view.isOpaque = false
         view.clipsToBounds = false
-        inputView?.backgroundColor = .clear
+        inputView?.backgroundColor = palette.keyboardBackground
         view.insetsLayoutMarginsFromSafeArea = false
 
         let height = view.heightAnchor.constraint(equalToConstant: keyboardHeight)
@@ -108,7 +109,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         height.isActive = true
 
         contentView.translatesAutoresizingMaskIntoConstraints = false
-        contentView.backgroundColor = .clear
+        contentView.backgroundColor = palette.keyboardBackground
         contentView.layer.cornerCurve = .continuous
         contentView.layer.maskedCorners = []
         contentView.layer.masksToBounds = false
@@ -128,15 +129,15 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
     private func updateKeyboardChrome() {
         contentView.layer.cornerRadius = 0
-        view.backgroundColor = .clear
-        inputView?.backgroundColor = .clear
-        contentView.backgroundColor = .clear
+        view.backgroundColor = palette.keyboardBackground
+        inputView?.backgroundColor = palette.keyboardBackground
+        contentView.backgroundColor = palette.keyboardBackground
     }
 
     private func applyPalette() {
-        view.backgroundColor = .clear
-        inputView?.backgroundColor = .clear
-        contentView.backgroundColor = .clear
+        view.backgroundColor = palette.keyboardBackground
+        inputView?.backgroundColor = palette.keyboardBackground
+        contentView.backgroundColor = palette.keyboardBackground
         wordmarkLabel.attributedText = wordmark()
         promptLabel.textColor = palette.inkSoft
         helperLabel.textColor = palette.muted
@@ -357,18 +358,29 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private func prepareHaptics() {
         keyFeedback.prepare()
         actionFeedback.prepare()
+        selectionFeedback.prepare()
     }
 
     private func playKeyFeedback(intensity: CGFloat = 0.85) {
+        let immediateFeedback = UIImpactFeedbackGenerator(style: .light)
+        immediateFeedback.prepare()
+        immediateFeedback.impactOccurred(intensity: intensity)
         keyFeedback.impactOccurred(intensity: intensity)
         keyFeedback.prepare()
+        selectionFeedback.selectionChanged()
+        selectionFeedback.prepare()
         UIDevice.current.playInputClick()
         AudioServicesPlaySystemSound(1519)
     }
 
     private func playActionFeedback(intensity: CGFloat = 0.9) {
+        let immediateFeedback = UIImpactFeedbackGenerator(style: .medium)
+        immediateFeedback.prepare()
+        immediateFeedback.impactOccurred(intensity: intensity)
         actionFeedback.impactOccurred(intensity: intensity)
         actionFeedback.prepare()
+        selectionFeedback.selectionChanged()
+        selectionFeedback.prepare()
         UIDevice.current.playInputClick()
         AudioServicesPlaySystemSound(1520)
     }
@@ -838,6 +850,8 @@ final class KeyboardViewModel: ObservableObject {
 }
 
 private struct KeyboardPalette {
+    let keyboardBackground = UIColor.voiceType(light: UIColor(red: 0.824, green: 0.843, blue: 0.875, alpha: 1),
+                                               dark: UIColor(red: 0.118, green: 0.118, blue: 0.125, alpha: 1))
     let keySurface = UIColor.voiceType(light: .white,
                                        dark: UIColor(red: 0.173, green: 0.173, blue: 0.184, alpha: 1))
     let keyGray = UIColor.voiceType(light: UIColor(red: 0.714, green: 0.741, blue: 0.788, alpha: 1),

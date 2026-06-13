@@ -86,21 +86,17 @@ Latest real transcription smoke test:
 Latest upload:
 
 - Date: 2026-06-13.
-- Version/build: `1.0.0 (6)`.
-- Archive path: `/tmp/VoiceType-build6-20260613125617.xcarchive`.
-- Local verification IPA: `/tmp/VoiceTypeExport-build6-local-20260613125646/VoiceType.ipa`.
+- Version/build: `1.0.0 (7)`.
+- Archive path: `/tmp/VoiceType-build7-20260613134433.xcarchive`.
 - Signing: `Apple Distribution: jialu qi (WC3PWB5R2J)` for both the containing
   app and keyboard extension.
 - Upload method: `xcodebuild -exportArchive` with `method=app-store-connect`,
   `destination=upload`, and automatic signing.
-- Result: Xcode reported `Uploaded VoiceType` and `Upload succeeded`; Apple
-  accepted the package and reported upload state `PROCESSING`. Delivery UUID:
-  `b4a64a59-af05-4b05-9cc7-14107fd05a73`.
-- The exported distribution IPA was verified as `CFBundleVersion` `6`,
-  backend `https://voicetype.y.dog`, `get-task-allow=false`, and the containing
-  app includes the Sign in with Apple entitlement.
-- App Store Connect version `1.0` is linked to build `6`, and App Store Connect
-  reports build `6` as `VALID`.
+- Result: Xcode reported `Uploaded VoiceType` and `Upload succeeded`; App Store
+  Connect reports build `7` (`cd5942e6-50de-457d-b1c1-367b46de2c7b`) as
+  `VALID`.
+- App Store Connect version `1.0` is linked to build `7`, and the Internal
+  Testers group contains build `7`.
 
 App Store Connect configuration completed:
 
@@ -108,8 +104,9 @@ App Store Connect configuration completed:
   - `com.kyleqi.voicetype.credits.small`: reference name `990,000 Credits`, USD 0.99.
   - `com.kyleqi.voicetype.credits.medium`: reference name `4,990,000 Credits`, USD 4.99.
   - `com.kyleqi.voicetype.credits.large`: reference name `19,990,000 Credits`, USD 19.99.
-- Each consumable has availability enabled for new territories and a permanent
-  manual price schedule in App Store Connect.
+- Each consumable has availability enabled for all territories, a permanent
+  manual price schedule in App Store Connect, and a complete App Review
+  screenshot asset.
 - English metadata, privacy policy URL, support URL, and marketing URL are set.
 - Age rating declaration is set.
 - Primary category is set to Productivity.
