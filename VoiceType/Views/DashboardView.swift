@@ -318,18 +318,12 @@ private struct SignInScreen: View {
             Spacer(minLength: 84)
 
             VStack(spacing: 12) {
-                SignInWithAppleButton(.signIn) { request in
+                AppleSignInControl(style: colorScheme == .dark ? .white : .black) {
                     account.errorMessage = nil
-                    request.requestedScopes = [.email, .fullName]
                 } onCompletion: { result in
                     Task { await handle(result) }
                 }
-                .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
                 .frame(height: 56)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .simultaneousGesture(TapGesture().onEnded {
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.85)
-                })
 
                 Text("No subscription. Buy credit only when you want it.")
                     .font(.system(size: 11.5, weight: .medium))
@@ -404,6 +398,76 @@ private struct SignInScreen: View {
             return "Apple sign-in needs VoiceType to stay open. Try again here."
         default:
             return "Apple sign-in could not be completed. Try again."
+        }
+    }
+}
+
+private struct AppleSignInControl: UIViewRepresentable {
+    let style: ASAuthorizationAppleIDButton.Style
+    let onRequest: () -> Void
+    let onCompletion: (Result<ASAuthorization, Error>) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onRequest: onRequest, onCompletion: onCompletion)
+    }
+
+    func makeUIView(context: Context) -> ASAuthorizationAppleIDButton {
+        let button = ASAuthorizationAppleIDButton(type: .signIn, style: style)
+        button.cornerRadius = 12
+        button.addTarget(context.coordinator, action: #selector(Coordinator.startSignIn), for: .touchUpInside)
+        return button
+    }
+
+    func updateUIView(_ uiView: ASAuthorizationAppleIDButton, context: Context) {
+        context.coordinator.onRequest = onRequest
+        context.coordinator.onCompletion = onCompletion
+    }
+
+    final class Coordinator: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
+        var onRequest: () -> Void
+        var onCompletion: (Result<ASAuthorization, Error>) -> Void
+        private var authorizationController: ASAuthorizationController?
+
+        init(
+            onRequest: @escaping () -> Void,
+            onCompletion: @escaping (Result<ASAuthorization, Error>) -> Void
+        ) {
+            self.onRequest = onRequest
+            self.onCompletion = onCompletion
+        }
+
+        @objc func startSignIn() {
+            onRequest()
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.85)
+
+            let request = ASAuthorizationAppleIDProvider().createRequest()
+            request.requestedScopes = [.email, .fullName]
+
+            let controller = ASAuthorizationController(authorizationRequests: [request])
+            controller.delegate = self
+            controller.presentationContextProvider = self
+            authorizationController = controller
+            controller.performRequests()
+        }
+
+        func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+            UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .flatMap { $0.windows }
+                .first { $0.isKeyWindow } ?? ASPresentationAnchor()
+        }
+
+        func authorizationController(
+            controller: ASAuthorizationController,
+            didCompleteWithAuthorization authorization: ASAuthorization
+        ) {
+            authorizationController = nil
+            onCompletion(.success(authorization))
+        }
+
+        func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+            authorizationController = nil
+            onCompletion(.failure(error))
         }
     }
 }

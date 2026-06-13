@@ -72,10 +72,12 @@
 
 - Replace Release `VOICETYPE_BACKEND_URL` in `project.yml` with the production HTTPS host.
 - Run `xcodegen generate`.
-- Archived and uploaded `1.0.0 (2)` on 2026-06-13 through `xcodebuild
-  -exportArchive` with App Store Connect upload destination. App Store Connect
-  package processing completed as `VALID`, and version `1.0` is linked to build
-  `2`.
+- Archived and uploaded `1.0.0 (3)` on 2026-06-13 through `xcodebuild
+  -exportArchive` with App Store Connect upload destination after replacing the
+  SwiftUI Sign in with Apple button wrapper with a direct
+  `ASAuthorizationController` flow. Apple accepted the package and reported
+  upload state `PROCESSING`; select or distribute build `3` after processing
+  completes.
 - Test on device:
   - Sign in with Apple succeeds.
   - First sign-in grants the welcome credit (balance is non-zero without a purchase).
