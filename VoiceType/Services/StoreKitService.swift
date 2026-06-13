@@ -8,6 +8,7 @@ final class StoreKitService: ObservableObject {
     @Published var errorMessage: String?
 
     func loadProducts() async {
+        guard !isLoading else { return }
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
@@ -15,6 +16,15 @@ final class StoreKitService: ObservableObject {
         do {
             let loaded = try await Product.products(for: ProductIDs.all)
             products = loaded.sorted { $0.price < $1.price }
+            if loaded.isEmpty {
+                errorMessage = "The App Store did not return any credit packs for this build. Try reloading; if it stays empty, the in-app purchases are not available to this TestFlight build yet."
+            } else {
+                let loadedIDs = Set(loaded.map(\.id))
+                let missingIDs = ProductIDs.all.filter { !loadedIDs.contains($0) }
+                if !missingIDs.isEmpty {
+                    errorMessage = "Some credit packs are not available from the App Store yet: \(missingIDs.joined(separator: ", "))"
+                }
+            }
         } catch {
             errorMessage = error.localizedDescription
         }

@@ -820,15 +820,10 @@ private struct CreditScreen: View {
             )
 
             VStack(spacing: 12) {
-                if store.products.isEmpty {
-                    Button {
-                        Task { await store.loadProducts() }
-                    } label: {
-                        Label("Reload packs", systemImage: "arrow.clockwise")
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 48)
+                if store.products.isEmpty && !store.isLoading {
+                    ForEach(FallbackCreditPack.all) { pack in
+                        UnavailableCreditPackCard(pack: pack)
                     }
-                    .buttonStyle(GhostButtonStyle())
                 } else {
                     ForEach(store.products) { product in
                         CreditPackCard(product: product, isPopular: product.id.contains("medium")) {
@@ -839,6 +834,31 @@ private struct CreditScreen: View {
                 }
             }
 
+            if store.isLoading {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .tint(AppTheme.accentDeep)
+                    Text("Loading App Store credit packs...")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppTheme.inkSoft)
+                    Spacer()
+                }
+                .padding(14)
+                .background(AppTheme.surface2.opacity(0.6))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+
+            Button {
+                Task { await store.loadProducts() }
+            } label: {
+                Label(store.products.isEmpty ? "Reload credit packs" : "Refresh credit packs", systemImage: "arrow.clockwise")
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(GhostButtonStyle())
+            .disabled(store.isLoading)
+
             LedgerNoteCard()
 
             if let error = store.errorMessage {
@@ -848,7 +868,43 @@ private struct CreditScreen: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .task {
+            guard store.products.isEmpty, !store.isLoading else { return }
+            await store.loadProducts()
+        }
     }
+}
+
+private struct FallbackCreditPack: Identifiable {
+    let id: String
+    let displayPrice: String
+    let displayName: String
+    let description: String
+    let isPopular: Bool
+
+    static let all = [
+        FallbackCreditPack(
+            id: ProductIDs.small,
+            displayPrice: "$0.99",
+            displayName: "990,000 Credits",
+            description: "Waiting for App Store product",
+            isPopular: false
+        ),
+        FallbackCreditPack(
+            id: ProductIDs.medium,
+            displayPrice: "$4.99",
+            displayName: "4,990,000 Credits",
+            description: "Waiting for App Store product",
+            isPopular: true
+        ),
+        FallbackCreditPack(
+            id: ProductIDs.large,
+            displayPrice: "$19.99",
+            displayName: "19,990,000 Credits",
+            description: "Waiting for App Store product",
+            isPopular: false
+        )
+    ]
 }
 
 private struct CreditPackCard: View {
@@ -897,8 +953,55 @@ private struct CreditPackCard: View {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(isPopular ? Color.clear : AppTheme.border, lineWidth: 1)
             }
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(PlainHapticButtonStyle())
+    }
+}
+
+private struct UnavailableCreditPackCard: View {
+    let pack: FallbackCreditPack
+
+    var body: some View {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 9) {
+                    Text(pack.displayPrice)
+                        .font(AppTheme.serif(30, weight: .regular))
+                    if pack.isPopular {
+                        Text("POPULAR")
+                            .font(.system(size: 10, weight: .bold))
+                            .tracking(0.8)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(AppTheme.accent.opacity(0.55))
+                            .foregroundStyle(AppTheme.ink)
+                            .clipShape(Capsule())
+                    }
+                }
+
+                Text(pack.displayName)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(pack.description)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(2)
+            }
+            .foregroundStyle(AppTheme.ink.opacity(0.52))
+
+            Spacer()
+
+            Image(systemName: "exclamationmark.circle")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(AppTheme.secondary)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity)
+        .background(AppTheme.surface.opacity(0.62))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(AppTheme.borderSoft, lineWidth: 1)
+        }
     }
 }
 
@@ -977,6 +1080,7 @@ private struct SettingsScreen: View {
                     .foregroundStyle(AppTheme.coral)
                     .frame(maxWidth: .infinity)
                     .frame(height: 50)
+                    .contentShape(Rectangle())
             }
             .background(AppTheme.surface)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -994,6 +1098,7 @@ private struct SettingsScreen: View {
                     .foregroundStyle(AppTheme.coral)
                     .frame(maxWidth: .infinity)
                     .frame(height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(PlainHapticButtonStyle())
             .disabled(account.isLoading)
@@ -1082,6 +1187,8 @@ private struct SettingsRow: View {
                     .foregroundStyle(AppTheme.secondary.opacity(0.72))
             }
             .padding(.vertical, 15)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(PlainHapticButtonStyle())
     }

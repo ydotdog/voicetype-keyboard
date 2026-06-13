@@ -7,7 +7,7 @@ final class KeyboardViewController: UIInputViewController {
     private var pendingActionStartedAt: Date?
     private var actionNotice: String?
     private let pendingActionTimeout: TimeInterval = 4
-    private let keyboardChromeCornerRadius: CGFloat = 0
+    private let keyboardChromeCornerRadius: CGFloat = 16
 
     private let contentView = UIView()
     private let topRow = UIStackView()
@@ -18,6 +18,7 @@ final class KeyboardViewController: UIInputViewController {
     private let actionControl = KeyboardActionControl()
     private let actionStack = UIStackView()
     private let micImageView = UIImageView()
+    private let actionTitleLabel = UILabel()
     private let waveStack = UIStackView()
     private let helperLabel = UILabel()
     private let bottomRow = UIStackView()
@@ -92,10 +93,10 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func setupKeyboard() {
-        view.backgroundColor = palette.keyboard
-        view.isOpaque = true
-        view.clipsToBounds = true
-        inputView?.backgroundColor = palette.keyboard
+        view.backgroundColor = .clear
+        view.isOpaque = false
+        view.clipsToBounds = false
+        inputView?.backgroundColor = .clear
         view.insetsLayoutMarginsFromSafeArea = false
 
         let height = view.heightAnchor.constraint(equalToConstant: keyboardHeight)
@@ -105,7 +106,7 @@ final class KeyboardViewController: UIInputViewController {
         contentView.translatesAutoresizingMaskIntoConstraints = false
         contentView.backgroundColor = palette.keyboard
         contentView.layer.cornerCurve = .continuous
-        contentView.layer.maskedCorners = []
+        contentView.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
         contentView.layer.masksToBounds = true
         view.addSubview(contentView)
         NSLayoutConstraint.activate([
@@ -123,19 +124,18 @@ final class KeyboardViewController: UIInputViewController {
 
     private func updateKeyboardChrome() {
         contentView.layer.cornerRadius = keyboardChromeCornerRadius
-        view.backgroundColor = palette.keyboard
-        inputView?.backgroundColor = palette.keyboard
-        paintKeyboardHostBackgrounds()
+        view.backgroundColor = .clear
+        inputView?.backgroundColor = .clear
     }
 
     private func applyPalette() {
-        view.backgroundColor = palette.keyboard
-        inputView?.backgroundColor = palette.keyboard
-        paintKeyboardHostBackgrounds()
+        view.backgroundColor = .clear
+        inputView?.backgroundColor = .clear
         contentView.backgroundColor = palette.keyboard
         wordmarkLabel.attributedText = wordmark()
         promptLabel.textColor = palette.inkSoft
         helperLabel.textColor = palette.muted
+        actionTitleLabel.textColor = palette.keySurface
         switchKeyboardButton.backgroundColor = palette.keyGray
         switchKeyboardButton.tintColor = palette.inkSoft
         returnButton.backgroundColor = palette.keySurface
@@ -146,29 +146,6 @@ final class KeyboardViewController: UIInputViewController {
             bar.backgroundColor = palette.live
         }
         markView.setNeedsDisplay()
-    }
-
-    private func paintKeyboardHostBackgrounds() {
-        // Host ancestors sit outside this controller's trait override, so hand
-        // them a color already resolved against the keyboard's own appearance.
-        let background = palette.keyboard.resolvedColor(with: view.traitCollection)
-        var ancestor = view.superview
-        var depth = 0
-        while let current = ancestor, depth < 6 {
-            current.backgroundColor = background
-            current.isOpaque = true
-            ancestor = current.superview
-            depth += 1
-        }
-
-        var inputAncestor = inputView?.superview
-        depth = 0
-        while let current = inputAncestor, depth < 6 {
-            current.backgroundColor = background
-            current.isOpaque = true
-            inputAncestor = current.superview
-            depth += 1
-        }
     }
 
     private func setupTopRow() {
@@ -225,8 +202,8 @@ final class KeyboardViewController: UIInputViewController {
 
         actionStack.axis = .horizontal
         actionStack.alignment = .center
-        actionStack.distribution = .equalCentering
-        actionStack.spacing = 5
+        actionStack.distribution = .fill
+        actionStack.spacing = 9
         actionStack.isUserInteractionEnabled = false
         actionStack.translatesAutoresizingMaskIntoConstraints = false
         actionControl.addSubview(actionStack)
@@ -244,6 +221,14 @@ final class KeyboardViewController: UIInputViewController {
             micImageView.widthAnchor.constraint(equalToConstant: 32),
             micImageView.heightAnchor.constraint(equalToConstant: 32)
         ])
+
+        actionTitleLabel.font = .systemFont(ofSize: 18, weight: .semibold)
+        actionTitleLabel.textColor = palette.keySurface
+        actionTitleLabel.adjustsFontSizeToFitWidth = true
+        actionTitleLabel.minimumScaleFactor = 0.72
+        actionTitleLabel.isUserInteractionEnabled = false
+        actionTitleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        actionTitleLabel.translatesAutoresizingMaskIntoConstraints = false
 
         waveStack.axis = .horizontal
         waveStack.alignment = .center
@@ -283,13 +268,13 @@ final class KeyboardViewController: UIInputViewController {
 
             helperLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 28),
             helperLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -28),
-            helperLabel.topAnchor.constraint(equalTo: actionControl.bottomAnchor, constant: 4),
-            helperLabel.heightAnchor.constraint(equalToConstant: 18),
+            helperLabel.topAnchor.constraint(equalTo: actionControl.bottomAnchor, constant: 6),
+            helperLabel.heightAnchor.constraint(equalToConstant: 30),
 
-            actionControl.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            actionControl.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
+            actionControl.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
             actionControl.topAnchor.constraint(equalTo: topRow.bottomAnchor, constant: 6),
-            actionControl.widthAnchor.constraint(equalToConstant: 212),
-            actionControl.heightAnchor.constraint(equalToConstant: 58)
+            actionControl.heightAnchor.constraint(equalToConstant: 60)
         ])
     }
 
@@ -322,7 +307,7 @@ final class KeyboardViewController: UIInputViewController {
         NSLayoutConstraint.activate([
             bottomRow.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 18),
             bottomRow.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -18),
-            bottomRow.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
+            bottomRow.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -4),
             bottomRow.heightAnchor.constraint(equalToConstant: 46),
 
             switchKeyboardButton.widthAnchor.constraint(equalToConstant: 46),
@@ -464,8 +449,9 @@ final class KeyboardViewController: UIInputViewController {
 
         let canUseBridge = viewModel.isKeyboardReady && hasFullAccess
         actionControl.isEnabled = pendingAction == nil && !viewModel.isTranscribing
-        helperLabel.text = actionNotice
-        helperLabel.isHidden = actionNotice?.isEmpty ?? true
+        let helperText = actionNotice ?? defaultHelperText(canUseBridge: canUseBridge)
+        helperLabel.text = helperText
+        helperLabel.isHidden = helperText.isEmpty
 
         if pendingAction == .startingClip {
             setLiveAction(accessibilityLabel: "Starting recording")
@@ -481,7 +467,10 @@ final class KeyboardViewController: UIInputViewController {
             actionControl.layer.borderWidth = 0
             micImageView.image = UIImage(systemName: canUseBridge ? "mic.fill" : "arrow.up.forward.app.fill")
             micImageView.tintColor = palette.keySurface
+            actionTitleLabel.text = actionTitle(canUseBridge: canUseBridge)
+            actionTitleLabel.textColor = palette.keySurface
             actionStack.addArrangedSubview(micImageView)
+            actionStack.addArrangedSubview(actionTitleLabel)
 
             if !hasFullAccess {
                 actionControl.accessibilityLabel = "Enable Full Access for VoiceType Keyboard"
@@ -500,7 +489,23 @@ final class KeyboardViewController: UIInputViewController {
         promptLabel.textColor = palette.live
         actionControl.accessibilityLabel = accessibilityLabel
         actionStack.addArrangedSubview(waveStack)
-        helperLabel.isHidden = actionNotice?.isEmpty ?? true
+    }
+
+    private func actionTitle(canUseBridge: Bool) -> String {
+        if !hasFullAccess {
+            return "Enable Access"
+        }
+        return canUseBridge ? "Speak" : "Open VoiceType"
+    }
+
+    private func defaultHelperText(canUseBridge: Bool) -> String {
+        if !hasFullAccess {
+            return "Enable Full Access in Settings."
+        }
+        if canUseBridge {
+            return ""
+        }
+        return "Open VoiceType and tap Turn on keyboard mic."
     }
 
     @objc private func actionTapped() {
@@ -590,24 +595,17 @@ final class KeyboardViewController: UIInputViewController {
     private func openContainingApp(route: ContainingAppRoute) {
         guard let url = route.url else { return }
         scheduleOpenAppFallback(route: route)
-        openURLThroughResponderChain(url)
-
         if let extensionContext {
             extensionContext.open(url) { [weak self] didOpen in
                 DispatchQueue.main.async {
                     guard let self else { return }
-                    if !didOpen { self.openURLThroughResponderChain(url) }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        self.openURLThroughResponderChain(url)
+                    if !didOpen {
+                        self.showOpenAppFallback(route: route)
                     }
                 }
             }
         } else {
-            openURLThroughResponderChain(url)
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
-            self?.openURLThroughResponderChain(url)
+            showOpenAppFallback(route: route)
         }
     }
 
@@ -622,49 +620,15 @@ final class KeyboardViewController: UIInputViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.1, execute: workItem)
     }
 
+    private func showOpenAppFallback(route: ContainingAppRoute) {
+        cancelOpenAppFallback()
+        actionNotice = route.fallbackMessage
+        updateUI(force: true)
+    }
+
     private func cancelOpenAppFallback() {
         openAppFallbackWorkItem?.cancel()
         openAppFallbackWorkItem = nil
-    }
-
-    @discardableResult
-    private func openURLThroughResponderChain(_ url: URL) -> Bool {
-        let startPoints: [UIResponder?] = [view, self]
-        var visited = Set<ObjectIdentifier>()
-
-        for start in startPoints {
-            var responder = start
-            while let current = responder {
-                let identifier = ObjectIdentifier(current)
-                guard !visited.contains(identifier) else { break }
-                visited.insert(identifier)
-
-                if openURL(url, through: current) {
-                    return true
-                }
-                responder = current.next
-            }
-        }
-        return false
-    }
-
-    private func openURL(_ url: URL, through responder: UIResponder) -> Bool {
-        let modernSelector = NSSelectorFromString("openURL:options:completionHandler:")
-        if responder.responds(to: modernSelector), let method = responder.method(for: modernSelector) {
-            typealias OpenURLIMP = @convention(c) (AnyObject, Selector, NSURL, NSDictionary, AnyObject?) -> Void
-            let function = unsafeBitCast(method, to: OpenURLIMP.self)
-            function(responder, modernSelector, url as NSURL, [:] as NSDictionary, nil)
-            return true
-        }
-
-        let legacySelector = NSSelectorFromString("openURL:")
-        if responder.responds(to: legacySelector), let method = responder.method(for: legacySelector) {
-            typealias OpenURLIMP = @convention(c) (AnyObject, Selector, NSURL) -> Bool
-            let function = unsafeBitCast(method, to: OpenURLIMP.self)
-            return function(responder, legacySelector, url as NSURL)
-        }
-
-        return false
     }
 
     private func setPendingAction(_ action: PendingKeyboardAction?) {
@@ -745,9 +709,9 @@ private enum ContainingAppRoute {
     var fallbackMessage: String {
         switch self {
         case .keyboardMic:
-            return "Open VoiceType from Home, then return here."
+            return "Open VoiceType and tap Turn on keyboard mic."
         case .keyboardSetup:
-            return "Open VoiceType from Home to finish setup."
+            return "Open VoiceType and finish keyboard setup."
         }
     }
 }
@@ -794,20 +758,20 @@ final class KeyboardViewModel: ObservableObject {
 }
 
 private struct KeyboardPalette {
-    let keyboard = UIColor.voiceType(light: UIColor(red: 0.906, green: 0.882, blue: 0.831, alpha: 1),
-                                     dark: UIColor(red: 0.055, green: 0.047, blue: 0.031, alpha: 1))
+    let keyboard = UIColor.voiceType(light: UIColor(red: 0.812, green: 0.831, blue: 0.859, alpha: 1),
+                                     dark: UIColor(red: 0.118, green: 0.118, blue: 0.125, alpha: 1))
     let keySurface = UIColor.voiceType(light: .white,
-                                       dark: UIColor(red: 0.149, green: 0.133, blue: 0.090, alpha: 1))
-    let keyGray = UIColor.voiceType(light: UIColor(red: 0.835, green: 0.843, blue: 0.855, alpha: 1),
-                                    dark: UIColor(red: 0.086, green: 0.075, blue: 0.063, alpha: 1))
-    let ink = UIColor.voiceType(light: UIColor(red: 0.106, green: 0.094, blue: 0.075, alpha: 1),
-                                dark: UIColor(red: 0.945, green: 0.922, blue: 0.863, alpha: 1))
-    let disabledInk = UIColor.voiceType(light: UIColor(red: 0.106, green: 0.094, blue: 0.075, alpha: 0.48),
-                                        dark: UIColor(red: 0.945, green: 0.922, blue: 0.863, alpha: 0.38))
-    let inkSoft = UIColor.voiceType(light: UIColor(red: 0.298, green: 0.275, blue: 0.231, alpha: 1),
-                                    dark: UIColor(red: 0.733, green: 0.698, blue: 0.627, alpha: 1))
-    let muted = UIColor.voiceType(light: UIColor(red: 0.549, green: 0.522, blue: 0.463, alpha: 1),
-                                  dark: UIColor(red: 0.518, green: 0.486, blue: 0.424, alpha: 1))
+                                       dark: UIColor(red: 0.173, green: 0.173, blue: 0.184, alpha: 1))
+    let keyGray = UIColor.voiceType(light: UIColor(red: 0.714, green: 0.741, blue: 0.788, alpha: 1),
+                                    dark: UIColor(red: 0.231, green: 0.231, blue: 0.242, alpha: 1))
+    let ink = UIColor.voiceType(light: UIColor(red: 0.102, green: 0.110, blue: 0.122, alpha: 1),
+                                dark: UIColor(red: 0.945, green: 0.949, blue: 0.957, alpha: 1))
+    let disabledInk = UIColor.voiceType(light: UIColor(red: 0.102, green: 0.110, blue: 0.122, alpha: 0.48),
+                                        dark: UIColor(red: 0.945, green: 0.949, blue: 0.957, alpha: 0.38))
+    let inkSoft = UIColor.voiceType(light: UIColor(red: 0.243, green: 0.263, blue: 0.294, alpha: 1),
+                                    dark: UIColor(red: 0.760, green: 0.768, blue: 0.792, alpha: 1))
+    let muted = UIColor.voiceType(light: UIColor(red: 0.408, green: 0.439, blue: 0.486, alpha: 1),
+                                  dark: UIColor(red: 0.596, green: 0.608, blue: 0.639, alpha: 1))
     let accent = UIColor.voiceType(light: UIColor(red: 0.878, green: 0.631, blue: 0.102, alpha: 1),
                                    dark: UIColor(red: 0.941, green: 0.737, blue: 0.271, alpha: 1))
     let live = UIColor.voiceType(light: UIColor(red: 0.812, green: 0.290, blue: 0.125, alpha: 1),
