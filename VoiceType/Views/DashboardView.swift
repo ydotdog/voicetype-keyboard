@@ -820,17 +820,11 @@ private struct CreditScreen: View {
             )
 
             VStack(spacing: 12) {
-                if store.products.isEmpty && !store.isLoading {
-                    ForEach(FallbackCreditPack.all) { pack in
-                        UnavailableCreditPackCard(pack: pack)
+                ForEach(FallbackCreditPack.all) { pack in
+                    CreditPackCard(pack: pack, product: store.product(for: pack.id)) {
+                        Task { await store.purchase(productID: pack.id, account: account) }
                     }
-                } else {
-                    ForEach(store.products) { product in
-                        CreditPackCard(product: product, isPopular: product.id.contains("medium")) {
-                            Task { await store.purchase(product, account: account) }
-                        }
-                        .disabled(store.isLoading)
-                    }
+                    .disabled(store.isLoading)
                 }
             }
 
@@ -887,29 +881,29 @@ private struct FallbackCreditPack: Identifiable {
             id: ProductIDs.small,
             displayPrice: "$0.99",
             displayName: "990,000 Credits",
-            description: "Waiting for App Store product",
+            description: "Starter pack for quick dictation",
             isPopular: false
         ),
         FallbackCreditPack(
             id: ProductIDs.medium,
             displayPrice: "$4.99",
             displayName: "4,990,000 Credits",
-            description: "Waiting for App Store product",
+            description: "Best for regular dictation",
             isPopular: true
         ),
         FallbackCreditPack(
             id: ProductIDs.large,
             displayPrice: "$19.99",
             displayName: "19,990,000 Credits",
-            description: "Waiting for App Store product",
+            description: "Best value for heavy use",
             isPopular: false
         )
     ]
 }
 
 private struct CreditPackCard: View {
-    let product: Product
-    let isPopular: Bool
+    let pack: FallbackCreditPack
+    let product: Product?
     let buy: () -> Void
 
     var body: some View {
@@ -917,9 +911,9 @@ private struct CreditPackCard: View {
             HStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 9) {
-                        Text(product.displayPrice)
+                        Text(product?.displayPrice ?? pack.displayPrice)
                             .font(AppTheme.serif(30, weight: .regular))
-                        if isPopular {
+                        if pack.isPopular {
                             Text("POPULAR")
                                 .font(.system(size: 10, weight: .bold))
                                 .tracking(0.8)
@@ -931,77 +925,35 @@ private struct CreditPackCard: View {
                         }
                     }
 
-                    Text(product.displayName)
+                    Text(product?.displayName ?? pack.displayName)
                         .font(.system(size: 13, weight: .semibold))
-                    Text(product.description)
+                    Text(product?.description ?? pack.description)
                         .font(.system(size: 12, weight: .medium))
                         .lineLimit(2)
                 }
-                .foregroundStyle(isPopular ? AppTheme.surface : AppTheme.ink)
+                .foregroundStyle(pack.isPopular ? AppTheme.surface : AppTheme.ink)
 
                 Spacer()
 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(isPopular ? AppTheme.surface.opacity(0.58) : AppTheme.secondary)
+                Text("Buy")
+                    .font(.system(size: 13, weight: .bold))
+                    .padding(.horizontal, 13)
+                    .frame(height: 34)
+                    .background(pack.isPopular ? AppTheme.surface.opacity(0.16) : AppTheme.surface2)
+                    .clipShape(Capsule())
+                    .foregroundStyle(pack.isPopular ? AppTheme.surface : AppTheme.accentDeep)
             }
             .padding(20)
             .frame(maxWidth: .infinity)
-            .background(isPopular ? AppTheme.ink : AppTheme.surface)
+            .background(pack.isPopular ? AppTheme.ink : AppTheme.surface)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(isPopular ? Color.clear : AppTheme.border, lineWidth: 1)
+                    .stroke(pack.isPopular ? Color.clear : AppTheme.border, lineWidth: 1)
             }
             .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(PlainHapticButtonStyle())
-    }
-}
-
-private struct UnavailableCreditPackCard: View {
-    let pack: FallbackCreditPack
-
-    var body: some View {
-        HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 9) {
-                    Text(pack.displayPrice)
-                        .font(AppTheme.serif(30, weight: .regular))
-                    if pack.isPopular {
-                        Text("POPULAR")
-                            .font(.system(size: 10, weight: .bold))
-                            .tracking(0.8)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(AppTheme.accent.opacity(0.55))
-                            .foregroundStyle(AppTheme.ink)
-                            .clipShape(Capsule())
-                    }
-                }
-
-                Text(pack.displayName)
-                    .font(.system(size: 13, weight: .semibold))
-                Text(pack.description)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(2)
-            }
-            .foregroundStyle(AppTheme.ink.opacity(0.52))
-
-            Spacer()
-
-            Image(systemName: "exclamationmark.circle")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(AppTheme.secondary)
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity)
-        .background(AppTheme.surface.opacity(0.62))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(AppTheme.borderSoft, lineWidth: 1)
-        }
     }
 }
 

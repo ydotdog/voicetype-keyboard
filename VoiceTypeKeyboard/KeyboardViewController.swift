@@ -1,13 +1,14 @@
+import AudioToolbox
+import ObjectiveC
 import UIKit
 
-final class KeyboardViewController: UIInputViewController {
+final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
     private let viewModel = KeyboardViewModel()
     private var refreshTimer: Timer?
     private var pendingAction: PendingKeyboardAction?
     private var pendingActionStartedAt: Date?
     private var actionNotice: String?
     private let pendingActionTimeout: TimeInterval = 4
-    private let keyboardChromeCornerRadius: CGFloat = 16
 
     private let contentView = UIView()
     private let topRow = UIStackView()
@@ -22,7 +23,6 @@ final class KeyboardViewController: UIInputViewController {
     private let waveStack = UIStackView()
     private let helperLabel = UILabel()
     private let bottomRow = UIStackView()
-    private let switchKeyboardButton = UIButton(type: .system)
     private let returnButton = UIButton(type: .system)
     private let deleteButton = UIButton(type: .system)
     private let keyFeedback = UIImpactFeedbackGenerator(style: .light)
@@ -34,6 +34,10 @@ final class KeyboardViewController: UIInputViewController {
 
     private let palette = KeyboardPalette()
     private let keyboardHeight: CGFloat = 188
+
+    var enableInputClicksWhenVisible: Bool {
+        true
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -104,10 +108,10 @@ final class KeyboardViewController: UIInputViewController {
         height.isActive = true
 
         contentView.translatesAutoresizingMaskIntoConstraints = false
-        contentView.backgroundColor = palette.keyboard
+        contentView.backgroundColor = .clear
         contentView.layer.cornerCurve = .continuous
-        contentView.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
-        contentView.layer.masksToBounds = true
+        contentView.layer.maskedCorners = []
+        contentView.layer.masksToBounds = false
         view.addSubview(contentView)
         NSLayoutConstraint.activate([
             contentView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -123,21 +127,20 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func updateKeyboardChrome() {
-        contentView.layer.cornerRadius = keyboardChromeCornerRadius
+        contentView.layer.cornerRadius = 0
         view.backgroundColor = .clear
         inputView?.backgroundColor = .clear
+        contentView.backgroundColor = .clear
     }
 
     private func applyPalette() {
         view.backgroundColor = .clear
         inputView?.backgroundColor = .clear
-        contentView.backgroundColor = palette.keyboard
+        contentView.backgroundColor = .clear
         wordmarkLabel.attributedText = wordmark()
         promptLabel.textColor = palette.inkSoft
         helperLabel.textColor = palette.muted
         actionTitleLabel.textColor = palette.keySurface
-        switchKeyboardButton.backgroundColor = palette.keyGray
-        switchKeyboardButton.tintColor = palette.inkSoft
         returnButton.backgroundColor = palette.keySurface
         returnButton.setTitleColor(palette.ink, for: .normal)
         deleteButton.backgroundColor = palette.keyGray
@@ -281,26 +284,26 @@ final class KeyboardViewController: UIInputViewController {
     private func setupBottomRow() {
         bottomRow.axis = .horizontal
         bottomRow.alignment = .center
-        bottomRow.distribution = .equalSpacing
+        bottomRow.distribution = .fill
+        bottomRow.spacing = 12
         bottomRow.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(bottomRow)
-
-        configureIconKey(switchKeyboardButton, systemName: "globe", accessibilityLabel: "Next keyboard")
-        installKeyPressFeedback(on: switchKeyboardButton)
-        switchKeyboardButton.addTarget(self, action: #selector(nextKeyboardTapped), for: .touchUpInside)
 
         configureTextKey(returnButton, text: "return", accessibilityLabel: "Return")
         installKeyPressFeedback(on: returnButton)
         returnButton.addTarget(self, action: #selector(returnTapped), for: .touchUpInside)
+        returnButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        returnButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         configureIconKey(deleteButton, systemName: "delete.left", accessibilityLabel: "Delete")
         installKeyPressFeedback(on: deleteButton)
         deleteButton.addTarget(self, action: #selector(deleteTapped), for: .touchUpInside)
+        deleteButton.setContentHuggingPriority(.required, for: .horizontal)
+        deleteButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         let deleteLongPress = UILongPressGestureRecognizer(target: self, action: #selector(deleteLongPressed(_:)))
         deleteLongPress.minimumPressDuration = 0.35
         deleteButton.addGestureRecognizer(deleteLongPress)
 
-        bottomRow.addArrangedSubview(switchKeyboardButton)
         bottomRow.addArrangedSubview(returnButton)
         bottomRow.addArrangedSubview(deleteButton)
 
@@ -310,9 +313,7 @@ final class KeyboardViewController: UIInputViewController {
             bottomRow.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -4),
             bottomRow.heightAnchor.constraint(equalToConstant: 46),
 
-            switchKeyboardButton.widthAnchor.constraint(equalToConstant: 46),
-            switchKeyboardButton.heightAnchor.constraint(equalToConstant: 46),
-            returnButton.widthAnchor.constraint(equalToConstant: 140),
+            returnButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
             returnButton.heightAnchor.constraint(equalToConstant: 44),
             deleteButton.widthAnchor.constraint(equalToConstant: 46),
             deleteButton.heightAnchor.constraint(equalToConstant: 46)
@@ -358,6 +359,20 @@ final class KeyboardViewController: UIInputViewController {
         actionFeedback.prepare()
     }
 
+    private func playKeyFeedback(intensity: CGFloat = 0.85) {
+        keyFeedback.impactOccurred(intensity: intensity)
+        keyFeedback.prepare()
+        UIDevice.current.playInputClick()
+        AudioServicesPlaySystemSound(1519)
+    }
+
+    private func playActionFeedback(intensity: CGFloat = 0.9) {
+        actionFeedback.impactOccurred(intensity: intensity)
+        actionFeedback.prepare()
+        UIDevice.current.playInputClick()
+        AudioServicesPlaySystemSound(1520)
+    }
+
     private func installKeyPressFeedback(on control: UIControl) {
         control.addTarget(self, action: #selector(keyPressBegan(_:)), for: [.touchDown, .touchDragEnter])
         control.addTarget(
@@ -377,14 +392,12 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     @objc private func keyPressBegan(_ sender: UIControl) {
-        keyFeedback.impactOccurred(intensity: 0.85)
-        keyFeedback.prepare()
+        playKeyFeedback()
         setPressed(true, for: sender)
     }
 
     @objc private func actionPressBegan(_ sender: UIControl) {
-        actionFeedback.impactOccurred(intensity: 0.9)
-        actionFeedback.prepare()
+        playActionFeedback()
         setPressed(true, for: sender)
     }
 
@@ -449,18 +462,18 @@ final class KeyboardViewController: UIInputViewController {
 
         let canUseBridge = viewModel.isKeyboardReady && hasFullAccess
         actionControl.isEnabled = pendingAction == nil && !viewModel.isTranscribing
-        let helperText = actionNotice ?? defaultHelperText(canUseBridge: canUseBridge)
+        let helperText = actionNotice ?? defaultHelperText(canUseBridge: canUseBridge, pendingAction: pendingAction)
         helperLabel.text = helperText
         helperLabel.isHidden = helperText.isEmpty
 
         if pendingAction == .startingClip {
-            setLiveAction(accessibilityLabel: "Starting recording")
+            setStatusAction(systemName: "mic.fill", title: "Starting", accessibilityLabel: "Starting recording", tintColor: palette.live)
         } else if pendingAction == .stoppingClip {
-            setLiveAction(accessibilityLabel: "Finishing recording")
+            setStatusAction(systemName: "checkmark.circle.fill", title: "Finishing", accessibilityLabel: "Finishing recording", tintColor: palette.live)
         } else if viewModel.isKeyboardRecording {
-            setLiveAction(accessibilityLabel: "Tap to finish recording")
+            setStatusAction(title: "Stop", accessibilityLabel: "Tap to finish recording", tintColor: palette.live, showsWave: true)
         } else if viewModel.isTranscribing {
-            setLiveAction(accessibilityLabel: "Transcribing")
+            setStatusAction(systemName: "waveform", title: "Transcribing", accessibilityLabel: "Transcribing", tintColor: palette.live)
         } else {
             promptLabel.textColor = palette.inkSoft
             actionControl.backgroundColor = canUseBridge ? palette.ink : palette.disabledInk
@@ -482,13 +495,28 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
-    private func setLiveAction(accessibilityLabel: String) {
+    private func setStatusAction(
+        systemName: String? = nil,
+        title: String,
+        accessibilityLabel: String,
+        tintColor: UIColor,
+        showsWave: Bool = false
+    ) {
         actionControl.backgroundColor = palette.keySurface
-        actionControl.layer.borderColor = palette.live.withAlphaComponent(0.22).cgColor
+        actionControl.layer.borderColor = tintColor.withAlphaComponent(0.22).cgColor
         actionControl.layer.borderWidth = 1
-        promptLabel.textColor = palette.live
+        promptLabel.textColor = tintColor
         actionControl.accessibilityLabel = accessibilityLabel
-        actionStack.addArrangedSubview(waveStack)
+        if showsWave {
+            actionStack.addArrangedSubview(waveStack)
+        } else if let systemName {
+            micImageView.image = UIImage(systemName: systemName)
+            micImageView.tintColor = tintColor
+            actionStack.addArrangedSubview(micImageView)
+        }
+        actionTitleLabel.text = title
+        actionTitleLabel.textColor = tintColor
+        actionStack.addArrangedSubview(actionTitleLabel)
     }
 
     private func actionTitle(canUseBridge: Bool) -> String {
@@ -498,9 +526,21 @@ final class KeyboardViewController: UIInputViewController {
         return canUseBridge ? "Speak" : "Open VoiceType"
     }
 
-    private func defaultHelperText(canUseBridge: Bool) -> String {
+    private func defaultHelperText(canUseBridge: Bool, pendingAction: PendingKeyboardAction?) -> String {
+        if pendingAction == .startingClip {
+            return "Starting clip..."
+        }
+        if pendingAction == .stoppingClip {
+            return "Finishing clip..."
+        }
         if !hasFullAccess {
             return "Enable Full Access in Settings."
+        }
+        if viewModel.isKeyboardRecording {
+            return "Recording. Tap Stop when done."
+        }
+        if viewModel.isTranscribing {
+            return "Processing audio..."
         }
         if canUseBridge {
             return ""
@@ -509,6 +549,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     @objc private func actionTapped() {
+        playActionFeedback(intensity: 0.55)
         viewModel.refresh()
         clearResolvedPendingAction()
         guard pendingAction == nil else {
@@ -519,6 +560,7 @@ final class KeyboardViewController: UIInputViewController {
 
         if viewModel.isKeyboardRecording {
             setPendingAction(.stoppingClip)
+            updateUI(force: true)
             // Re-arm here: the armed state is cleared whenever the keyboard
             // disappears, so the transcript follows the field where the user
             // actually finished the clip.
@@ -542,23 +584,20 @@ final class KeyboardViewController: UIInputViewController {
         updateUI()
     }
 
-    @objc private func nextKeyboardTapped() {
-        advanceToNextInputMode()
-    }
-
     @objc private func returnTapped() {
+        playKeyFeedback(intensity: 0.5)
         textDocumentProxy.insertText("\n")
     }
 
     @objc private func deleteTapped() {
+        playKeyFeedback(intensity: 0.5)
         textDocumentProxy.deleteBackward()
     }
 
     @objc private func deleteLongPressed(_ recognizer: UILongPressGestureRecognizer) {
         switch recognizer.state {
         case .began:
-            keyFeedback.impactOccurred(intensity: 0.9)
-            keyFeedback.prepare()
+            playKeyFeedback(intensity: 0.9)
             setPressed(true, for: deleteButton)
             textDocumentProxy.deleteBackward()
             startDeleteRepeat()
@@ -583,8 +622,7 @@ final class KeyboardViewController: UIInputViewController {
 
     @objc private func deleteRepeatTick() {
         textDocumentProxy.deleteBackward()
-        keyFeedback.impactOccurred(intensity: 0.45)
-        keyFeedback.prepare()
+        playKeyFeedback(intensity: 0.45)
     }
 
     private func stopDeleteRepeat() {
@@ -595,18 +633,60 @@ final class KeyboardViewController: UIInputViewController {
     private func openContainingApp(route: ContainingAppRoute) {
         guard let url = route.url else { return }
         scheduleOpenAppFallback(route: route)
+        let responderOpenDispatched = openURLThroughResponderChain(url)
+        let applicationOpenDispatched = openURLThroughApplicationRuntime(url)
         if let extensionContext {
             extensionContext.open(url) { [weak self] didOpen in
                 DispatchQueue.main.async {
                     guard let self else { return }
-                    if !didOpen {
+                    if !didOpen, !responderOpenDispatched, !applicationOpenDispatched {
                         self.showOpenAppFallback(route: route)
                     }
                 }
             }
-        } else {
+        } else if !responderOpenDispatched, !applicationOpenDispatched {
             showOpenAppFallback(route: route)
         }
+    }
+
+    @discardableResult
+    private func openURLThroughResponderChain(_ url: URL) -> Bool {
+        let selector = Selector(("openURL:"))
+        var responder: UIResponder? = view
+        while let current = responder {
+            if current.responds(to: selector) {
+                current.perform(selector, with: url)
+                return true
+            }
+            responder = current.next
+        }
+        return false
+    }
+
+    @discardableResult
+    private func openURLThroughApplicationRuntime(_ url: URL) -> Bool {
+        let sharedSelector = Selector(("sharedApplication"))
+        let openSelector = Selector(("openURL:"))
+        guard
+            let applicationClass = NSClassFromString("UIApplication"),
+            let sharedMethod = class_getClassMethod(applicationClass, sharedSelector),
+            let openMethod = class_getInstanceMethod(applicationClass, openSelector)
+        else {
+            return false
+        }
+
+        typealias SharedApplicationFunction = @convention(c) (AnyClass, Selector) -> AnyObject
+        typealias OpenURLFunction = @convention(c) (AnyObject, Selector, NSURL) -> Bool
+        let sharedApplication = unsafeBitCast(
+            method_getImplementation(sharedMethod),
+            to: SharedApplicationFunction.self
+        )
+        let openURL = unsafeBitCast(
+            method_getImplementation(openMethod),
+            to: OpenURLFunction.self
+        )
+        let application = sharedApplication(applicationClass, sharedSelector)
+        return openURL(application, openSelector, url as NSURL)
     }
 
     private func scheduleOpenAppFallback(route: ContainingAppRoute) {
@@ -758,8 +838,6 @@ final class KeyboardViewModel: ObservableObject {
 }
 
 private struct KeyboardPalette {
-    let keyboard = UIColor.voiceType(light: UIColor(red: 0.812, green: 0.831, blue: 0.859, alpha: 1),
-                                     dark: UIColor(red: 0.118, green: 0.118, blue: 0.125, alpha: 1))
     let keySurface = UIColor.voiceType(light: .white,
                                        dark: UIColor(red: 0.173, green: 0.173, blue: 0.184, alpha: 1))
     let keyGray = UIColor.voiceType(light: UIColor(red: 0.714, green: 0.741, blue: 0.788, alpha: 1),

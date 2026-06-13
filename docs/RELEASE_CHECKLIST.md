@@ -72,12 +72,13 @@
 
 - Replace Release `VOICETYPE_BACKEND_URL` in `project.yml` with the production HTTPS host.
 - Run `xcodegen generate`.
-- Archived and uploaded `1.0.0 (5)` on 2026-06-13 through `xcodebuild
+- Archived and uploaded `1.0.0 (6)` on 2026-06-13 through `xcodebuild
   -exportArchive` with App Store Connect upload destination. This build includes
-  the direct `ASAuthorizationController` Sign in with Apple flow, Add Credit
-  empty-state handling, larger Settings row hit areas, and keyboard UI fixes for
-  app-open fallback plus system keyboard background/rounding. Apple accepted the
-  package and reported upload state `PROCESSING`; select or distribute build `5`
+  always-visible Add Credit purchase buttons, stronger keyboard app-open
+  dispatch, no extra keyboard globe key, system keyboard background passthrough,
+  fallback haptic/audio feedback, and immediate keyboard `Finishing` state after
+  tapping Stop. Apple accepted the package and reported upload state
+  `PROCESSING`; select or distribute build `6`
   after processing completes.
 - Test on device:
   - Sign in with Apple succeeds.

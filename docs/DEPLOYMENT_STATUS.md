@@ -86,21 +86,21 @@ Latest real transcription smoke test:
 Latest upload:
 
 - Date: 2026-06-13.
-- Version/build: `1.0.0 (5)`.
-- Archive path: latest build-5 archive recorded in `/tmp/voicetype_latest_archive_path`.
-- Local verification IPA: `/tmp/VoiceTypeExport-build5-local-20260613123452/VoiceType.ipa`.
+- Version/build: `1.0.0 (6)`.
+- Archive path: `/tmp/VoiceType-build6-20260613125617.xcarchive`.
+- Local verification IPA: `/tmp/VoiceTypeExport-build6-local-20260613125646/VoiceType.ipa`.
 - Signing: `Apple Distribution: jialu qi (WC3PWB5R2J)` for both the containing
   app and keyboard extension.
 - Upload method: `xcodebuild -exportArchive` with `method=app-store-connect`,
   `destination=upload`, and automatic signing.
 - Result: Xcode reported `Uploaded VoiceType` and `Upload succeeded`; Apple
   accepted the package and reported upload state `PROCESSING`. Delivery UUID:
-  `d89ecd9a-6c39-4fba-aa2e-645a16d6cfb0`.
-- The exported distribution IPA was verified as `CFBundleVersion` `5`,
+  `b4a64a59-af05-4b05-9cc7-14107fd05a73`.
+- The exported distribution IPA was verified as `CFBundleVersion` `6`,
   backend `https://voicetype.y.dog`, `get-task-allow=false`, and the containing
   app includes the Sign in with Apple entitlement.
 - App Store Connect version `1.0` was previously linked to build `2`; select or
-  distribute build `5` after Apple processing completes.
+  distribute build `6` after Apple processing completes.
 
 App Store Connect configuration completed:
 
