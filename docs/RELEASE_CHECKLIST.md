@@ -25,8 +25,11 @@
   key. Dry-run first with `ASC_ISSUER_ID=<issuer-id> python3
   scripts/configure_app_store_iaps.py`, then apply with `--apply`.
 - Match product display names and credit pack sizes with backend `CREDIT_PRODUCTS_JSON` if changed.
-- Confirm the Paid Apps Agreement is `Active` in App Store Connect Business.
+- Confirm the Paid Apps Agreement, bank account, U.S. tax form, and Digital
+  Services Act compliance are `Active` in App Store Connect Business.
 - App Store version `1.0` is linked to uploaded build `1.0.0 (8)`.
+- App Store version `1.0` has the three consumable credit products selected in
+  `In-App Purchases and Subscriptions`.
 - English description, keywords, support URL, marketing URL, privacy policy URL,
   subtitle, and promotional text are set.
 - iPhone 6.7-inch and iPad Pro 12.9-inch screenshots are uploaded and processed.
@@ -65,6 +68,9 @@
   - `ALLOW_UNVERIFIED_STOREKIT_JWS=false`
   - `REQUIRE_STOREKIT_APP_ACCOUNT_TOKEN=true`
   - `ALLOW_DEV_CREDIT=false`
+- For TestFlight purchase validation, temporarily run the backend with
+  `APPLE_STOREKIT_ENVIRONMENT=SANDBOX`. Switch it back to `PRODUCTION` before
+  public App Store release.
 - Put the backend behind HTTPS.
 - Set request body limits to at least `MAX_AUDIO_BYTES`.
 - Enable database backups.

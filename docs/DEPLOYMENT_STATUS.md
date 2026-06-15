@@ -99,6 +99,9 @@ Latest upload:
   Testers group contains build `8`.
 - Internal tester `qijialuabc@gmail.com` is in the Internal Testers group with
   state `INSTALLED`.
+- The backend is temporarily configured with `APPLE_STOREKIT_ENVIRONMENT=SANDBOX`
+  for TestFlight purchase validation. Switch it back to `PRODUCTION` before the
+  public App Store release.
 
 App Store Connect configuration completed:
 
@@ -109,6 +112,8 @@ App Store Connect configuration completed:
 - Each consumable has availability enabled for all territories, a permanent
   manual price schedule in App Store Connect, and a complete App Review
   screenshot asset.
+- The three consumable IAP products are selected in App Store Connect version
+  `1.0` under `In-App Purchases and Subscriptions`.
 - English metadata, privacy policy URL, support URL, and marketing URL are set.
 - Age rating declaration is set.
 - Primary category is set to Productivity.
@@ -117,10 +122,8 @@ App Store Connect configuration completed:
 - App Privacy is published. The nutrition label lists Name, Email Address,
   Audio Data, Other User Content, User ID, and Purchase History as linked to the
   user, used for App Functionality, and not used for tracking.
-- Paid Apps Agreement status was not confirmed because Chrome is currently
-  redirected to the App Store Connect `/business/` login page. The Account
-  Holder must confirm the Paid Apps Agreement is `Active` in App Store Connect
-  Business before relying on IAP availability for review.
+- Paid Apps Agreement, bank account, U.S. W-9 tax form, and Digital Services Act
+  compliance are `Active` in App Store Connect Business as of 2026-06-15.
 - Run StoreKit sandbox/TestFlight validation before submitting for review.
 
 ## DNS
@@ -190,6 +193,7 @@ sudo docker compose -f deploy/gcp-vm/docker-compose.yml restart backend
 Still required for App Store release:
 
 - StoreKit sandbox/TestFlight validation.
-- Confirm Paid Apps Agreement is `Active` in App Store Connect Business.
+- Switch `APPLE_STOREKIT_ENVIRONMENT` back to `PRODUCTION` before releasing the
+  approved App Store build to the public.
 - Final App Store review submission after the remaining App Store Connect review
   form fields are checked.
