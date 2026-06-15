@@ -25,7 +25,8 @@
   key. Dry-run first with `ASC_ISSUER_ID=<issuer-id> python3
   scripts/configure_app_store_iaps.py`, then apply with `--apply`.
 - Match product display names and credit pack sizes with backend `CREDIT_PRODUCTS_JSON` if changed.
-- App Store version `1.0` is linked to uploaded build `1.0.0 (7)`.
+- Confirm the Paid Apps Agreement is `Active` in App Store Connect Business.
+- App Store version `1.0` is linked to uploaded build `1.0.0 (8)`.
 - English description, keywords, support URL, marketing URL, privacy policy URL,
   subtitle, and promotional text are set.
 - iPhone 6.7-inch and iPad Pro 12.9-inch screenshots are uploaded and processed.
@@ -72,14 +73,14 @@
 
 - Replace Release `VOICETYPE_BACKEND_URL` in `project.yml` with the production HTTPS host.
 - Run `xcodegen generate`.
-- Archived and uploaded `1.0.0 (7)` on 2026-06-13 through `xcodebuild
+- Archived and uploaded `1.0.0 (8)` on 2026-06-15 through `xcodebuild
   -exportArchive` with App Store Connect upload destination. This build includes
   always-visible Add Credit purchase buttons, stronger keyboard app-open
-  dispatch, no extra keyboard globe key, a full system-keyboard-gray background
+  dispatch, no extra keyboard globe key, a system keyboard material background
   to remove the top and bottom color mismatch, stronger haptic/audio feedback, and
-  immediate keyboard `Finishing` state after tapping Stop. Apple accepted the
-  package, App Store Connect reports build `7` as `VALID`, version `1.0` is
-  linked to build `7`, and the Internal Testers group contains build `7`.
+  immediate keyboard `Transcribing` state after tapping Stop. Apple accepted the
+  package, App Store Connect reports build `8` as `VALID`, version `1.0` is
+  linked to build `8`, and the Internal Testers group contains build `8`.
 - Test on device:
   - Sign in with Apple succeeds.
   - First sign-in grants the welcome credit (balance is non-zero without a purchase).

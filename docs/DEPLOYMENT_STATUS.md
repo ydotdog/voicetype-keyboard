@@ -1,6 +1,6 @@
 # Deployment Status
 
-Last updated: 2026-06-13
+Last updated: 2026-06-15
 
 ## GCP
 
@@ -85,18 +85,20 @@ Latest real transcription smoke test:
 
 Latest upload:
 
-- Date: 2026-06-13.
-- Version/build: `1.0.0 (7)`.
-- Archive path: `/tmp/VoiceType-build7-20260613134433.xcarchive`.
+- Date: 2026-06-15.
+- Version/build: `1.0.0 (8)`.
+- Archive path: `/tmp/VoiceType-build8-20260615095432.xcarchive`.
 - Signing: `Apple Distribution: jialu qi (WC3PWB5R2J)` for both the containing
   app and keyboard extension.
 - Upload method: `xcodebuild -exportArchive` with `method=app-store-connect`,
   `destination=upload`, and automatic signing.
 - Result: Xcode reported `Uploaded VoiceType` and `Upload succeeded`; App Store
-  Connect reports build `7` (`cd5942e6-50de-457d-b1c1-367b46de2c7b`) as
+  Connect reports build `8` (`bc9e2d48-b9e7-4680-b80e-64f29bdc4d32`) as
   `VALID`.
-- App Store Connect version `1.0` is linked to build `7`, and the Internal
-  Testers group contains build `7`.
+- App Store Connect version `1.0` is linked to build `8`, and the Internal
+  Testers group contains build `8`.
+- Internal tester `qijialuabc@gmail.com` is in the Internal Testers group with
+  state `INSTALLED`.
 
 App Store Connect configuration completed:
 
@@ -115,6 +117,10 @@ App Store Connect configuration completed:
 - App Privacy is published. The nutrition label lists Name, Email Address,
   Audio Data, Other User Content, User ID, and Purchase History as linked to the
   user, used for App Functionality, and not used for tracking.
+- Paid Apps Agreement status was not confirmed because Chrome is currently
+  redirected to the App Store Connect `/business/` login page. The Account
+  Holder must confirm the Paid Apps Agreement is `Active` in App Store Connect
+  Business before relying on IAP availability for review.
 - Run StoreKit sandbox/TestFlight validation before submitting for review.
 
 ## DNS
@@ -184,5 +190,6 @@ sudo docker compose -f deploy/gcp-vm/docker-compose.yml restart backend
 Still required for App Store release:
 
 - StoreKit sandbox/TestFlight validation.
+- Confirm Paid Apps Agreement is `Active` in App Store Connect Business.
 - Final App Store review submission after the remaining App Store Connect review
   form fields are checked.
