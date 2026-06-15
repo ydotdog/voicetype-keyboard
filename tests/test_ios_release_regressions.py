@@ -48,31 +48,49 @@ def test_keyboard_has_no_extra_globe_and_keeps_app_open_fallbacks() -> None:
     assert "components.scheme = AppConstants.appURLScheme" in keyboard
     assert 'URLQueryItem(name: "autostart", value: "1")' in keyboard
 
+    # The responder-chain path must reach the hosting UIApplication and use the
+    # modern open API. The old deprecated perform(openURL:) did not launch the
+    # containing app from the keyboard.
+    assert "if let application = current as? UIApplication" in keyboard
+    assert "application.open(url, options: [:], completionHandler: nil)" in keyboard
 
-def test_keyboard_background_feedback_and_stop_state_are_pinned() -> None:
+
+def test_keyboard_matches_system_background_feedback_and_stop_state() -> None:
     keyboard = read("VoiceTypeKeyboard/KeyboardViewController.swift")
 
-    assert "let keyboardBackground = UIColor.voiceType" in keyboard
-    assert "view.backgroundColor = palette.keyboardBackground" in keyboard
-    assert "inputView?.backgroundColor = palette.keyboardBackground" in keyboard
-    assert "contentView.backgroundColor = palette.keyboardBackground" in keyboard
-    assert "contentView.backgroundColor = .clear" not in keyboard
+    # Background must use the real system keyboard material (UIInputView with the
+    # .keyboard style) and keep every other layer transparent. A hardcoded color
+    # can never match the translucent system keyboard, which caused the seams.
+    assert "UIInputView(frame: .zero, inputViewStyle: .keyboard)" in keyboard
+    assert "let keyboardBackground = UIColor.voiceType" not in keyboard
+    assert "palette.keyboardBackground" not in keyboard
+    assert "view.backgroundColor = .clear" in keyboard
+    assert "inputView?.backgroundColor = .clear" in keyboard
+    assert "contentView.backgroundColor = .clear" in keyboard
 
+    # Haptics fire on touch-down through prepared, reused generators. The old
+    # throwaway generators were created and fired the same instant, so the
+    # Taptic Engine dropped them. (Keyboard haptics require Full Access.)
     assert "UISelectionFeedbackGenerator" in keyboard
-    assert "let immediateFeedback = UIImpactFeedbackGenerator(style: .light)" in keyboard
-    assert "let immediateFeedback = UIImpactFeedbackGenerator(style: .medium)" in keyboard
+    assert "let immediateFeedback" not in keyboard
+    assert "keyFeedback.impactOccurred(intensity: intensity)" in keyboard
+    assert "actionFeedback.impactOccurred(intensity: intensity)" in keyboard
     assert "AudioServicesPlaySystemSound(1519)" in keyboard
     assert "AudioServicesPlaySystemSound(1520)" in keyboard
     assert "for: [.touchDown, .touchDragEnter]" in keyboard
 
+    # Tapping Stop must immediately leave the recording look and show the
+    # processing state, and must never revert to the "recording" wave while a
+    # long clip is still transcribing.
     stop_branch_start = keyboard.index("if viewModel.isKeyboardRecording")
     stop_branch = keyboard[stop_branch_start : keyboard.index("} else if !hasFullAccess", stop_branch_start)]
     assert "setPendingAction(.stoppingClip)" in stop_branch
     assert "updateUI(force: true)" in stop_branch
     assert "RecordingBridgeStore.requestStopClip()" in stop_branch
-    assert 'title: "Finishing"' in keyboard
+    assert 'title: "Finishing"' not in keyboard
+    assert 'title: "Transcribing"' in keyboard
 
 
 def test_uploaded_build_number_is_current() -> None:
     project = read("project.yml")
-    assert "CURRENT_PROJECT_VERSION: 7" in project
+    assert "CURRENT_PROJECT_VERSION: 8" in project

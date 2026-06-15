@@ -16,7 +16,13 @@ final class StoreKitService: ObservableObject {
         do {
             let loaded = try await Product.products(for: ProductIDs.all)
             products = loaded.sorted { $0.price < $1.price }
-            if !loaded.isEmpty {
+            if loaded.isEmpty {
+                // The buttons below are real StoreKit purchase entry points; they
+                // only go live once the in-app purchases finish review and
+                // propagate in App Store Connect. Make that explicit so an empty
+                // list reads as an App Store state, not an app bug.
+                errorMessage = "Credit packs aren't loading from the App Store yet. In TestFlight this clears once the in-app purchases finish review and propagate (it can take a few hours). Tap reload to try again."
+            } else {
                 let loadedIDs = Set(loaded.map(\.id))
                 let missingIDs = ProductIDs.all.filter { !loadedIDs.contains($0) }
                 if !missingIDs.isEmpty {

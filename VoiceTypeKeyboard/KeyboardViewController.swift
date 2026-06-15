@@ -10,6 +10,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private var actionNotice: String?
     private let pendingActionTimeout: TimeInterval = 4
 
+    private let backdropView = UIInputView(frame: .zero, inputViewStyle: .keyboard)
     private let contentView = UIView()
     private let topRow = UIStackView()
     private let brandStack = UIStackView()
@@ -98,18 +99,32 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     }
 
     private func setupKeyboard() {
-        view.backgroundColor = palette.keyboardBackground
+        // Match the system keyboard exactly by rendering the real keyboard
+        // material (UIInputView with the .keyboard style) behind everything and
+        // keeping every other layer transparent. A hardcoded color can never
+        // match the translucent system background, which is what produced the
+        // visible color seams against the system keyboard chrome and top edge.
+        view.backgroundColor = .clear
         view.isOpaque = false
         view.clipsToBounds = false
-        inputView?.backgroundColor = palette.keyboardBackground
+        inputView?.backgroundColor = .clear
         view.insetsLayoutMarginsFromSafeArea = false
+
+        backdropView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(backdropView)
+        NSLayoutConstraint.activate([
+            backdropView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            backdropView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            backdropView.topAnchor.constraint(equalTo: view.topAnchor),
+            backdropView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
 
         let height = view.heightAnchor.constraint(equalToConstant: keyboardHeight)
         height.priority = .defaultHigh
         height.isActive = true
 
         contentView.translatesAutoresizingMaskIntoConstraints = false
-        contentView.backgroundColor = palette.keyboardBackground
+        contentView.backgroundColor = .clear
         contentView.layer.cornerCurve = .continuous
         contentView.layer.maskedCorners = []
         contentView.layer.masksToBounds = false
@@ -129,15 +144,15 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
     private func updateKeyboardChrome() {
         contentView.layer.cornerRadius = 0
-        view.backgroundColor = palette.keyboardBackground
-        inputView?.backgroundColor = palette.keyboardBackground
-        contentView.backgroundColor = palette.keyboardBackground
+        view.backgroundColor = .clear
+        inputView?.backgroundColor = .clear
+        contentView.backgroundColor = .clear
     }
 
     private func applyPalette() {
-        view.backgroundColor = palette.keyboardBackground
-        inputView?.backgroundColor = palette.keyboardBackground
-        contentView.backgroundColor = palette.keyboardBackground
+        view.backgroundColor = .clear
+        inputView?.backgroundColor = .clear
+        contentView.backgroundColor = .clear
         wordmarkLabel.attributedText = wordmark()
         promptLabel.textColor = palette.inkSoft
         helperLabel.textColor = palette.muted
@@ -361,10 +376,12 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         selectionFeedback.prepare()
     }
 
+    // Haptics inside a keyboard extension only fire when the user has granted
+    // "Allow Full Access". With it on, the pre-prepared impact generator is the
+    // reliable signal; the input click and system actuation are supplements.
+    // (The old code created a throwaway generator and fired it the same instant
+    // it was prepared, which the Taptic Engine drops, so it added nothing.)
     private func playKeyFeedback(intensity: CGFloat = 0.85) {
-        let immediateFeedback = UIImpactFeedbackGenerator(style: .light)
-        immediateFeedback.prepare()
-        immediateFeedback.impactOccurred(intensity: intensity)
         keyFeedback.impactOccurred(intensity: intensity)
         keyFeedback.prepare()
         selectionFeedback.selectionChanged()
@@ -374,9 +391,6 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     }
 
     private func playActionFeedback(intensity: CGFloat = 0.9) {
-        let immediateFeedback = UIImpactFeedbackGenerator(style: .medium)
-        immediateFeedback.prepare()
-        immediateFeedback.impactOccurred(intensity: intensity)
         actionFeedback.impactOccurred(intensity: intensity)
         actionFeedback.prepare()
         selectionFeedback.selectionChanged()
@@ -481,7 +495,11 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         if pendingAction == .startingClip {
             setStatusAction(systemName: "mic.fill", title: "Starting", accessibilityLabel: "Starting recording", tintColor: palette.live)
         } else if pendingAction == .stoppingClip {
-            setStatusAction(systemName: "checkmark.circle.fill", title: "Finishing", accessibilityLabel: "Finishing recording", tintColor: palette.live)
+            // The moment the user taps Stop we leave the recording look behind and
+            // show the processing state, even before the app confirms. Long clips
+            // can take a while to transcribe, so the user must never be left
+            // staring at the "recording" wave wondering if it is still capturing.
+            setStatusAction(systemName: "waveform", title: "Transcribing", accessibilityLabel: "Transcribing", tintColor: palette.live)
         } else if viewModel.isKeyboardRecording {
             setStatusAction(title: "Stop", accessibilityLabel: "Tap to finish recording", tintColor: palette.live, showsWave: true)
         } else if viewModel.isTranscribing {
@@ -543,7 +561,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             return "Starting clip..."
         }
         if pendingAction == .stoppingClip {
-            return "Finishing clip..."
+            return "Processing audio..."
         }
         if !hasFullAccess {
             return "Enable Full Access in Settings."
@@ -645,29 +663,32 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private func openContainingApp(route: ContainingAppRoute) {
         guard let url = route.url else { return }
         scheduleOpenAppFallback(route: route)
-        let responderOpenDispatched = openURLThroughResponderChain(url)
-        let applicationOpenDispatched = openURLThroughApplicationRuntime(url)
+        // Primary path: walk the responder chain to the hosting UIApplication and
+        // call the modern open(_:options:completionHandler:). This is what
+        // actually launches the containing app from a Full Access keyboard.
+        // Fall back to the runtime sharedApplication trick, then to the
+        // extension context as a last resort.
+        if openURLThroughResponderChain(url) || openURLThroughApplicationRuntime(url) {
+            return
+        }
         if let extensionContext {
             extensionContext.open(url) { [weak self] didOpen in
                 DispatchQueue.main.async {
-                    guard let self else { return }
-                    if !didOpen, !responderOpenDispatched, !applicationOpenDispatched {
-                        self.showOpenAppFallback(route: route)
-                    }
+                    guard let self, !didOpen else { return }
+                    self.showOpenAppFallback(route: route)
                 }
             }
-        } else if !responderOpenDispatched, !applicationOpenDispatched {
+        } else {
             showOpenAppFallback(route: route)
         }
     }
 
     @discardableResult
     private func openURLThroughResponderChain(_ url: URL) -> Bool {
-        let selector = Selector(("openURL:"))
-        var responder: UIResponder? = view
+        var responder: UIResponder? = self
         while let current = responder {
-            if current.responds(to: selector) {
-                current.perform(selector, with: url)
+            if let application = current as? UIApplication {
+                application.open(url, options: [:], completionHandler: nil)
                 return true
             }
             responder = current.next
@@ -850,8 +871,6 @@ final class KeyboardViewModel: ObservableObject {
 }
 
 private struct KeyboardPalette {
-    let keyboardBackground = UIColor.voiceType(light: UIColor(red: 0.824, green: 0.843, blue: 0.875, alpha: 1),
-                                               dark: UIColor(red: 0.118, green: 0.118, blue: 0.125, alpha: 1))
     let keySurface = UIColor.voiceType(light: .white,
                                        dark: UIColor(red: 0.173, green: 0.173, blue: 0.184, alpha: 1))
     let keyGray = UIColor.voiceType(light: UIColor(red: 0.714, green: 0.741, blue: 0.788, alpha: 1),
