@@ -85,34 +85,29 @@ Latest real transcription smoke test:
 
 Latest upload:
 
-- Date: 2026-06-15.
-- Version/build: `1.0.0 (8)`.
-- Archive path: `/tmp/VoiceType-build8-20260615095432.xcarchive`.
-- Signing: `Apple Distribution: jialu qi (WC3PWB5R2J)` for both the containing
-  app and keyboard extension.
+- Date: 2026-06-16.
+- Version/build: `1.0.0 (9)`.
+- Archive path: `/tmp/VoiceType-build9-20260616103920.xcarchive`.
+- Signing: automatic signing with team `WC3PWB5R2J`; export used
+  `method=app-store-connect` and `destination=upload`.
 - Upload method: `xcodebuild -exportArchive` with `method=app-store-connect`,
   `destination=upload`, and automatic signing.
 - Result: Xcode reported `Uploaded VoiceType` and `Upload succeeded`; App Store
-  Connect reports build `8` (`bc9e2d48-b9e7-4680-b80e-64f29bdc4d32`) as
+  Connect reports build `9` (`70137e93-4464-4e72-a47f-f7a9adc93f3d`) as
   `VALID`.
-- App Store Connect version `1.0` is linked to build `8`, and the Internal
-  Testers group contains build `8`.
+- App Store Connect version `1.0` is linked to build `9`. The Internal Testers
+  TestFlight group has access to all builds, so build `9` is available to the
+  internal group after App Store Connect processing.
 - Internal tester `qijialuabc@gmail.com` is in the Internal Testers group with
   state `INSTALLED`.
 - StoreKit receipt verification is now environment-agnostic. `verify_storekit_payload`
   verifies against the transaction's own `environment` first, then the configured
   `APPLE_STOREKIT_ENVIRONMENT`, then Sandbox and Production. This accepts TestFlight
   Sandbox transactions regardless of the configured environment, fixing the prior
-  HTTP 401 that blocked TestFlight purchases and credit grants. Requires a backend
-  redeploy to take effect; once deployed, the already-paid stuck transaction grants
+  HTTP 401 that blocked TestFlight purchases and credit grants. The backend was
+  redeployed from this code on 2026-06-16; already-paid stuck transactions grant
   retroactively via the client's unfinished-transaction replay (reopen the app or
-  tap Restore purchases). `APPLE_STOREKIT_ENVIRONMENT` no longer has to be flipped
-  between Sandbox and Production.
-
-Pending changes for next upload (build 9):
-
-- `CURRENT_PROJECT_VERSION` bumped to `9` in `project.yml`. Build 9 is not yet
-  archived or uploaded.
+  tap Restore purchases).
 - Keyboard extension `CFBundleDisplayName` changed from `VoiceType Keyboard` to
   `VoiceType`, and `PrimaryLanguage` changed from `en-US` to `mul` (the ISO 639
   code for "multiple languages"), so the globe/keyboard switcher reads just
@@ -218,10 +213,6 @@ sudo docker compose -f deploy/gcp-vm/docker-compose.yml restart backend
 
 Still required for App Store release:
 
-- Redeploy the backend so the environment-agnostic StoreKit verifier is live
-  (VM: `git pull`, then
-  `sudo docker compose -f deploy/gcp-vm/docker-compose.yml build backend` and
-  `... up -d backend`). This is what makes TestFlight purchases credit.
-- StoreKit sandbox/TestFlight validation after the redeploy.
+- StoreKit sandbox/TestFlight validation on build `9`.
 - Final App Store review submission after the remaining App Store Connect review
   form fields are checked.

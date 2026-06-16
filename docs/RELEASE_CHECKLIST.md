@@ -27,7 +27,7 @@
 - Match product display names and credit pack sizes with backend `CREDIT_PRODUCTS_JSON` if changed.
 - Confirm the Paid Apps Agreement, bank account, U.S. tax form, and Digital
   Services Act compliance are `Active` in App Store Connect Business.
-- App Store version `1.0` is linked to uploaded build `1.0.0 (8)`.
+- App Store version `1.0` is linked to uploaded build `1.0.0 (9)`.
 - App Store version `1.0` has the three consumable credit products selected in
   `In-App Purchases and Subscriptions`.
 - English description, keywords, support URL, marketing URL, privacy policy URL,
@@ -68,9 +68,9 @@
   - `ALLOW_UNVERIFIED_STOREKIT_JWS=false`
   - `REQUIRE_STOREKIT_APP_ACCOUNT_TOKEN=true`
   - `ALLOW_DEV_CREDIT=false`
-- For TestFlight purchase validation, temporarily run the backend with
-  `APPLE_STOREKIT_ENVIRONMENT=SANDBOX`. Switch it back to `PRODUCTION` before
-  public App Store release.
+- StoreKit verification accepts the transaction's own environment first, then the
+  configured environment, then Sandbox and Production, while keeping strict
+  signature verification and `appAccountToken` matching enabled.
 - Put the backend behind HTTPS.
 - Set request body limits to at least `MAX_AUDIO_BYTES`.
 - Enable database backups.
@@ -79,14 +79,17 @@
 
 - Replace Release `VOICETYPE_BACKEND_URL` in `project.yml` with the production HTTPS host.
 - Run `xcodegen generate`.
-- Archived and uploaded `1.0.0 (8)` on 2026-06-15 through `xcodebuild
+- Archived and uploaded `1.0.0 (9)` on 2026-06-16 through `xcodebuild
   -exportArchive` with App Store Connect upload destination. This build includes
   always-visible Add Credit purchase buttons, stronger keyboard app-open
   dispatch, no extra keyboard globe key, a system keyboard material background
   to remove the top and bottom color mismatch, stronger haptic/audio feedback, and
-  immediate keyboard `Transcribing` state after tapping Stop. Apple accepted the
-  package, App Store Connect reports build `8` as `VALID`, version `1.0` is
-  linked to build `8`, and the Internal Testers group contains build `8`.
+  immediate keyboard `Transcribing` state after tapping Stop. Build `9` also
+  fixes TestFlight StoreKit receipt verification, purchase 401 messaging, keyboard
+  button proportions, keyboard-mic ready-state recovery after Stop, and the
+  switcher language subtitle. Apple accepted the package, App Store Connect
+  reports build `9` as `VALID`, version `1.0` is linked to build `9`, and the
+  Internal Testers group has access to all builds.
 - Test on device:
   - Sign in with Apple succeeds.
   - First sign-in grants the welcome credit (balance is non-zero without a purchase).
