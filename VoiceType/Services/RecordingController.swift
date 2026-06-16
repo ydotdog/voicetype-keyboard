@@ -13,6 +13,13 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             RecordingPreferencesStore.durationLimit = durationLimit
             guard isRecording || isKeyboardSessionActive else { return }
             activeDurationLimit = durationLimit
+            // Re-verify the live recorder before republishing, so changing the
+            // session length can never broadcast a stale ".keyboardReady" over a
+            // recorder that has already died underneath us.
+            if isKeyboardSessionActive {
+                recoverKeyboardRecorderIfNeeded(reason: "session length changed")
+                guard isRecording || isKeyboardSessionActive else { return }
+            }
             publishBridgeState()
             Task { @MainActor [weak self] in
                 await self?.stopIfDurationLimitReached()
@@ -597,19 +604,30 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     }
 
     private func stopIfDurationLimitReached() async {
-        guard
-            isRecording || bridgeMode == .keyboardReady || bridgeMode == .keyboardRecording,
-            let maximumDuration = activeDurationLimit.maximumDuration,
-            elapsedSeconds >= maximumDuration,
-            let activeAccount
-        else {
+        guard let maximumDuration = activeDurationLimit.maximumDuration else { return }
+
+        // The session-length limit caps a single dictation, never the armed mic
+        // itself. While the keyboard mic is idle (ready) it must stay alive
+        // indefinitely: applying this limit to the whole session used to tear the
+        // armed mic down here and silently drop the user back to "Open VoiceType" the
+        // moment the elapsed *session* lifetime crossed the limit (e.g. the 5 min
+        // default) — the recurring bug that only a force-quit appeared to fix.
+        if bridgeMode == .keyboardRecording {
+            // Measure from when the user tapped Speak (the recorder's clip start),
+            // not from when the keyboard mic was first armed.
+            guard
+                let recorder,
+                let clipStartTime = keyboardClipStartTime,
+                recorder.currentTime - clipStartTime >= maximumDuration
+            else {
+                return
+            }
+            await stopKeyboardClipAndTranscribe()
             return
         }
-        if isKeyboardSessionActive {
-            if bridgeMode == .keyboardRecording {
-                await stopKeyboardClipAndTranscribe()
-            }
-            stopKeyboardReady()
+
+        // A standard in-app recording is bounded from its own start.
+        guard isRecording, bridgeMode == .standard, elapsedSeconds >= maximumDuration, let activeAccount else {
             return
         }
         await stopAndTranscribe(account: activeAccount)
@@ -734,14 +752,25 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     }
 
     private func stopKeyboardClipAndTranscribe() async {
+        // A Stop can land after the clip already ended, or after the session was
+        // interrupted. Don't silently swallow it: if we still hold an armed keyboard
+        // mic, repair it back to a usable ready state so the next Speak works, instead
+        // of leaving the keyboard stuck on a pending "Transcribing".
+        guard bridgeMode == .keyboardRecording, !isStopping else {
+            if isKeyboardSessionActive, !isStopping {
+                recoverKeyboardRecorderIfNeeded(reason: "stop clip with no active clip")
+            }
+            return
+        }
         guard
-            bridgeMode == .keyboardRecording,
-            !isStopping,
             let sourceURL = currentFileURL,
             let recorder,
             let clipStartTime = keyboardClipStartTime,
             let activeAccount
         else {
+            // We believed we were recording but the recorder/account is gone. Recover
+            // the armed session rather than dropping back to "Open VoiceType".
+            recoverKeyboardRecorderIfNeeded(reason: "stop clip with broken recorder state")
             return
         }
         cancelActiveTranscription()

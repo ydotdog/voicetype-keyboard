@@ -136,6 +136,31 @@ def test_keyboard_mic_recovers_from_stale_internal_recorder_state() -> None:
     assert 'showToast("VoiceType is finishing your clip.")' in keyboard_request
 
 
+def test_session_length_limit_caps_a_clip_not_the_armed_keyboard_mic() -> None:
+    # "Session length" must bound a single dictation, measured from when Speak was
+    # tapped. It must never tear down an idle, armed keyboard mic (.keyboardReady):
+    # doing that silently dropped the user back to "Open VoiceType" the instant the
+    # session lifetime crossed the limit (the 5 min default) -- the recurring
+    # "mic stops working until force-quit" bug.
+    controller = read("VoiceType/Services/RecordingController.swift")
+
+    start = controller.index("private func stopIfDurationLimitReached")
+    end = controller.index("\n    private func ", start + len("private func stopIfDurationLimitReached"))
+    body = controller[start:end]
+
+    assert "stopKeyboardReady" not in body
+    assert "bridgeMode == .keyboardReady" not in body
+    # A keyboard clip is bounded from the recorder's clip start, not the session.
+    assert "keyboardClipStartTime" in body
+    assert "recorder.currentTime - clipStartTime >= maximumDuration" in body
+
+    # Changing the session length re-verifies the live recorder before publishing,
+    # so it can never broadcast a stale ready over a dead recorder.
+    assert 'recoverKeyboardRecorderIfNeeded(reason: "session length changed")' in controller
+    # A Stop with no live clip recovers the armed mic instead of silently returning.
+    assert 'recoverKeyboardRecorderIfNeeded(reason: "stop clip with no active clip")' in controller
+
+
 def test_keyboard_mic_live_activity_is_configured() -> None:
     project = read("project.yml")
     info = read("VoiceType/Info.plist")
