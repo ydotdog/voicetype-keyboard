@@ -141,11 +141,10 @@ Latest upload:
   needed an App Store provisioning profile; retrying with
   `-allowProvisioningUpdates` created/downloaded signing assets and uploaded
   successfully.
-- Current source is bumped to build `15` for a stronger keyboard-mic recovery fix:
-  the app now verifies the real `AVAudioRecorder.isRecording` before publishing
-  keyboard-ready heartbeats, recovers after audio interruptions, media-services
-  reset, and foreground return, and times out stuck transcription uploads instead
-  of leaving the app in a permanent in-memory `Transcribing` state.
+- Current source is bumped to build `16` for the Live Activity sync race fix:
+  ActivityKit update/end operations now carry a monotonic epoch through a
+  serialized controller path so stale recording updates cannot resurrect the
+  Live Activity after the mic is off.
 - Build `11` also adds a Live Activity / Dynamic Island surface for the active
   keyboard microphone session, using the VoiceType app logo in compact and
   minimal presentations.
@@ -176,6 +175,15 @@ Latest upload:
   was archived at
   `/private/tmp/VoiceTypeBuild15SessionLengthKeyboardMic-202606161803.xcarchive`
   and uploaded with `xcodebuild -exportArchive` on 2026-06-16; Xcode reported
+  `Uploaded VoiceType` and `Upload succeeded`.
+- Build `16` includes the Live Activity sync race fix from commit `f21cdab`:
+  update/end operations now carry a monotonic epoch through a serialized
+  ActivityKit controller path so stale recording updates cannot resurrect the
+  Live Activity after the mic is off. It also keeps the compact Dynamic Island
+  short by showing a status dot instead of a running timer, while preserving the
+  one-row expanded island layout. It was archived at
+  `/private/tmp/VoiceTypeBuild16LiveActivitySyncRace-202606161950.xcarchive` and
+  uploaded with `xcodebuild -exportArchive` on 2026-06-16; Xcode reported
   `Uploaded VoiceType` and `Upload succeeded`.
 
 App Store Connect configuration completed:

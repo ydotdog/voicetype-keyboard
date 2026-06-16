@@ -122,6 +122,10 @@
   changes re-check the real recorder before republishing ready state, and broken
   Stop commands recover ready instead of silently returning. It was uploaded for
   App Store Connect processing on 2026-06-16.
+- Build `16` adds the Live Activity epoch/serialization fix from commit `f21cdab`
+  so stale recording updates cannot reopen the activity after the mic ends, and
+  switches compact Dynamic Island back to a short status dot instead of a running
+  timer. It was uploaded for App Store Connect processing on 2026-06-16.
 - Test on device:
   - Sign in with Apple succeeds.
   - First sign-in grants the welcome credit (balance is non-zero without a purchase).

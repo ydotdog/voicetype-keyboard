@@ -93,7 +93,7 @@ def test_keyboard_matches_system_background_feedback_and_stop_state() -> None:
 
 def test_uploaded_build_number_is_current() -> None:
     project = read("project.yml")
-    assert "CURRENT_PROJECT_VERSION: 15" in project
+    assert "CURRENT_PROJECT_VERSION: 16" in project
 
 
 def test_keyboard_clip_keeps_session_alive_across_stops() -> None:
@@ -172,10 +172,14 @@ def test_keyboard_mic_live_activity_is_configured() -> None:
     assert "VoiceTypeLiveActivity" in project
     assert "KeyboardMicLiveActivityController.shared.update" in controller
     assert "KeyboardMicLiveActivityController.shared.end" in controller
+    assert "private var liveActivityEpoch: UInt64" in controller
+    assert "nextLiveActivityEpoch()" in controller
+    assert "epoch: epoch" in controller
     assert "glassEffect(" in widget
     assert "VoiceTypeActivityLogo" in widget
     assert "barHeights" in widget
     assert "VoiceTypeActivityGlassPanel" in widget
+    assert "VoiceTypeActivityStatusDot" in widget
     assert "containerBackground(for: .widget)" in widget
     assert "readabilityScrim" in widget
     assert "VoiceTypeActivityIslandStatus" in widget
@@ -185,6 +189,18 @@ def test_keyboard_mic_live_activity_is_configured() -> None:
     assert "func voiceTypeGlass" not in widget
     assert "compactLeading" in widget
     assert "minimal" in widget
+
+    live_activity_controller = read("VoiceType/Services/KeyboardMicLiveActivityController.swift")
+    assert "private var latestEpoch: UInt64" in live_activity_controller
+    assert "private var operationChain: Task<Void, Never>?" in live_activity_controller
+    assert "await serialize(epoch: epoch)" in live_activity_controller
+    assert "guard epoch >= self.latestEpoch else { return }" in live_activity_controller
+
+    compact_start = widget.index("private struct VoiceTypeActivityCompactStatus")
+    compact_end = widget.index("\nprivate struct VoiceTypeActivityGlassPanel", compact_start)
+    compact_body = widget[compact_start:compact_end]
+    assert "VoiceTypeActivityStatusDot" in compact_body
+    assert "VoiceTypeActivityTimer" not in compact_body
 
 
 def test_keyboard_switcher_name_is_voicetype_without_suffix() -> None:
