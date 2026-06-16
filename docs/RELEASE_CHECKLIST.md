@@ -100,8 +100,8 @@
   Internal Testers group has access to all builds. Version `1.0` is submitted
   for App Review and configured for manual release after approval.
 - Build `10` contains the stale keyboard-mic recorder recovery fix and was
-  uploaded on 2026-06-16. Wait for App Store Connect processing, validate it on
-  device, then replace build `9` before public release.
+  uploaded on 2026-06-16. App Store Connect reports build `10` as `VALID`.
+  Validate it on device, then replace build `9` before public release.
 - Test on device:
   - Sign in with Apple succeeds.
   - First sign-in grants the welcome credit (balance is non-zero without a purchase).
