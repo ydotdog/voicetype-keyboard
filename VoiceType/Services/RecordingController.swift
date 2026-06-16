@@ -199,7 +199,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         }
     }
 
-    func stopKeyboardReady() {
+    func stopKeyboardReady(preserveAutoInsert: Bool = false) {
         guard isKeyboardSessionActive else { return }
         cancelActiveTranscription()
         isStopping = true
@@ -215,7 +215,9 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         stopTimer()
         RecordingBridgeStore.state = .inactive
         endLiveActivity()
-        KeyboardAutoInsertStore.clear()
+        if !preserveAutoInsert {
+            KeyboardAutoInsertStore.clear()
+        }
         if let currentFileURL {
             try? FileManager.default.removeItem(at: currentFileURL)
         }
@@ -440,12 +442,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         guard isKeyboardSessionActive else { return }
         if let recorder, recorder.isRecording { return }
 
-        // stopKeyboardClipAndTranscribe intentionally publishes `.transcribing`
-        // before its replacement recorder is started. Do not delete that source
-        // file during the small stop -> restart handoff window.
-        if isStopping, bridgeMode == .transcribing, recorder == nil {
-            return
-        }
+        let shouldKeepTranscribingOnRecoveryFailure = bridgeMode == .transcribing && isProcessing
 
         let interruptedActiveClip = bridgeMode == .keyboardRecording
         if interruptedActiveClip {
@@ -481,7 +478,11 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             }
         } catch {
             errorMessage = error.localizedDescription
-            stopKeyboardReady()
+            if shouldKeepTranscribingOnRecoveryFailure {
+                publishBridgeState()
+            } else {
+                stopKeyboardReady()
+            }
         }
     }
 
@@ -853,6 +854,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "VoiceTypeKeyboardClip")
         recorder.stop()
         self.recorder = nil
+        currentFileURL = nil
         isProcessing = true
         processingStartedAt = Date()
         bridgeMode = .transcribing
@@ -904,7 +906,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         }
 
         do {
-            try restartKeyboardReadyRecorder()
+            recoverKeyboardRecorderIfNeeded(reason: "keyboard clip handoff")
             guard isActiveTranscription(id) else { return }
             try await exportClip(sourceURL: sourceURL, outputURL: clipURL, start: clipStartTime, duration: clipDuration)
             guard isActiveTranscription(id) else { return }
@@ -923,11 +925,16 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
 
             if shouldStopKeyboardSessionAfterCurrentClip {
                 shouldStopKeyboardSessionAfterCurrentClip = false
-                stopKeyboardReady()
+                stopKeyboardReady(preserveAutoInsert: true)
             } else {
+                recoverKeyboardRecorderIfNeeded(reason: "keyboard clip transcribed")
                 isProcessing = false
-                bridgeMode = .keyboardReady
-                publishBridgeState()
+                if let recorder, recorder.isRecording {
+                    bridgeMode = .keyboardReady
+                    publishBridgeState()
+                } else {
+                    stopKeyboardReady(preserveAutoInsert: true)
+                }
             }
         } catch {
             guard isActiveTranscription(id) else { return }
@@ -938,7 +945,13 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
                 shouldStopKeyboardSessionAfterCurrentClip = false
                 stopKeyboardReady()
             } else if self.recorder == nil {
-                stopKeyboardReady()
+                recoverKeyboardRecorderIfNeeded(reason: "keyboard clip transcription failed")
+                if let recorder, recorder.isRecording {
+                    bridgeMode = .keyboardReady
+                    publishBridgeState()
+                } else {
+                    stopKeyboardReady()
+                }
             } else {
                 bridgeMode = .keyboardReady
                 publishBridgeState()

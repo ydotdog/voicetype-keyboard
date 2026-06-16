@@ -141,11 +141,11 @@ Latest upload:
   needed an App Store provisioning profile; retrying with
   `-allowProvisioningUpdates` created/downloaded signing assets and uploaded
   successfully.
-- Current source is bumped to build `17` for the corrected session-length
-  semantics and Live Activity layout cleanup. `Session length` again limits the
-  armed keyboard mic session from the moment the user taps Turn on keyboard mic;
-  a separate 10-minute cap protects each Speak clip. Live Activity and Dynamic
-  Island no longer show an elapsed timer.
+- Current source is bumped to build `18` for the keyboard Stop handoff fix. A
+  failed restart of the continuous keyboard recorder can no longer abort the
+  current clip before export/transcription; the app keeps the bridge in
+  `Transcribing`, continues processing the captured audio, retries ready-recorder
+  recovery, and preserves keyboard auto-insert after a successful transcript.
 - Build `11` also adds a Live Activity / Dynamic Island surface for the active
   keyboard microphone session, using the VoiceType app logo in compact and
   minimal presentations.
@@ -195,6 +195,16 @@ Latest upload:
   the left and the current mic status on the right. It was archived at
   `/private/tmp/VoiceTypeBuild17SessionLengthLiveActivity-202606162103.xcarchive`
   and uploaded with `xcodebuild -exportArchive` on 2026-06-16; Xcode reported
+  `Uploaded VoiceType` and `Upload succeeded`.
+- Build `18` fixes the Stop path that could still drop the keyboard back to
+  `Open VoiceType` and lose the current clip when the replacement continuous
+  recorder failed to start during the stop -> restart -> transcribe handoff.
+  The source clip URL is now detached before ready-recorder recovery can run,
+  recorder recovery failure during `.transcribing` keeps publishing bridge
+  heartbeats instead of tearing down the session, and transcription proceeds even
+  if ready recovery is temporarily unavailable. It was archived at
+  `/private/tmp/VoiceTypeBuild18StopHandoff-202606162141.xcarchive` and uploaded
+  with `xcodebuild -exportArchive` on 2026-06-16; Xcode reported
   `Uploaded VoiceType` and `Upload succeeded`.
 
 App Store Connect configuration completed:

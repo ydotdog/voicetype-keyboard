@@ -130,6 +130,9 @@
   measured from Turn on keyboard mic, adds a separate 10-minute Speak clip cap,
   removes elapsed timers from Live Activity/Dynamic Island, and aligns expanded
   Dynamic Island as logo left plus mic status right.
+- Build `18` fixes the keyboard Stop handoff so a failed continuous-recorder
+  restart cannot drop the bridge to `Open VoiceType` or lose the current clip
+  before transcription.
 - Test on device:
   - Sign in with Apple succeeds.
   - First sign-in grants the welcome credit (balance is non-zero without a purchase).

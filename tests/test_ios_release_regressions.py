@@ -93,7 +93,7 @@ def test_keyboard_matches_system_background_feedback_and_stop_state() -> None:
 
 def test_uploaded_build_number_is_current() -> None:
     project = read("project.yml")
-    assert "CURRENT_PROJECT_VERSION: 17" in project
+    assert "CURRENT_PROJECT_VERSION: 18" in project
 
 
 def test_keyboard_clip_keeps_session_alive_across_stops() -> None:
@@ -104,6 +104,11 @@ def test_keyboard_clip_keeps_session_alive_across_stops() -> None:
     controller = read("VoiceType/Services/RecordingController.swift")
     assert 'beginBackgroundTask(withName: "VoiceTypeKeyboardClip")' in controller
     assert "for attempt in 0..<2" in controller
+    assert "currentFileURL = nil" in controller
+    assert 'recoverKeyboardRecorderIfNeeded(reason: "keyboard clip handoff")' in controller
+    assert "try restartKeyboardReadyRecorder()\n            guard isActiveTranscription(id)" not in controller
+    assert "shouldKeepTranscribingOnRecoveryFailure" in controller
+    assert "stopKeyboardReady(preserveAutoInsert: true)" in controller
 
 
 def test_keyboard_mic_recovers_from_stale_internal_recorder_state() -> None:
@@ -129,6 +134,7 @@ def test_keyboard_mic_recovers_from_stale_internal_recorder_state() -> None:
     assert "activeTranscriptionTask?.cancel()" in controller
     assert "activeTranscriptionID" in controller
     assert "request.timeoutInterval = min(max(duration + 90, 120), 600)" in backend
+    assert "publishBridgeState()\n            } else {\n                stopKeyboardReady()" in controller
 
     keyboard_request = dashboard[dashboard.index("private func handleKeyboardMicRequest") :]
     assert "await recorder.startKeyboardReady(account: account)" in keyboard_request
