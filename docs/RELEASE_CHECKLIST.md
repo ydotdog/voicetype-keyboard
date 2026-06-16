@@ -15,7 +15,8 @@
 ## App Store Connect
 
 - Create the app record for bundle id `com.kyleqi.voicetype`.
-- Consumable IAP products are created and `READY_TO_SUBMIT`:
+- Consumable IAP products are created and submitted with version `1.0`
+  (`WAITING_FOR_REVIEW`):
   - `com.kyleqi.voicetype.credits.small`, reference name `990,000 Credits`, USD 0.99.
   - `com.kyleqi.voicetype.credits.medium`, reference name `4,990,000 Credits`, USD 4.99.
   - `com.kyleqi.voicetype.credits.large`, reference name `19,990,000 Credits`, USD 19.99.
@@ -43,7 +44,9 @@
   been pasted into App Review Information.
 - Confirm account deletion is reachable in-app (Settings → Delete account) for
   Guideline 5.1.1(v).
-- Use StoreKit sandbox/TestFlight before production launch.
+- StoreKit sandbox/TestFlight validation passed for build `9`.
+- Version `1.0` was submitted for App Review on 2026-06-16 and is configured
+  for automatic release after approval.
 
 ## Backend
 
@@ -71,8 +74,10 @@
 - StoreKit verification accepts the transaction's own environment first, then the
   configured environment, then Sandbox and Production, while keeping strict
   signature verification and `appAccountToken` matching enabled.
-- Keep `STOREKIT_ACCEPTED_ENVIRONMENTS=SANDBOX` for TestFlight/App Review, then
-  switch it to `PRODUCTION` after approval and before manual public release.
+- During App Review plus automatic release, keep
+  `STOREKIT_ACCEPTED_ENVIRONMENTS=SANDBOX,PRODUCTION` so reviewer sandbox
+  transactions and public production transactions both grant credit. After the
+  public launch is stable, switch it to `PRODUCTION` and restart the backend.
 - Put the backend behind HTTPS.
 - Set request body limits to at least `MAX_AUDIO_BYTES`.
 - Enable database backups.
@@ -91,8 +96,8 @@
   button proportions, keyboard-mic ready-state recovery after Stop, and the
   switcher language subtitle. Apple accepted the package, App Store Connect
   reports build `9` as `VALID`, version `1.0` is linked to build `9`, and the
-  Internal Testers group has access to all builds. Version `1.0` is configured
-  for manual release after approval.
+  Internal Testers group has access to all builds. Version `1.0` is submitted
+  for App Review and configured for automatic release after approval.
 - Test on device:
   - Sign in with Apple succeeds.
   - First sign-in grants the welcome credit (balance is non-zero without a purchase).

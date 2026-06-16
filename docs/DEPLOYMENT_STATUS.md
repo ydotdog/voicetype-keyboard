@@ -98,9 +98,8 @@ Latest upload:
 - App Store Connect version `1.0` is linked to build `9`. The Internal Testers
   TestFlight group has access to all builds, so build `9` is available to the
   internal group after App Store Connect processing.
-- App Store Connect version `1.0` is configured for manual release, so an App
-  Review approval will wait in `Pending Developer Release` instead of going live
-  automatically.
+- App Store Connect version `1.0` is submitted for App Review and configured for
+  automatic release after approval (`releaseType=AFTER_APPROVAL`).
 - Internal tester `qijialuabc@gmail.com` is in the Internal Testers group with
   state `INSTALLED`.
 - StoreKit receipt verification is now environment-agnostic. `verify_storekit_payload`
@@ -108,13 +107,14 @@ Latest upload:
   `APPLE_STOREKIT_ENVIRONMENT`, then Sandbox and Production. This accepts TestFlight
   Sandbox transactions without pinning the verifier to one environment, fixing
   the prior HTTP 401 that blocked TestFlight purchases and credit grants.
-- Credit grants are still gated by `STOREKIT_ACCEPTED_ENVIRONMENTS`. During
-  TestFlight/App Review this is `SANDBOX`; before manual public release, switch
-  it to `PRODUCTION` and restart the backend so sandbox test receipts cannot
-  credit production accounts. The backend was redeployed from this code on
-  2026-06-16; already-paid stuck transactions grant retroactively via the
-  client's unfinished-transaction replay (reopen the app or tap Restore
-  purchases).
+- Credit grants are still gated by `STOREKIT_ACCEPTED_ENVIRONMENTS`. For App
+  Review plus automatic release, the VM currently uses
+  `STOREKIT_ACCEPTED_ENVIRONMENTS=SANDBOX,PRODUCTION` so App Review sandbox
+  purchases and public production purchases both grant credit. After the public
+  launch is stable, tighten it to `PRODUCTION` and restart the backend. The
+  backend was redeployed from this code on 2026-06-16; already-paid stuck
+  transactions grant retroactively via the client's unfinished-transaction
+  replay (reopen the app or tap Restore purchases).
 - Keyboard extension `CFBundleDisplayName` changed from `VoiceType Keyboard` to
   `VoiceType`, and `PrimaryLanguage` changed from `en-US` to `mul` (the ISO 639
   code for "multiple languages"), so the globe/keyboard switcher reads just
@@ -133,7 +133,7 @@ Latest upload:
 
 App Store Connect configuration completed:
 
-- Consumable IAP products exist and are `READY_TO_SUBMIT`:
+- Consumable IAP products exist and are `WAITING_FOR_REVIEW`:
   - `com.kyleqi.voicetype.credits.small`: reference name `990,000 Credits`, USD 0.99.
   - `com.kyleqi.voicetype.credits.medium`: reference name `4,990,000 Credits`, USD 4.99.
   - `com.kyleqi.voicetype.credits.large`: reference name `19,990,000 Credits`, USD 19.99.
@@ -152,7 +152,10 @@ App Store Connect configuration completed:
   user, used for App Functionality, and not used for tracking.
 - Paid Apps Agreement, bank account, U.S. W-9 tax form, and Digital Services Act
   compliance are `Active` in App Store Connect Business as of 2026-06-15.
-- Run StoreKit sandbox/TestFlight validation before submitting for review.
+- App Store version `1.0` was submitted for review on 2026-06-16 at
+  03:14:24 UTC. Review submission `83e859ed-1370-4256-aabb-73b6bc60b1f2`
+  is `WAITING_FOR_REVIEW`, version `1.0` is `WAITING_FOR_REVIEW`, the three IAP
+  products are `WAITING_FOR_REVIEW`, and release is automatic after approval.
 
 ## DNS
 
@@ -220,8 +223,6 @@ sudo docker compose -f deploy/gcp-vm/docker-compose.yml restart backend
 
 Still required for App Store release:
 
-- StoreKit sandbox/TestFlight validation on build `9`.
-- After App Review approval and before manual release, set
-  `STOREKIT_ACCEPTED_ENVIRONMENTS=PRODUCTION` on the VM and restart the backend.
-- Final App Store review submission after the remaining App Store Connect review
-  form fields are checked.
+- Monitor App Review and respond to any reviewer messages or rejections.
+- After public launch is stable, set `STOREKIT_ACCEPTED_ENVIRONMENTS=PRODUCTION`
+  on the VM and restart the backend.
