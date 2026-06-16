@@ -117,6 +117,11 @@
   by separating the Liquid Glass background from all text/logo/timer content and
   adding the background through `containerBackground(for: .widget)`. It was
   uploaded for App Store Connect processing on 2026-06-16.
+- Build `15` fixes the session-length keyboard mic teardown: the length setting
+  now caps only one Speak clip, idle keyboard-ready mode stays armed, picker
+  changes re-check the real recorder before republishing ready state, and broken
+  Stop commands recover ready instead of silently returning. It was uploaded for
+  App Store Connect processing on 2026-06-16.
 - Test on device:
   - Sign in with Apple succeeds.
   - First sign-in grants the welcome credit (balance is non-zero without a purchase).

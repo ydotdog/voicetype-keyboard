@@ -93,7 +93,7 @@ def test_keyboard_matches_system_background_feedback_and_stop_state() -> None:
 
 def test_uploaded_build_number_is_current() -> None:
     project = read("project.yml")
-    assert "CURRENT_PROJECT_VERSION: 14" in project
+    assert "CURRENT_PROJECT_VERSION: 15" in project
 
 
 def test_keyboard_clip_keeps_session_alive_across_stops() -> None:

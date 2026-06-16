@@ -141,7 +141,7 @@ Latest upload:
   needed an App Store provisioning profile; retrying with
   `-allowProvisioningUpdates` created/downloaded signing assets and uploaded
   successfully.
-- Current source is bumped to build `14` for a stronger keyboard-mic recovery fix:
+- Current source is bumped to build `15` for a stronger keyboard-mic recovery fix:
   the app now verifies the real `AVAudioRecorder.isRecording` before publishing
   keyboard-ready heartbeats, recovers after audio interruptions, media-services
   reset, and foreground return, and times out stuck transcription uploads instead
@@ -166,6 +166,15 @@ Latest upload:
   `containerBackground(for: .widget)` so `glassEffect` is never applied to a
   view that contains `Text`. It was archived at
   `/private/tmp/VoiceTypeBuild14LiveActivityForegroundText-202606161714.xcarchive`
+  and uploaded with `xcodebuild -exportArchive` on 2026-06-16; Xcode reported
+  `Uploaded VoiceType` and `Upload succeeded`.
+- Build `15` fixes the root session-length bug behind the keyboard mic dropping
+  back to `Open VoiceType`: the limit now caps only a single dictation clip and
+  never tears down an idle armed keyboard mic. Changing session length also
+  re-verifies the live recorder before publishing ready state, and a Stop command
+  with broken clip state repairs the armed mic instead of silently returning. It
+  was archived at
+  `/private/tmp/VoiceTypeBuild15SessionLengthKeyboardMic-202606161803.xcarchive`
   and uploaded with `xcodebuild -exportArchive` on 2026-06-16; Xcode reported
   `Uploaded VoiceType` and `Upload succeeded`.
 
