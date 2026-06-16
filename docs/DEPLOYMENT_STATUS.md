@@ -132,12 +132,16 @@ Latest upload:
   stop/restart/transcribe window now runs under a `beginBackgroundTask` so iOS does
   not suspend the app while the continuous recorder is momentarily stopped, and the
   recorder restart reasserts the audio session and retries once before giving up.
+- Build `10` was archived at `/tmp/VoiceType-build10-20260616123206.xcarchive`
+  and uploaded with `xcodebuild -exportArchive` on 2026-06-16. Xcode reported
+  `Uploaded VoiceType` and `Upload succeeded`; App Store Connect package
+  indexing/processing had not yet exposed build `10` through the Builds API at
+  the time of this snapshot.
 - Current source is bumped to build `10` for a stronger keyboard-mic recovery fix:
   the app now verifies the real `AVAudioRecorder.isRecording` before publishing
   keyboard-ready heartbeats, recovers after audio interruptions, media-services
   reset, and foreground return, and times out stuck transcription uploads instead
-  of leaving the app in a permanent in-memory `Transcribing` state. Build `10` has
-  not yet been uploaded in this status snapshot.
+  of leaving the app in a permanent in-memory `Transcribing` state.
 
 App Store Connect configuration completed:
 
@@ -232,7 +236,8 @@ sudo docker compose -f deploy/gcp-vm/docker-compose.yml restart backend
 Still required for App Store release:
 
 - Monitor App Review and respond to any reviewer messages or rejections.
-- Upload build `10`, validate the keyboard-mic stale-recorder recovery on device,
-  and replace build `9` before public release.
+- Wait for build `10` to finish App Store Connect processing, validate the
+  keyboard-mic stale-recorder recovery on device, and replace build `9` before
+  public release.
 - After public launch is stable, set `STOREKIT_ACCEPTED_ENVIRONMENTS=PRODUCTION`
   on the VM and restart the backend.

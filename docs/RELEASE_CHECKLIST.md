@@ -99,9 +99,9 @@
   reports build `9` as `VALID`, version `1.0` is linked to build `9`, and the
   Internal Testers group has access to all builds. Version `1.0` is submitted
   for App Review and configured for manual release after approval.
-- Current source is bumped to build `10` for the stale keyboard-mic recorder
-  recovery fix. Upload build `10`, validate it on device, then replace build `9`
-  before public release.
+- Build `10` contains the stale keyboard-mic recorder recovery fix and was
+  uploaded on 2026-06-16. Wait for App Store Connect processing, validate it on
+  device, then replace build `9` before public release.
 - Test on device:
   - Sign in with Apple succeeds.
   - First sign-in grants the welcome credit (balance is non-zero without a purchase).
