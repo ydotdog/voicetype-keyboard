@@ -35,6 +35,20 @@
                ReferencedContainer = "container:VoiceType.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "493C5287A12289C436CC4C21"
+               BuildableName = "VoiceTypeLiveActivity.appex"
+               BlueprintName = "VoiceTypeLiveActivity"
+               ReferencedContainer = "container:VoiceType.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction

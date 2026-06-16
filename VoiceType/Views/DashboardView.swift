@@ -171,9 +171,17 @@ struct DashboardView: View {
             showToast("Sign in to turn on keyboard mic")
             return
         }
-        if recorder.isKeyboardReady {
+        if recorder.isKeyboardSessionActive {
             await recorder.startKeyboardReady(account: account)
-            showToast(recorder.isKeyboardReady ? "Keyboard mic is on. Return to your app." : "Turn keyboard mic on again")
+            if recorder.isKeyboardReady {
+                showToast("Keyboard mic is on. Return to your app.")
+            } else if recorder.isKeyboardTranscribing {
+                showToast("VoiceType is finishing your clip.")
+            } else if recorder.isKeyboardRecording {
+                showToast("VoiceType is recording from the keyboard.")
+            } else {
+                showToast("Turn keyboard mic on again")
+            }
             return
         }
         guard !recorder.isRecording, !recorder.isProcessing else {
@@ -489,7 +497,7 @@ private struct HomeScreen: View {
             BalanceBlock(balanceText: account.balanceText, identity: account.email)
 
             VStack(spacing: 12) {
-                if recorder.isKeyboardReady {
+                if recorder.isKeyboardSessionActive {
                     KeyboardMicStatusCard(recorder: recorder)
                     Button {
                         recorder.stopKeyboardReady()

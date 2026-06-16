@@ -102,6 +102,10 @@
 - Build `10` contains the stale keyboard-mic recorder recovery fix and was
   uploaded on 2026-06-16. App Store Connect reports build `10` as `VALID`.
   Validate it on device, then replace build `9` before public release.
+- Build `11` adds the Live Activity / Dynamic Island keyboard microphone status
+  surface and a stronger in-memory transcription state machine. It was uploaded
+  on 2026-06-16 and is waiting for App Store Connect processing before TestFlight
+  availability.
 - Test on device:
   - Sign in with Apple succeeds.
   - First sign-in grants the welcome credit (balance is non-zero without a purchase).

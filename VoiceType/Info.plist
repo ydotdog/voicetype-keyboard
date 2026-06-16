@@ -42,6 +42,8 @@
 	<string>VoiceType connects to your configured transcription backend.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>VoiceType uses the microphone to turn your speech into text. While you keep keyboard mic on, the app records audio so the VoiceType keyboard can transcribe what you say in other apps.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

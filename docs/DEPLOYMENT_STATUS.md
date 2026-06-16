@@ -86,15 +86,14 @@ Latest real transcription smoke test:
 Latest upload:
 
 - Date: 2026-06-16.
-- Version/build: `1.0.0 (9)`.
-- Archive path: `/tmp/VoiceType-build9-20260616103920.xcarchive`.
+- Version/build: `1.0.0 (11)`.
+- Archive path: `/tmp/VoiceTypeBuild11LiveActivity.xcarchive`.
 - Signing: automatic signing with team `WC3PWB5R2J`; export used
   `method=app-store-connect` and `destination=upload`.
 - Upload method: `xcodebuild -exportArchive` with `method=app-store-connect`,
   `destination=upload`, and automatic signing.
 - Result: Xcode reported `Uploaded VoiceType` and `Upload succeeded`; App Store
-  Connect reports build `9` (`70137e93-4464-4e72-a47f-f7a9adc93f3d`) as
-  `VALID`.
+  Connect package processing started.
 - App Store Connect version `1.0` is linked to build `9`. The Internal Testers
   TestFlight group has access to all builds, so build `9` is available to the
   internal group after App Store Connect processing.
@@ -136,11 +135,20 @@ Latest upload:
   and uploaded with `xcodebuild -exportArchive` on 2026-06-16. Xcode reported
   `Uploaded VoiceType` and `Upload succeeded`; App Store Connect reports build
   `10` (`e6befbc1-1459-4f8c-9edc-45c2ca48433a`) as `VALID`.
-- Current source is bumped to build `10` for a stronger keyboard-mic recovery fix:
+- Build `11` was archived at `/tmp/VoiceTypeBuild11LiveActivity.xcarchive` and
+  uploaded with `xcodebuild -exportArchive` on 2026-06-16. The first export
+  attempt failed because the new `com.kyleqi.voicetype.liveactivity` extension
+  needed an App Store provisioning profile; retrying with
+  `-allowProvisioningUpdates` created/downloaded signing assets and uploaded
+  successfully.
+- Current source is bumped to build `11` for a stronger keyboard-mic recovery fix:
   the app now verifies the real `AVAudioRecorder.isRecording` before publishing
   keyboard-ready heartbeats, recovers after audio interruptions, media-services
   reset, and foreground return, and times out stuck transcription uploads instead
   of leaving the app in a permanent in-memory `Transcribing` state.
+- Build `11` also adds a Live Activity / Dynamic Island surface for the active
+  keyboard microphone session, using the VoiceType app logo in compact and
+  minimal presentations.
 
 App Store Connect configuration completed:
 
@@ -235,7 +243,7 @@ sudo docker compose -f deploy/gcp-vm/docker-compose.yml restart backend
 Still required for App Store release:
 
 - Monitor App Review and respond to any reviewer messages or rejections.
-- Validate build `10` keyboard-mic stale-recorder recovery on device and replace
+- Validate build `11` keyboard-mic stale-recorder recovery on device and replace
   build `9` before public release.
 - After public launch is stable, set `STOREKIT_ACCEPTED_ENVIRONMENTS=PRODUCTION`
   on the VM and restart the backend.

@@ -698,8 +698,8 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
     @discardableResult
     private func openURLThroughApplicationRuntime(_ url: URL) -> Bool {
-        let sharedSelector = Selector(("sharedApplication"))
-        let openSelector = Selector(("openURL:"))
+        let sharedSelector = NSSelectorFromString("sharedApplication")
+        let openSelector = NSSelectorFromString("openURL:")
         guard
             let applicationClass = NSClassFromString("UIApplication"),
             let sharedMethod = class_getClassMethod(applicationClass, sharedSelector),
