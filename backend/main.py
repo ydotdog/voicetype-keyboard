@@ -77,6 +77,7 @@ REQUIRE_STOREKIT_APP_ACCOUNT_TOKEN = os.getenv("REQUIRE_STOREKIT_APP_ACCOUNT_TOK
 ALLOW_DEV_CREDIT = os.getenv("ALLOW_DEV_CREDIT", "").lower() in {"1", "true", "yes"}
 DEV_CREDIT_SHARED_SECRET = os.getenv("DEV_CREDIT_SHARED_SECRET", "")
 APPLE_STOREKIT_ENVIRONMENT = os.getenv("APPLE_STOREKIT_ENVIRONMENT", "PRODUCTION").upper()
+STOREKIT_ACCEPTED_ENVIRONMENTS = os.getenv("STOREKIT_ACCEPTED_ENVIRONMENTS", APPLE_STOREKIT_ENVIRONMENT)
 APPLE_ROOT_CERTIFICATE_PATHS = os.getenv("APPLE_ROOT_CERTIFICATE_PATHS", "")
 APPLE_ROOT_CERTIFICATE_PEMS_B64 = os.getenv("APPLE_ROOT_CERTIFICATE_PEMS_B64", "")
 
@@ -1272,6 +1273,39 @@ def storekit_environment_from_name(name: Optional[str]) -> Any:
     return mapping.get(str(name).strip().lower())
 
 
+def storekit_environment_key(name: Any) -> Optional[str]:
+    value = getattr(name, "value", name)
+    if value is None:
+        return None
+    normalized = re.sub(r"[^a-z0-9]", "", str(value).strip().lower())
+    mapping = {
+        "production": "PRODUCTION",
+        "sandbox": "SANDBOX",
+        "xcode": "XCODE",
+        "localtesting": "LOCAL_TESTING",
+    }
+    return mapping.get(normalized)
+
+
+def accepted_storekit_environment_keys() -> set[str]:
+    raw = STOREKIT_ACCEPTED_ENVIRONMENTS.strip()
+    if not raw:
+        return set()
+    result: set[str] = set()
+    for item in raw.split(","):
+        key = storekit_environment_key(item)
+        if key:
+            result.add(key)
+    return result
+
+
+def ensure_storekit_environment_allowed(environment: Any) -> None:
+    accepted = accepted_storekit_environment_keys()
+    current = storekit_environment_key(environment)
+    if accepted and current not in accepted:
+        raise HTTPException(status_code=403, detail="StoreKit transaction environment is not enabled for this server.")
+
+
 def candidate_storekit_environments(preferred: Any) -> list[Any]:
     # A SignedDataVerifier rejects any transaction whose environment differs
     # from the one it was built for, so a single fixed environment breaks either
@@ -1314,12 +1348,14 @@ def verify_storekit_payload(jws: str) -> dict[str, Any]:
             except Exception as exc:
                 last_error = exc
                 continue
+            environment_name = decoded.rawEnvironment or getattr(decoded.environment, "value", None)
+            ensure_storekit_environment_allowed(environment_name)
             return {
                 "product_id": decoded.productId,
                 "transaction_id": decoded.transactionId,
                 "original_transaction_id": decoded.originalTransactionId,
                 "bundle_id": decoded.bundleId,
-                "environment": decoded.rawEnvironment or getattr(decoded.environment, "value", None),
+                "environment": environment_name,
                 "app_account_token": decoded.appAccountToken,
             }
         logger.warning(

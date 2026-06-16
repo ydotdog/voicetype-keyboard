@@ -98,16 +98,23 @@ Latest upload:
 - App Store Connect version `1.0` is linked to build `9`. The Internal Testers
   TestFlight group has access to all builds, so build `9` is available to the
   internal group after App Store Connect processing.
+- App Store Connect version `1.0` is configured for manual release, so an App
+  Review approval will wait in `Pending Developer Release` instead of going live
+  automatically.
 - Internal tester `qijialuabc@gmail.com` is in the Internal Testers group with
   state `INSTALLED`.
 - StoreKit receipt verification is now environment-agnostic. `verify_storekit_payload`
   verifies against the transaction's own `environment` first, then the configured
   `APPLE_STOREKIT_ENVIRONMENT`, then Sandbox and Production. This accepts TestFlight
-  Sandbox transactions regardless of the configured environment, fixing the prior
-  HTTP 401 that blocked TestFlight purchases and credit grants. The backend was
-  redeployed from this code on 2026-06-16; already-paid stuck transactions grant
-  retroactively via the client's unfinished-transaction replay (reopen the app or
-  tap Restore purchases).
+  Sandbox transactions without pinning the verifier to one environment, fixing
+  the prior HTTP 401 that blocked TestFlight purchases and credit grants.
+- Credit grants are still gated by `STOREKIT_ACCEPTED_ENVIRONMENTS`. During
+  TestFlight/App Review this is `SANDBOX`; before manual public release, switch
+  it to `PRODUCTION` and restart the backend so sandbox test receipts cannot
+  credit production accounts. The backend was redeployed from this code on
+  2026-06-16; already-paid stuck transactions grant retroactively via the
+  client's unfinished-transaction replay (reopen the app or tap Restore
+  purchases).
 - Keyboard extension `CFBundleDisplayName` changed from `VoiceType Keyboard` to
   `VoiceType`, and `PrimaryLanguage` changed from `en-US` to `mul` (the ISO 639
   code for "multiple languages"), so the globe/keyboard switcher reads just
@@ -214,5 +221,7 @@ sudo docker compose -f deploy/gcp-vm/docker-compose.yml restart backend
 Still required for App Store release:
 
 - StoreKit sandbox/TestFlight validation on build `9`.
+- After App Review approval and before manual release, set
+  `STOREKIT_ACCEPTED_ENVIRONMENTS=PRODUCTION` on the VM and restart the backend.
 - Final App Store review submission after the remaining App Store Connect review
   form fields are checked.

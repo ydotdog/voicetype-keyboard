@@ -4,6 +4,7 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -205,6 +206,28 @@ def test_storekit_environment_detection_prefers_transaction_environment(tmp_path
     assert candidates[0] == Environment.SANDBOX
     assert Environment.PRODUCTION in candidates
     assert len(candidates) == len(set(candidates))
+
+
+def test_storekit_environment_acceptance_can_be_locked_to_current_phase(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPLE_STOREKIT_ENVIRONMENT", "SANDBOX")
+    monkeypatch.delenv("STOREKIT_ACCEPTED_ENVIRONMENTS", raising=False)
+    main = load_main(tmp_path, monkeypatch)
+
+    assert main.accepted_storekit_environment_keys() == {"SANDBOX"}
+    main.ensure_storekit_environment_allowed("Sandbox")
+    with pytest.raises(HTTPException) as exc:
+        main.ensure_storekit_environment_allowed("Production")
+    assert exc.value.status_code == 403
+
+
+def test_storekit_environment_acceptance_supports_review_to_release_cutover(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPLE_STOREKIT_ENVIRONMENT", "SANDBOX")
+    monkeypatch.setenv("STOREKIT_ACCEPTED_ENVIRONMENTS", "SANDBOX,PRODUCTION")
+    main = load_main(tmp_path, monkeypatch)
+
+    assert main.accepted_storekit_environment_keys() == {"SANDBOX", "PRODUCTION"}
+    main.ensure_storekit_environment_allowed("Sandbox")
+    main.ensure_storekit_environment_allowed("Production")
 
 
 def test_dev_credit_can_require_shared_secret(tmp_path, monkeypatch):

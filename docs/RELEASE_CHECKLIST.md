@@ -71,6 +71,8 @@
 - StoreKit verification accepts the transaction's own environment first, then the
   configured environment, then Sandbox and Production, while keeping strict
   signature verification and `appAccountToken` matching enabled.
+- Keep `STOREKIT_ACCEPTED_ENVIRONMENTS=SANDBOX` for TestFlight/App Review, then
+  switch it to `PRODUCTION` after approval and before manual public release.
 - Put the backend behind HTTPS.
 - Set request body limits to at least `MAX_AUDIO_BYTES`.
 - Enable database backups.
@@ -89,7 +91,8 @@
   button proportions, keyboard-mic ready-state recovery after Stop, and the
   switcher language subtitle. Apple accepted the package, App Store Connect
   reports build `9` as `VALID`, version `1.0` is linked to build `9`, and the
-  Internal Testers group has access to all builds.
+  Internal Testers group has access to all builds. Version `1.0` is configured
+  for manual release after approval.
 - Test on device:
   - Sign in with Apple succeeds.
   - First sign-in grants the welcome credit (balance is non-zero without a purchase).
