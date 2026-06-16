@@ -96,6 +96,16 @@ def test_uploaded_build_number_is_current() -> None:
     assert "CURRENT_PROJECT_VERSION: 9" in project
 
 
+def test_keyboard_clip_keeps_session_alive_across_stops() -> None:
+    # After a clip stops, the keyboard mic session must stay ready so the user can
+    # speak again, instead of collapsing to "Open VoiceType" the instant they tap
+    # Stop. The transcribe window runs under a background task, and the recorder
+    # restart reasserts the audio session and retries before giving up.
+    controller = read("VoiceType/Services/RecordingController.swift")
+    assert 'beginBackgroundTask(withName: "VoiceTypeKeyboardClip")' in controller
+    assert "for attempt in 0..<2" in controller
+
+
 def test_keyboard_switcher_name_is_voicetype_without_suffix() -> None:
     # In the globe/keyboard switcher the extension must read just "VoiceType",
     # dropping the old "VoiceType Keyboard" display name. xcodegen regenerates
@@ -106,3 +116,18 @@ def test_keyboard_switcher_name_is_voicetype_without_suffix() -> None:
     assert "VoiceType Keyboard" not in project
     assert "VoiceType Keyboard" not in info
     assert "<key>CFBundleDisplayName</key>\n\t<string>VoiceType</string>" in info
+
+
+def test_keyboard_switcher_has_no_language_subtitle() -> None:
+    # The globe/keyboard switcher renders a language line under the name, derived
+    # from PrimaryLanguage. Setting it to "mul" (the ISO 639 code for "multiple
+    # languages") suppresses that "English" subtitle while the keyboard stays
+    # ASCII-capable. xcodegen regenerates the Info.plist from project.yml.
+    project = read("project.yml")
+    info = read("VoiceTypeKeyboard/Info.plist")
+
+    assert "PrimaryLanguage: mul" in project
+    assert "PrimaryLanguage: en-US" not in project
+    assert "<key>PrimaryLanguage</key>" in info
+    assert "<string>mul</string>" in info
+    assert "<string>en-US</string>" not in info

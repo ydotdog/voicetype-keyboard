@@ -114,13 +114,20 @@ Pending changes for next upload (build 9):
 - `CURRENT_PROJECT_VERSION` bumped to `9` in `project.yml`. Build 9 is not yet
   archived or uploaded.
 - Keyboard extension `CFBundleDisplayName` changed from `VoiceType Keyboard` to
-  `VoiceType` so the globe/keyboard switcher reads just `VoiceType`. The system
-  still renders the `en-US` `PrimaryLanguage` subtitle ("English") underneath; that
-  line is not removable for a keyboard extension.
+  `VoiceType`, and `PrimaryLanguage` changed from `en-US` to `mul` (the ISO 639
+  code for "multiple languages"), so the globe/keyboard switcher reads just
+  `VoiceType` with no "English" subtitle underneath. The keyboard stays
+  ASCII-capable (`IsASCIICapable: true`).
 - Keyboard layout proportions tightened: unified side margins, equal-height
   return/delete keys with matching corner radii, and a rebalanced Speak pill.
 - Client no longer mislabels a StoreKit submission HTTP 401 as "session expired";
   it now tells the buyer the purchase will credit automatically.
+- Fixed a keyboard-mic regression where tapping Stop after a clip could collapse
+  the session to "Open VoiceType" instead of returning to ready (the user then had
+  to relaunch the app before voice-to-text worked again). The clip
+  stop/restart/transcribe window now runs under a `beginBackgroundTask` so iOS does
+  not suspend the app while the continuous recorder is momentarily stopped, and the
+  recorder restart reasserts the audio session and retries once before giving up.
 
 App Store Connect configuration completed:
 

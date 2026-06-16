@@ -81,7 +81,7 @@ targets:
           NSExtensionPointIdentifier: com.apple.keyboard-service
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
           NSExtensionAttributes:
-            PrimaryLanguage: en-US
+            PrimaryLanguage: mul
             IsASCIICapable: true
             PrefersRightToLeft: false
             RequestsOpenAccess: true

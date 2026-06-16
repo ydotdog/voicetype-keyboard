@@ -485,6 +485,11 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         }
 
         isStopping = true
+        // Hold a background task across the whole stop -> restart -> transcribe
+        // window so iOS does not suspend the app while the continuous recorder is
+        // momentarily stopped, which would drop the audio assertion and kill the
+        // keyboard session before it can return to ready.
+        let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "VoiceTypeKeyboardClip")
         recorder.stop()
         self.recorder = nil
         isProcessing = true
@@ -496,6 +501,9 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             .appendingPathExtension("m4a")
         defer {
             isStopping = false
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+            }
             try? FileManager.default.removeItem(at: sourceURL)
             try? FileManager.default.removeItem(at: clipURL)
         }
@@ -532,13 +540,34 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     }
 
     private func restartKeyboardReadyRecorder() throws {
-        let (audioRecorder, fileURL) = try makeAudioRecorder()
-        guard audioRecorder.record() else {
-            try? FileManager.default.removeItem(at: fileURL)
-            throw RecorderError.failedToStart
+        // The keyboard-ready session stays alive only while a recorder is running:
+        // that audio assertion is what keeps this app from being suspended in the
+        // background between clips. When a clip stops, the shared audio session can
+        // briefly lapse, so reassert it and retry once. Otherwise record() returns
+        // false, this throws, and the whole keyboard session collapses to
+        // "Open VoiceType" the instant the user taps Stop.
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.allowBluetoothHFP, .defaultToSpeaker])
+        try? session.setActive(true)
+        var lastError: Error?
+        for attempt in 0..<2 {
+            do {
+                let (audioRecorder, fileURL) = try makeAudioRecorder()
+                if audioRecorder.record() {
+                    recorder = audioRecorder
+                    currentFileURL = fileURL
+                    return
+                }
+                try? FileManager.default.removeItem(at: fileURL)
+                lastError = RecorderError.failedToStart
+            } catch {
+                lastError = error
+            }
+            if attempt == 0 {
+                try? session.setActive(true)
+            }
         }
-        recorder = audioRecorder
-        currentFileURL = fileURL
+        throw lastError ?? RecorderError.failedToStart
     }
 
     private func ensureKeyboardReadyRecorder() throws -> AVAudioRecorder {
