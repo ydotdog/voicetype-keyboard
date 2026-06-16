@@ -93,4 +93,16 @@ def test_keyboard_matches_system_background_feedback_and_stop_state() -> None:
 
 def test_uploaded_build_number_is_current() -> None:
     project = read("project.yml")
-    assert "CURRENT_PROJECT_VERSION: 8" in project
+    assert "CURRENT_PROJECT_VERSION: 9" in project
+
+
+def test_keyboard_switcher_name_is_voicetype_without_suffix() -> None:
+    # In the globe/keyboard switcher the extension must read just "VoiceType",
+    # dropping the old "VoiceType Keyboard" display name. xcodegen regenerates
+    # the keyboard Info.plist from project.yml, so both must agree.
+    project = read("project.yml")
+    info = read("VoiceTypeKeyboard/Info.plist")
+
+    assert "VoiceType Keyboard" not in project
+    assert "VoiceType Keyboard" not in info
+    assert "<key>CFBundleDisplayName</key>\n\t<string>VoiceType</string>" in info

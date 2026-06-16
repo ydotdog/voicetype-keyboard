@@ -1257,6 +1257,37 @@ def storekit_environment() -> Any:
     return mapping.get(APPLE_STOREKIT_ENVIRONMENT, Environment.PRODUCTION)
 
 
+def storekit_environment_from_name(name: Optional[str]) -> Any:
+    # Map the environment string embedded in a StoreKit transaction
+    # ("Sandbox", "Production", ...) to the App Store library's Environment.
+    if Environment is None or not name:
+        return None
+    mapping = {
+        "production": Environment.PRODUCTION,
+        "sandbox": Environment.SANDBOX,
+        "xcode": Environment.XCODE,
+        "localtesting": Environment.LOCAL_TESTING,
+        "local_testing": Environment.LOCAL_TESTING,
+    }
+    return mapping.get(str(name).strip().lower())
+
+
+def candidate_storekit_environments(preferred: Any) -> list[Any]:
+    # A SignedDataVerifier rejects any transaction whose environment differs
+    # from the one it was built for, so a single fixed environment breaks either
+    # TestFlight (Sandbox) or the App Store (Production). Try the transaction's
+    # own environment first, then the configured default, then both real
+    # environments, so a purchase verifies no matter where it came from.
+    if Environment is None:
+        return []
+    ordered = [preferred, storekit_environment(), Environment.SANDBOX, Environment.PRODUCTION]
+    result: list[Any] = []
+    for environment in ordered:
+        if environment is not None and environment not in result:
+            result.append(environment)
+    return result
+
+
 def verify_storekit_payload(jws: str) -> dict[str, Any]:
     if STOREKIT_VERIFICATION_MODE == "strict" and not ALLOW_UNVERIFIED_STOREKIT_JWS:
         if SignedDataVerifier is None or Environment is None:
@@ -1264,25 +1295,38 @@ def verify_storekit_payload(jws: str) -> dict[str, Any]:
         certs = load_apple_root_certificates()
         if not certs:
             raise HTTPException(status_code=500, detail="APPLE_ROOT_CERTIFICATE_PATHS or APPLE_ROOT_CERTIFICATE_PEMS_B64 is required.")
-        verifier = SignedDataVerifier(
-            certs,
-            True,
-            storekit_environment(),
-            APPLE_BUNDLE_ID,
-            int(APPLE_APP_APPLE_ID) if APPLE_APP_APPLE_ID else None,
-        )
+
+        # Read the environment from the unverified payload only to pick which
+        # verifier to try first; the signature itself is still fully verified.
         try:
-            decoded = verifier.verify_and_decode_signed_transaction(jws)
-        except Exception as exc:
-            raise HTTPException(status_code=401, detail="Invalid StoreKit transaction signature.") from exc
-        return {
-            "product_id": decoded.productId,
-            "transaction_id": decoded.transactionId,
-            "original_transaction_id": decoded.originalTransactionId,
-            "bundle_id": decoded.bundleId,
-            "environment": decoded.rawEnvironment or getattr(decoded.environment, "value", None),
-            "app_account_token": decoded.appAccountToken,
-        }
+            preferred_env = storekit_environment_from_name(
+                decode_unverified_storekit_payload(jws).get("environment")
+            )
+        except HTTPException:
+            preferred_env = None
+        app_apple_id = int(APPLE_APP_APPLE_ID) if APPLE_APP_APPLE_ID else None
+
+        last_error: Optional[Exception] = None
+        for environment in candidate_storekit_environments(preferred_env):
+            try:
+                verifier = SignedDataVerifier(certs, True, environment, APPLE_BUNDLE_ID, app_apple_id)
+                decoded = verifier.verify_and_decode_signed_transaction(jws)
+            except Exception as exc:
+                last_error = exc
+                continue
+            return {
+                "product_id": decoded.productId,
+                "transaction_id": decoded.transactionId,
+                "original_transaction_id": decoded.originalTransactionId,
+                "bundle_id": decoded.bundleId,
+                "environment": decoded.rawEnvironment or getattr(decoded.environment, "value", None),
+                "app_account_token": decoded.appAccountToken,
+            }
+        logger.warning(
+            "storekit_signature_rejected",
+            extra={"error": str(last_error) if last_error else None},
+        )
+        raise HTTPException(status_code=401, detail="Invalid StoreKit transaction signature.") from last_error
 
     payload = decode_unverified_storekit_payload(jws)
     return {

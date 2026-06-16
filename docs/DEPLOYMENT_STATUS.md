@@ -1,6 +1,6 @@
 # Deployment Status
 
-Last updated: 2026-06-15
+Last updated: 2026-06-16
 
 ## GCP
 
@@ -99,9 +99,28 @@ Latest upload:
   Testers group contains build `8`.
 - Internal tester `qijialuabc@gmail.com` is in the Internal Testers group with
   state `INSTALLED`.
-- The backend is temporarily configured with `APPLE_STOREKIT_ENVIRONMENT=SANDBOX`
-  for TestFlight purchase validation. Switch it back to `PRODUCTION` before the
-  public App Store release.
+- StoreKit receipt verification is now environment-agnostic. `verify_storekit_payload`
+  verifies against the transaction's own `environment` first, then the configured
+  `APPLE_STOREKIT_ENVIRONMENT`, then Sandbox and Production. This accepts TestFlight
+  Sandbox transactions regardless of the configured environment, fixing the prior
+  HTTP 401 that blocked TestFlight purchases and credit grants. Requires a backend
+  redeploy to take effect; once deployed, the already-paid stuck transaction grants
+  retroactively via the client's unfinished-transaction replay (reopen the app or
+  tap Restore purchases). `APPLE_STOREKIT_ENVIRONMENT` no longer has to be flipped
+  between Sandbox and Production.
+
+Pending changes for next upload (build 9):
+
+- `CURRENT_PROJECT_VERSION` bumped to `9` in `project.yml`. Build 9 is not yet
+  archived or uploaded.
+- Keyboard extension `CFBundleDisplayName` changed from `VoiceType Keyboard` to
+  `VoiceType` so the globe/keyboard switcher reads just `VoiceType`. The system
+  still renders the `en-US` `PrimaryLanguage` subtitle ("English") underneath; that
+  line is not removable for a keyboard extension.
+- Keyboard layout proportions tightened: unified side margins, equal-height
+  return/delete keys with matching corner radii, and a rebalanced Speak pill.
+- Client no longer mislabels a StoreKit submission HTTP 401 as "session expired";
+  it now tells the buyer the purchase will credit automatically.
 
 App Store Connect configuration completed:
 
@@ -192,8 +211,10 @@ sudo docker compose -f deploy/gcp-vm/docker-compose.yml restart backend
 
 Still required for App Store release:
 
-- StoreKit sandbox/TestFlight validation.
-- Switch `APPLE_STOREKIT_ENVIRONMENT` back to `PRODUCTION` before releasing the
-  approved App Store build to the public.
+- Redeploy the backend so the environment-agnostic StoreKit verifier is live
+  (VM: `git pull`, then
+  `sudo docker compose -f deploy/gcp-vm/docker-compose.yml build backend` and
+  `... up -d backend`). This is what makes TestFlight purchases credit.
+- StoreKit sandbox/TestFlight validation after the redeploy.
 - Final App Store review submission after the remaining App Store Connect review
   form fields are checked.

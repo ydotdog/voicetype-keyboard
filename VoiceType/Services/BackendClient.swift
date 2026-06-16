@@ -1,9 +1,14 @@
 import Foundation
 
+enum BackendRequestContext {
+    case general
+    case storeKitPurchase
+}
+
 enum BackendClientError: LocalizedError {
     case missingBackendURL
     case invalidResponse
-    case httpError(status: Int, message: String)
+    case httpError(status: Int, message: String, context: BackendRequestContext)
     case missingFile
 
     var errorDescription: String? {
@@ -12,18 +17,25 @@ enum BackendClientError: LocalizedError {
             "Backend URL is not configured."
         case .invalidResponse:
             "The backend returned an unexpected response."
-        case let .httpError(status, message):
-            Self.userMessage(status: status, message: message)
+        case let .httpError(status, message, context):
+            Self.userMessage(status: status, message: message, context: context)
         case .missingFile:
             "The recording file could not be read."
         }
     }
 
-    private static func userMessage(status: Int, message: String) -> String {
+    private static func userMessage(status: Int, message: String, context: BackendRequestContext) -> String {
         switch status {
         case 400:
             return message.isEmpty ? "The request could not be completed." : message
         case 401:
+            // A 401 on a StoreKit submission is the server failing to verify the
+            // receipt, not an auth problem. The purchase already succeeded with
+            // Apple, so the unfinished transaction replays and credits later;
+            // never tell the buyer their session expired here.
+            if context == .storeKitPurchase {
+                return "Your purchase went through, but the server couldn't confirm it yet. Your credit will be added automatically — reopen VoiceType or tap Restore purchases in a moment."
+            }
             return "Your session expired. Sign in again."
         case 402:
             return "Add credit before transcribing. Your credit never expires."
@@ -99,7 +111,7 @@ enum BackendClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         applyUserAuth(token, to: &request)
         request.httpBody = try JSONEncoder().encode(StoreKitTransactionRequest(signedTransaction: jws))
-        return try await sendJSON(request)
+        return try await sendJSON(request, context: .storeKitPurchase)
     }
 
     #if DEBUG
@@ -144,19 +156,27 @@ enum BackendClient {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
-    private static func sendJSON<T: Decodable>(_ request: URLRequest) async throws -> T {
+    private static func sendJSON<T: Decodable>(
+        _ request: URLRequest,
+        context: BackendRequestContext = .general
+    ) async throws -> T {
         let (data, response) = try await URLSession.shared.data(for: request)
-        return try decode(data: data, response: response)
+        return try decode(data: data, response: response, context: context)
     }
 
-    private static func decode<T: Decodable>(data: Data, response: URLResponse) throws -> T {
+    private static func decode<T: Decodable>(
+        data: Data,
+        response: URLResponse,
+        context: BackendRequestContext = .general
+    ) throws -> T {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw BackendClientError.invalidResponse
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
             throw BackendClientError.httpError(
                 status: httpResponse.statusCode,
-                message: backendMessage(from: data)
+                message: backendMessage(from: data),
+                context: context
             )
         }
         return try JSONDecoder().decode(T.self, from: data)

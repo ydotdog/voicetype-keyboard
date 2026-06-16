@@ -187,6 +187,26 @@ def test_storekit_requires_app_account_token(tmp_path, monkeypatch):
         assert response.status_code == 400, response.text
 
 
+def test_storekit_environment_detection_prefers_transaction_environment(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    from appstoreserverlibrary.models.Environment import Environment
+
+    assert main.storekit_environment_from_name("Sandbox") == Environment.SANDBOX
+    assert main.storekit_environment_from_name("Production") == Environment.PRODUCTION
+    assert main.storekit_environment_from_name("production") == Environment.PRODUCTION
+    assert main.storekit_environment_from_name("LocalTesting") == Environment.LOCAL_TESTING
+    assert main.storekit_environment_from_name(None) is None
+    assert main.storekit_environment_from_name("nonsense") is None
+
+    # The transaction's own environment must be tried first, and both real
+    # environments must always be covered so a TestFlight (Sandbox) purchase and
+    # an App Store (Production) purchase each verify against their own signer.
+    candidates = main.candidate_storekit_environments(Environment.SANDBOX)
+    assert candidates[0] == Environment.SANDBOX
+    assert Environment.PRODUCTION in candidates
+    assert len(candidates) == len(set(candidates))
+
+
 def test_dev_credit_can_require_shared_secret(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
     main.DEV_CREDIT_SHARED_SECRET = "test-secret"

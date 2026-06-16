@@ -7,7 +7,7 @@ settings:
   base:
     SWIFT_VERSION: 6.0
     MARKETING_VERSION: 1.0.0
-    CURRENT_PROJECT_VERSION: 8
+    CURRENT_PROJECT_VERSION: 9
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     VOICETYPE_APP_GROUP: group.com.kyleqi.voicetype
     VOICETYPE_DEV_CREDIT_KEY: ""
@@ -72,7 +72,7 @@ targets:
     info:
       path: VoiceTypeKeyboard/Info.plist
       properties:
-        CFBundleDisplayName: VoiceType Keyboard
+        CFBundleDisplayName: VoiceType
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false

@@ -193,10 +193,10 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         topRow.addArrangedSubview(UIView())
 
         NSLayoutConstraint.activate([
-            topRow.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 14),
-            topRow.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -14),
-            topRow.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 2),
-            topRow.heightAnchor.constraint(equalToConstant: 34)
+            topRow.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 18),
+            topRow.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -18),
+            topRow.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 5),
+            topRow.heightAnchor.constraint(equalToConstant: 32)
         ])
     }
 
@@ -212,7 +212,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
         actionControl.translatesAutoresizingMaskIntoConstraints = false
         actionControl.layer.cornerCurve = .continuous
-        actionControl.layer.cornerRadius = 29
+        actionControl.layer.cornerRadius = 28
         actionControl.addTarget(self, action: #selector(actionTapped), for: .touchUpInside)
         installActionPressFeedback(on: actionControl)
         actionControl.isAccessibilityElement = true
@@ -282,18 +282,18 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         NSLayoutConstraint.activate([
             promptLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 18),
             promptLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -18),
-            promptLabel.topAnchor.constraint(equalTo: topRow.bottomAnchor, constant: 6),
+            promptLabel.topAnchor.constraint(equalTo: topRow.bottomAnchor, constant: 7),
             promptLabel.heightAnchor.constraint(equalToConstant: 0),
 
-            helperLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 28),
-            helperLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -28),
+            helperLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
+            helperLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
             helperLabel.topAnchor.constraint(equalTo: actionControl.bottomAnchor, constant: 6),
-            helperLabel.heightAnchor.constraint(equalToConstant: 30),
+            helperLabel.heightAnchor.constraint(equalToConstant: 26),
 
-            actionControl.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
-            actionControl.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
-            actionControl.topAnchor.constraint(equalTo: topRow.bottomAnchor, constant: 6),
-            actionControl.heightAnchor.constraint(equalToConstant: 60)
+            actionControl.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 18),
+            actionControl.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -18),
+            actionControl.topAnchor.constraint(equalTo: topRow.bottomAnchor, constant: 7),
+            actionControl.heightAnchor.constraint(equalToConstant: 56)
         ])
     }
 
@@ -327,12 +327,12 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             bottomRow.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 18),
             bottomRow.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -18),
             bottomRow.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -4),
-            bottomRow.heightAnchor.constraint(equalToConstant: 46),
+            bottomRow.heightAnchor.constraint(equalToConstant: 48),
 
             returnButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
-            returnButton.heightAnchor.constraint(equalToConstant: 44),
-            deleteButton.widthAnchor.constraint(equalToConstant: 46),
-            deleteButton.heightAnchor.constraint(equalToConstant: 46)
+            returnButton.heightAnchor.constraint(equalToConstant: 48),
+            deleteButton.widthAnchor.constraint(equalToConstant: 48),
+            deleteButton.heightAnchor.constraint(equalToConstant: 48)
         ])
     }
 
@@ -341,7 +341,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         button.backgroundColor = palette.keyGray
         button.tintColor = palette.inkSoft
         button.layer.cornerCurve = .continuous
-        button.layer.cornerRadius = 23
+        button.layer.cornerRadius = 24
         button.setImage(UIImage(systemName: systemName), for: .normal)
         button.imageView?.contentMode = .scaleAspectFit
         button.accessibilityLabel = accessibilityLabel
@@ -352,7 +352,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         button.backgroundColor = palette.keySurface
         button.tintColor = palette.ink
         button.layer.cornerCurve = .continuous
-        button.layer.cornerRadius = 22
+        button.layer.cornerRadius = 24
         button.setTitle(text, for: .normal)
         button.setTitleColor(palette.ink, for: .normal)
         button.titleLabel?.font = .systemFont(ofSize: 22, weight: .regular)
