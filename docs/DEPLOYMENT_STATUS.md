@@ -141,7 +141,7 @@ Latest upload:
   needed an App Store provisioning profile; retrying with
   `-allowProvisioningUpdates` created/downloaded signing assets and uploaded
   successfully.
-- Current source is bumped to build `11` for a stronger keyboard-mic recovery fix:
+- Current source is bumped to build `13` for a stronger keyboard-mic recovery fix:
   the app now verifies the real `AVAudioRecorder.isRecording` before publishing
   keyboard-ready heartbeats, recovers after audio interruptions, media-services
   reset, and foreground return, and times out stuck transcription uploads instead
@@ -152,6 +152,13 @@ Latest upload:
 - Build `12` replaces the first Live Activity presentation with a smaller
   Liquid Glass-style pill, a code-rendered VoiceType waveform mark so the compact
   logo cannot render blank, and tighter Dynamic Island sizing.
+- Build `13` improves the Live Activity readability pass: lock-screen text now
+  sits on a stronger contrast scrim while keeping the Liquid Glass treatment, and
+  the expanded Dynamic Island uses a compact status chip plus stable-width timer
+  pill instead of loose status text next to changing seconds. It was archived at
+  `/private/tmp/VoiceTypeBuild13ReadableLiveActivity-202606161412.xcarchive` and
+  uploaded with `xcodebuild -exportArchive` on 2026-06-16; Xcode reported
+  `Uploaded VoiceType` and `Upload succeeded`.
 
 App Store Connect configuration completed:
 

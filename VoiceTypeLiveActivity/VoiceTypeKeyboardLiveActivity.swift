@@ -14,12 +14,10 @@ struct VoiceTypeKeyboardLiveActivity: Widget {
                     VoiceTypeActivityLogo(size: 28)
                 }
                 DynamicIslandExpandedRegion(.center) {
-                    VoiceTypeActivityIslandText(state: context.state)
+                    VoiceTypeActivityIslandStatus(state: context.state)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    VoiceTypeActivityTimer(state: context.state)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(.primary)
+                    VoiceTypeActivityTimerPill(state: context.state, compact: true)
                 }
             } compactLeading: {
                 VoiceTypeActivityLogo(size: 18)
@@ -44,20 +42,14 @@ private struct VoiceTypeLiveActivityView: View {
 
             Spacer(minLength: 8)
 
-            VStack(alignment: .trailing, spacing: 2) {
-                VoiceTypeActivityTimer(state: state)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(VoiceTypeActivityPalette.text)
-                Text(state.durationLimit.label)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(VoiceTypeActivityPalette.secondary)
-            }
-            .padding(.horizontal, 9)
-            .frame(height: 32)
-            .voiceTypeGlass(cornerRadius: 16)
+            VoiceTypeActivityTimerPill(state: state, compact: false)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
+        .background {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(VoiceTypeActivityPalette.readabilityScrim)
+        }
         .voiceTypeGlass(cornerRadius: 26)
         .overlay {
             RoundedRectangle(cornerRadius: 26, style: .continuous)
@@ -101,11 +93,12 @@ private struct VoiceTypeActivityLockScreenText: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Circle()
-                    .fill(statusColor)
+                    .fill(state.statusColor)
                     .frame(width: 6, height: 6)
+
                 Text("VoiceType")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(VoiceTypeActivityPalette.secondary)
+                    .foregroundStyle(VoiceTypeActivityPalette.secondaryText)
             }
 
             Text(state.title)
@@ -115,37 +108,38 @@ private struct VoiceTypeActivityLockScreenText: View {
 
             Text(state.subtitle)
                 .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundStyle(VoiceTypeActivityPalette.secondary)
+                .foregroundStyle(VoiceTypeActivityPalette.secondaryText)
                 .lineLimit(1)
         }
-    }
-
-    private var statusColor: Color {
-        switch state.mode {
-        case .keyboardRecording:
-            VoiceTypeActivityPalette.gold
-        case .transcribing:
-            VoiceTypeActivityPalette.blue
-        case .keyboardReady, .standard:
-            VoiceTypeActivityPalette.green
-        }
+        .shadow(color: VoiceTypeActivityPalette.textShadow, radius: 3, x: 0, y: 1)
     }
 }
 
-private struct VoiceTypeActivityIslandText: View {
+private struct VoiceTypeActivityIslandStatus: View {
     let state: VoiceTypeKeyboardActivityAttributes.ContentState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(state.title)
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-            Text(state.subtitle)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+        HStack(spacing: 7) {
+            Circle()
+                .fill(state.statusColor)
+                .frame(width: 6, height: 6)
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text(state.title)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(VoiceTypeActivityPalette.text)
+                    .lineLimit(1)
+
+                Text(state.islandSubtitle)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(VoiceTypeActivityPalette.secondaryText)
+                    .lineLimit(1)
+            }
         }
+        .padding(.horizontal, 9)
+        .frame(height: 32)
+        .background(VoiceTypeActivityPalette.islandScrim, in: Capsule(style: .continuous))
+        .shadow(color: VoiceTypeActivityPalette.textShadow, radius: 2.5, x: 0, y: 1)
     }
 }
 
@@ -170,6 +164,38 @@ private struct VoiceTypeActivityCompactStatus: View {
     }
 }
 
+private struct VoiceTypeActivityTimerPill: View {
+    let state: VoiceTypeKeyboardActivityAttributes.ContentState
+    let compact: Bool
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: compact ? 0 : 2) {
+            VoiceTypeActivityTimer(state: state)
+                .font(
+                    .system(
+                        size: compact ? 12.5 : 15,
+                        weight: .semibold,
+                        design: .rounded
+                    )
+                    .monospacedDigit()
+                )
+                .foregroundStyle(VoiceTypeActivityPalette.text)
+
+            if !compact {
+                Text(state.durationLimit.label)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(VoiceTypeActivityPalette.secondaryText)
+            }
+        }
+        .shadow(color: VoiceTypeActivityPalette.textShadow, radius: 3, x: 0, y: 1)
+        .padding(.horizontal, compact ? 8 : 9)
+        .frame(minWidth: compact ? 48 : 58, alignment: .trailing)
+        .frame(height: compact ? 26 : 32)
+        .background(VoiceTypeActivityPalette.islandScrim, in: Capsule(style: .continuous))
+        .voiceTypeGlass(cornerRadius: compact ? 13 : 16)
+    }
+}
+
 private struct VoiceTypeActivityTimer: View {
     let state: VoiceTypeKeyboardActivityAttributes.ContentState
 
@@ -183,14 +209,43 @@ private struct VoiceTypeActivityTimer: View {
 }
 
 private enum VoiceTypeActivityPalette {
-    static let text = Color.primary
-    static let secondary = Color.secondary
+    static let text = Color.white
+    static let secondaryText = Color.white.opacity(0.84)
+    static let textShadow = Color.black.opacity(0.85)
     static let gold = Color(red: 0.91, green: 0.62, blue: 0.10)
     static let green = Color(red: 0.45, green: 0.78, blue: 0.48)
     static let blue = Color(red: 0.40, green: 0.66, blue: 0.95)
-    static let logoInk = Color.primary.opacity(0.92)
-    static let logoFill = Color.white.opacity(0.20)
-    static let glassStroke = Color.white.opacity(0.28)
+    static let logoInk = Color.black.opacity(0.90)
+    static let logoFill = Color.white.opacity(0.88)
+    static let glassStroke = Color.white.opacity(0.32)
+    static let readabilityScrim = Color.black.opacity(0.34)
+    static let islandScrim = Color.black.opacity(0.38)
+}
+
+private extension VoiceTypeKeyboardActivityAttributes.ContentState {
+    var statusColor: Color {
+        switch mode {
+        case .keyboardRecording:
+            VoiceTypeActivityPalette.gold
+        case .transcribing:
+            VoiceTypeActivityPalette.blue
+        case .keyboardReady, .standard:
+            VoiceTypeActivityPalette.green
+        }
+    }
+
+    var islandSubtitle: String {
+        switch mode {
+        case .keyboardRecording:
+            "Recording"
+        case .transcribing:
+            "Finishing"
+        case .keyboardReady:
+            "Mic on"
+        case .standard:
+            "Keyboard"
+        }
+    }
 }
 
 private extension View {

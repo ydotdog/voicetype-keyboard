@@ -109,6 +109,10 @@
 - Build `12` redesigns the Live Activity as a smaller Liquid Glass-style pill
   with a code-rendered VoiceType waveform mark, then uploads it for TestFlight
   processing on 2026-06-16.
+- Build `13` improves that Live Activity pass with higher-contrast lock-screen
+  text, a stronger readability scrim, a shorter Dynamic Island status chip, and a
+  stable-width timer pill. It was uploaded for App Store Connect processing on
+  2026-06-16.
 - Test on device:
   - Sign in with Apple succeeds.
   - First sign-in grants the welcome credit (balance is non-zero without a purchase).
