@@ -45,6 +45,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     private var activeTranscriptionTask: Task<Void, Never>?
     private var activeTranscriptionID: UUID?
     private var processingWatchdogTask: Task<Void, Never>?
+    private var shouldStopKeyboardSessionAfterCurrentClip = false
     // Monotonic stamp for Live Activity operations. Bumped synchronously on the
     // main actor at each call site so the epochs reflect the true *intent* order,
     // even though the Tasks that deliver update/end run unordered. The controller
@@ -181,6 +182,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             activeDurationLimit = durationLimit
             handledCommandID = RecordingBridgeStore.latestCommand?.id
             keyboardClipStartTime = nil
+            shouldStopKeyboardSessionAfterCurrentClip = false
             lastBridgeHeartbeatAt = nil
             elapsedSeconds = 0
             isRecording = false
@@ -209,6 +211,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         processingStartedAt = nil
         bridgeMode = .standard
         keyboardClipStartTime = nil
+        shouldStopKeyboardSessionAfterCurrentClip = false
         stopTimer()
         RecordingBridgeStore.state = .inactive
         endLiveActivity()
@@ -345,6 +348,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         handledCommandID = nil
         lastBridgeHeartbeatAt = nil
         bridgeMode = .standard
+        shouldStopKeyboardSessionAfterCurrentClip = false
         isStopping = false
         elapsedSeconds = 0
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -506,9 +510,14 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         processingStartedAt = nil
         isStopping = false
         if isKeyboardSessionActive {
-            bridgeMode = .keyboardReady
-            recoverKeyboardRecorderIfNeeded(reason: "stale transcription watchdog")
-            publishBridgeState()
+            if shouldStopKeyboardSessionAfterCurrentClip {
+                shouldStopKeyboardSessionAfterCurrentClip = false
+                stopKeyboardReady()
+            } else {
+                bridgeMode = .keyboardReady
+                recoverKeyboardRecorderIfNeeded(reason: "stale transcription watchdog")
+                publishBridgeState()
+            }
         } else {
             bridgeMode = .standard
             RecordingBridgeStore.state = .inactive
@@ -590,6 +599,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         return formatter
     }()
     private static let maximumTranscriptionWait: TimeInterval = 600
+    private static let maximumKeyboardClipDuration: TimeInterval = 10 * 60
 
     private func handleBridgeCommandIfNeeded() async {
         guard
@@ -619,33 +629,56 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     }
 
     private func stopIfDurationLimitReached() async {
-        guard let maximumDuration = activeDurationLimit.maximumDuration else { return }
-
-        // The session-length limit caps a single dictation, never the armed mic
-        // itself. While the keyboard mic is idle (ready) it must stay alive
-        // indefinitely: applying this limit to the whole session used to tear the
-        // armed mic down here and silently drop the user back to "Open VoiceType" the
-        // moment the elapsed *session* lifetime crossed the limit (e.g. the 5 min
-        // default) — the recurring bug that only a force-quit appeared to fix.
-        if bridgeMode == .keyboardRecording {
-            // Measure from when the user tapped Speak (the recorder's clip start),
-            // not from when the keyboard mic was first armed.
-            guard
-                let recorder,
-                let clipStartTime = keyboardClipStartTime,
-                recorder.currentTime - clipStartTime >= maximumDuration
-            else {
-                return
-            }
+        if
+            bridgeMode == .keyboardRecording,
+            let recorder,
+            let clipStartTime = keyboardClipStartTime,
+            recorder.currentTime - clipStartTime >= Self.maximumKeyboardClipDuration
+        {
             await stopKeyboardClipAndTranscribe()
             return
         }
 
+        guard let maximumDuration = activeDurationLimit.maximumDuration else { return }
+
+        if isKeyboardSessionActive {
+            guard
+                let startedAt,
+                Date().timeIntervalSince(startedAt) >= maximumDuration
+            else {
+                return
+            }
+            await stopKeyboardSessionForDurationLimit()
+            return
+        }
+
         // A standard in-app recording is bounded from its own start.
-        guard isRecording, bridgeMode == .standard, elapsedSeconds >= maximumDuration, let activeAccount else {
+        guard
+            isRecording,
+            bridgeMode == .standard,
+            let startedAt,
+            Date().timeIntervalSince(startedAt) >= maximumDuration,
+            let activeAccount
+        else {
             return
         }
         await stopAndTranscribe(account: activeAccount)
+    }
+
+    private func stopKeyboardSessionForDurationLimit() async {
+        guard isKeyboardSessionActive else { return }
+
+        switch bridgeMode {
+        case .keyboardRecording:
+            shouldStopKeyboardSessionAfterCurrentClip = true
+            await stopKeyboardClipAndTranscribe()
+        case .transcribing:
+            shouldStopKeyboardSessionAfterCurrentClip = true
+        case .keyboardReady:
+            stopKeyboardReady()
+        case .standard:
+            break
+        }
     }
 
     private func registerBridgeCommandObserver() {
@@ -800,8 +833,13 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         isRecording = false
 
         guard clipDuration >= 0.25 else {
-            bridgeMode = .keyboardReady
-            publishBridgeState()
+            if shouldStopKeyboardSessionAfterCurrentClip {
+                shouldStopKeyboardSessionAfterCurrentClip = false
+                stopKeyboardReady()
+            } else {
+                bridgeMode = .keyboardReady
+                publishBridgeState()
+            }
             return
         }
 
@@ -883,15 +921,23 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             lastTranscript = snapshot
             account.apply(balance: response.balance)
 
-            isProcessing = false
-            bridgeMode = .keyboardReady
-            publishBridgeState()
+            if shouldStopKeyboardSessionAfterCurrentClip {
+                shouldStopKeyboardSessionAfterCurrentClip = false
+                stopKeyboardReady()
+            } else {
+                isProcessing = false
+                bridgeMode = .keyboardReady
+                publishBridgeState()
+            }
         } catch {
             guard isActiveTranscription(id) else { return }
             KeyboardAutoInsertStore.clear()
             errorMessage = error.localizedDescription
             isProcessing = false
-            if self.recorder == nil {
+            if shouldStopKeyboardSessionAfterCurrentClip {
+                shouldStopKeyboardSessionAfterCurrentClip = false
+                stopKeyboardReady()
+            } else if self.recorder == nil {
                 stopKeyboardReady()
             } else {
                 bridgeMode = .keyboardReady

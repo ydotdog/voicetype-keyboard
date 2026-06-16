@@ -93,7 +93,7 @@ def test_keyboard_matches_system_background_feedback_and_stop_state() -> None:
 
 def test_uploaded_build_number_is_current() -> None:
     project = read("project.yml")
-    assert "CURRENT_PROJECT_VERSION: 16" in project
+    assert "CURRENT_PROJECT_VERSION: 17" in project
 
 
 def test_keyboard_clip_keeps_session_alive_across_stops() -> None:
@@ -136,23 +136,27 @@ def test_keyboard_mic_recovers_from_stale_internal_recorder_state() -> None:
     assert 'showToast("VoiceType is finishing your clip.")' in keyboard_request
 
 
-def test_session_length_limit_caps_a_clip_not_the_armed_keyboard_mic() -> None:
-    # "Session length" must bound a single dictation, measured from when Speak was
-    # tapped. It must never tear down an idle, armed keyboard mic (.keyboardReady):
-    # doing that silently dropped the user back to "Open VoiceType" the instant the
-    # session lifetime crossed the limit (the 5 min default) -- the recurring
-    # "mic stops working until force-quit" bug.
+def test_session_length_limits_the_armed_keyboard_mic_lifetime() -> None:
+    # "Session length" is the lifetime of the armed keyboard mic session, measured
+    # from Turn on keyboard mic. It is not reset when the picker changes, and it is
+    # separate from the model-facing max length of a single Speak clip.
     controller = read("VoiceType/Services/RecordingController.swift")
 
     start = controller.index("private func stopIfDurationLimitReached")
     end = controller.index("\n    private func ", start + len("private func stopIfDurationLimitReached"))
     body = controller[start:end]
 
-    assert "stopKeyboardReady" not in body
-    assert "bridgeMode == .keyboardReady" not in body
-    # A keyboard clip is bounded from the recorder's clip start, not the session.
-    assert "keyboardClipStartTime" in body
-    assert "recorder.currentTime - clipStartTime >= maximumDuration" in body
+    assert "Date().timeIntervalSince(startedAt) >= maximumDuration" in body
+    assert "await stopKeyboardSessionForDurationLimit()" in body
+    assert "recorder.currentTime - clipStartTime >= Self.maximumKeyboardClipDuration" in body
+    assert "private static let maximumKeyboardClipDuration: TimeInterval = 10 * 60" in controller
+    assert "shouldStopKeyboardSessionAfterCurrentClip = true" in controller
+
+    session_limit_start = controller.index("private func stopKeyboardSessionForDurationLimit")
+    session_limit_end = controller.index("\n    private func ", session_limit_start + len("private func stopKeyboardSessionForDurationLimit"))
+    session_limit_body = controller[session_limit_start:session_limit_end]
+    assert "case .keyboardReady:" in session_limit_body
+    assert "stopKeyboardReady()" in session_limit_body
 
     # Changing the session length re-verifies the live recorder before publishing,
     # so it can never broadcast a stale ready over a dead recorder.
@@ -183,9 +187,12 @@ def test_keyboard_mic_live_activity_is_configured() -> None:
     assert "containerBackground(for: .widget)" in widget
     assert "readabilityScrim" in widget
     assert "VoiceTypeActivityIslandStatus" in widget
-    assert "VoiceTypeActivityTimerPill" in widget
     assert "islandSubtitle" in widget
-    assert ".frame(minWidth: compact ? 48 : 58" in widget
+    assert "VoiceTypeActivityTimerPill" not in widget
+    assert "VoiceTypeActivityTimer" not in widget
+    assert "Text(startedAt, style: .timer)" not in widget
+    assert "DynamicIslandExpandedRegion(.trailing)" in widget
+    assert ".frame(minWidth: 86, alignment: .trailing)" in widget
     assert "func voiceTypeGlass" not in widget
     assert "compactLeading" in widget
     assert "minimal" in widget

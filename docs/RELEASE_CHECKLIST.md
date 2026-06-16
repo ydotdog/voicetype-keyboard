@@ -126,6 +126,10 @@
   so stale recording updates cannot reopen the activity after the mic ends, and
   switches compact Dynamic Island back to a short status dot instead of a running
   timer. It was uploaded for App Store Connect processing on 2026-06-16.
+- Build `17` restores `Session length` to the intended keyboard mic lifetime
+  measured from Turn on keyboard mic, adds a separate 10-minute Speak clip cap,
+  removes elapsed timers from Live Activity/Dynamic Island, and aligns expanded
+  Dynamic Island as logo left plus mic status right.
 - Test on device:
   - Sign in with Apple succeeds.
   - First sign-in grants the welcome credit (balance is non-zero without a purchase).

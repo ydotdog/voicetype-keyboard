@@ -141,10 +141,11 @@ Latest upload:
   needed an App Store provisioning profile; retrying with
   `-allowProvisioningUpdates` created/downloaded signing assets and uploaded
   successfully.
-- Current source is bumped to build `16` for the Live Activity sync race fix:
-  ActivityKit update/end operations now carry a monotonic epoch through a
-  serialized controller path so stale recording updates cannot resurrect the
-  Live Activity after the mic is off.
+- Current source is bumped to build `17` for the corrected session-length
+  semantics and Live Activity layout cleanup. `Session length` again limits the
+  armed keyboard mic session from the moment the user taps Turn on keyboard mic;
+  a separate 10-minute cap protects each Speak clip. Live Activity and Dynamic
+  Island no longer show an elapsed timer.
 - Build `11` also adds a Live Activity / Dynamic Island surface for the active
   keyboard microphone session, using the VoiceType app logo in compact and
   minimal presentations.
@@ -184,6 +185,16 @@ Latest upload:
   one-row expanded island layout. It was archived at
   `/private/tmp/VoiceTypeBuild16LiveActivitySyncRace-202606161950.xcarchive` and
   uploaded with `xcodebuild -exportArchive` on 2026-06-16; Xcode reported
+  `Uploaded VoiceType` and `Upload succeeded`.
+- Build `17` restores `Session length` to the intended keyboard-mic session
+  lifetime: 5 minutes, 12 hours, or Forever are measured from Turn on keyboard
+  mic, not from Speak and not from changing the picker. A current Speak clip is
+  stopped and transcribed before the expired session closes, while each Speak
+  clip has its own 10-minute safety cap. The Live Activity and Dynamic Island
+  no longer display elapsed duration; expanded Dynamic Island shows the logo on
+  the left and the current mic status on the right. It was archived at
+  `/private/tmp/VoiceTypeBuild17SessionLengthLiveActivity-202606162103.xcarchive`
+  and uploaded with `xcodebuild -exportArchive` on 2026-06-16; Xcode reported
   `Uploaded VoiceType` and `Upload succeeded`.
 
 App Store Connect configuration completed:
