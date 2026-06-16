@@ -93,7 +93,7 @@ def test_keyboard_matches_system_background_feedback_and_stop_state() -> None:
 
 def test_uploaded_build_number_is_current() -> None:
     project = read("project.yml")
-    assert "CURRENT_PROJECT_VERSION: 13" in project
+    assert "CURRENT_PROJECT_VERSION: 14" in project
 
 
 def test_keyboard_clip_keeps_session_alive_across_stops() -> None:
@@ -150,11 +150,14 @@ def test_keyboard_mic_live_activity_is_configured() -> None:
     assert "glassEffect(" in widget
     assert "VoiceTypeActivityLogo" in widget
     assert "barHeights" in widget
+    assert "VoiceTypeActivityGlassPanel" in widget
+    assert "containerBackground(for: .widget)" in widget
     assert "readabilityScrim" in widget
     assert "VoiceTypeActivityIslandStatus" in widget
     assert "VoiceTypeActivityTimerPill" in widget
     assert "islandSubtitle" in widget
     assert ".frame(minWidth: compact ? 48 : 58" in widget
+    assert "func voiceTypeGlass" not in widget
     assert "compactLeading" in widget
     assert "minimal" in widget
 

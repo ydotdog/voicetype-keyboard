@@ -113,6 +113,10 @@
   text, a stronger readability scrim, a shorter Dynamic Island status chip, and a
   stable-width timer pill. It was uploaded for App Store Connect processing on
   2026-06-16.
+- Build `14` fixes the lock-screen/Home Screen Live Activity foreground rendering
+  by separating the Liquid Glass background from all text/logo/timer content and
+  adding the background through `containerBackground(for: .widget)`. It was
+  uploaded for App Store Connect processing on 2026-06-16.
 - Test on device:
   - Sign in with Apple succeeds.
   - First sign-in grants the welcome credit (balance is non-zero without a purchase).

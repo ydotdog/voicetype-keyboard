@@ -35,25 +35,24 @@ private struct VoiceTypeLiveActivityView: View {
     let state: VoiceTypeKeyboardActivityAttributes.ContentState
 
     var body: some View {
-        HStack(spacing: 10) {
-            VoiceTypeActivityLogo(size: 30)
+        ZStack {
+            VoiceTypeActivityGlassPanel(cornerRadius: 26, scrim: VoiceTypeActivityPalette.readabilityScrim)
 
-            VoiceTypeActivityLockScreenText(state: state)
+            HStack(spacing: 10) {
+                VoiceTypeActivityLogo(size: 30)
 
-            Spacer(minLength: 8)
+                VoiceTypeActivityLockScreenText(state: state)
 
-            VoiceTypeActivityTimerPill(state: state, compact: false)
+                Spacer(minLength: 8)
+
+                VoiceTypeActivityTimerPill(state: state, compact: false)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .zIndex(1)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background {
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .fill(VoiceTypeActivityPalette.readabilityScrim)
-        }
-        .voiceTypeGlass(cornerRadius: 26)
-        .overlay {
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .stroke(VoiceTypeActivityPalette.glassStroke, lineWidth: 0.8)
+        .containerBackground(for: .widget) {
+            VoiceTypeActivityGlassPanel(cornerRadius: 26, scrim: VoiceTypeActivityPalette.readabilityScrim)
         }
     }
 }
@@ -164,35 +163,69 @@ private struct VoiceTypeActivityCompactStatus: View {
     }
 }
 
+private struct VoiceTypeActivityGlassPanel: View {
+    let cornerRadius: CGFloat
+    let scrim: Color
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+
+        ZStack {
+            if #available(iOSApplicationExtension 26.0, *) {
+                shape
+                    .fill(VoiceTypeActivityPalette.glassBase)
+                    .glassEffect(
+                        .regular.tint(VoiceTypeActivityPalette.glassTint),
+                        in: shape
+                    )
+            } else {
+                shape
+                    .fill(.ultraThinMaterial)
+            }
+
+            shape
+                .fill(scrim)
+
+            shape
+                .stroke(VoiceTypeActivityPalette.glassStroke, lineWidth: 0.8)
+        }
+    }
+}
+
 private struct VoiceTypeActivityTimerPill: View {
     let state: VoiceTypeKeyboardActivityAttributes.ContentState
     let compact: Bool
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: compact ? 0 : 2) {
-            VoiceTypeActivityTimer(state: state)
-                .font(
-                    .system(
-                        size: compact ? 12.5 : 15,
-                        weight: .semibold,
-                        design: .rounded
-                    )
-                    .monospacedDigit()
-                )
-                .foregroundStyle(VoiceTypeActivityPalette.text)
+        ZStack {
+            VoiceTypeActivityGlassPanel(
+                cornerRadius: compact ? 13 : 16,
+                scrim: VoiceTypeActivityPalette.islandScrim
+            )
 
-            if !compact {
-                Text(state.durationLimit.label)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(VoiceTypeActivityPalette.secondaryText)
+            VStack(alignment: .trailing, spacing: compact ? 0 : 2) {
+                VoiceTypeActivityTimer(state: state)
+                    .font(
+                        .system(
+                            size: compact ? 12.5 : 15,
+                            weight: .semibold,
+                            design: .rounded
+                        )
+                        .monospacedDigit()
+                    )
+                    .foregroundStyle(VoiceTypeActivityPalette.text)
+
+                if !compact {
+                    Text(state.durationLimit.label)
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(VoiceTypeActivityPalette.secondaryText)
+                }
             }
+            .padding(.horizontal, compact ? 8 : 9)
+            .shadow(color: VoiceTypeActivityPalette.textShadow, radius: 3, x: 0, y: 1)
         }
-        .shadow(color: VoiceTypeActivityPalette.textShadow, radius: 3, x: 0, y: 1)
-        .padding(.horizontal, compact ? 8 : 9)
         .frame(minWidth: compact ? 48 : 58, alignment: .trailing)
         .frame(height: compact ? 26 : 32)
-        .background(VoiceTypeActivityPalette.islandScrim, in: Capsule(style: .continuous))
-        .voiceTypeGlass(cornerRadius: compact ? 13 : 16)
     }
 }
 
@@ -217,6 +250,8 @@ private enum VoiceTypeActivityPalette {
     static let blue = Color(red: 0.40, green: 0.66, blue: 0.95)
     static let logoInk = Color.black.opacity(0.90)
     static let logoFill = Color.white.opacity(0.88)
+    static let glassBase = Color.white.opacity(0.08)
+    static let glassTint = Color.white.opacity(0.10)
     static let glassStroke = Color.white.opacity(0.32)
     static let readabilityScrim = Color.black.opacity(0.34)
     static let islandScrim = Color.black.opacity(0.38)
@@ -244,20 +279,6 @@ private extension VoiceTypeKeyboardActivityAttributes.ContentState {
             "Mic on"
         case .standard:
             "Keyboard"
-        }
-    }
-}
-
-private extension View {
-    @ViewBuilder
-    func voiceTypeGlass(cornerRadius: CGFloat) -> some View {
-        if #available(iOSApplicationExtension 26.0, *) {
-            glassEffect(
-                .regular.tint(Color.white.opacity(0.10)),
-                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            )
-        } else {
-            background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         }
     }
 }

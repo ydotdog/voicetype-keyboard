@@ -141,7 +141,7 @@ Latest upload:
   needed an App Store provisioning profile; retrying with
   `-allowProvisioningUpdates` created/downloaded signing assets and uploaded
   successfully.
-- Current source is bumped to build `13` for a stronger keyboard-mic recovery fix:
+- Current source is bumped to build `14` for a stronger keyboard-mic recovery fix:
   the app now verifies the real `AVAudioRecorder.isRecording` before publishing
   keyboard-ready heartbeats, recovers after audio interruptions, media-services
   reset, and foreground return, and times out stuck transcription uploads instead
@@ -158,6 +158,15 @@ Latest upload:
   pill instead of loose status text next to changing seconds. It was archived at
   `/private/tmp/VoiceTypeBuild13ReadableLiveActivity-202606161412.xcarchive` and
   uploaded with `xcodebuild -exportArchive` on 2026-06-16; Xcode reported
+  `Uploaded VoiceType` and `Upload succeeded`.
+- Build `14` fixes the lock-screen/Home Screen Live Activity rendering bug where
+  the Liquid Glass card could show wallpaper but no text. The foreground content
+  is now drawn in a separate `ZStack` layer above a dedicated
+  `VoiceTypeActivityGlassPanel`, and the widget background is supplied through
+  `containerBackground(for: .widget)` so `glassEffect` is never applied to a
+  view that contains `Text`. It was archived at
+  `/private/tmp/VoiceTypeBuild14LiveActivityForegroundText-202606161714.xcarchive`
+  and uploaded with `xcodebuild -exportArchive` on 2026-06-16; Xcode reported
   `Uploaded VoiceType` and `Upload succeeded`.
 
 App Store Connect configuration completed:
