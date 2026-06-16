@@ -45,6 +45,13 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     private var activeTranscriptionTask: Task<Void, Never>?
     private var activeTranscriptionID: UUID?
     private var processingWatchdogTask: Task<Void, Never>?
+    // Monotonic stamp for Live Activity operations. Bumped synchronously on the
+    // main actor at each call site so the epochs reflect the true *intent* order,
+    // even though the Tasks that deliver update/end run unordered. The controller
+    // uses it to drop a stale update that would otherwise resurrect the Live
+    // Activity after a later end -- the lock screen kept showing "recording" while
+    // the app and Dynamic Island were already off.
+    private var liveActivityEpoch: UInt64 = 0
 
     override init() {
         super.init()
@@ -539,7 +546,13 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         syncLiveActivity()
     }
 
+    private func nextLiveActivityEpoch() -> UInt64 {
+        liveActivityEpoch += 1
+        return liveActivityEpoch
+    }
+
     private func syncLiveActivity(force: Bool = false) {
+        let epoch = nextLiveActivityEpoch()
         let sessionID = activeSessionID
         let mode = bridgeMode
         let startedAt = startedAt
@@ -550,14 +563,16 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
                 mode: mode,
                 startedAt: startedAt,
                 durationLimit: durationLimit,
+                epoch: epoch,
                 force: force
             )
         }
     }
 
     private func endLiveActivity() {
+        let epoch = nextLiveActivityEpoch()
         Task { @MainActor in
-            await KeyboardMicLiveActivityController.shared.end()
+            await KeyboardMicLiveActivityController.shared.end(epoch: epoch)
         }
     }
 
@@ -680,10 +695,14 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             }
         )
         notificationObservers.append(
-            center.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: nil) { _ in
+            center.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: nil) { [weak self] _ in
                 RecordingBridgeStore.state = .inactive
-                Task { @MainActor in
-                    await KeyboardMicLiveActivityController.shared.end()
+                Task { @MainActor [weak self] in
+                    // A terminal end must outrank any in-flight update; if the
+                    // controller is already gone there is nothing left to bump, so
+                    // .max guarantees this end wins.
+                    let epoch = self?.nextLiveActivityEpoch() ?? .max
+                    await KeyboardMicLiveActivityController.shared.end(epoch: epoch)
                 }
             }
         )

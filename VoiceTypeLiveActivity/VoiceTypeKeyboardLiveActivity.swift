@@ -11,19 +11,16 @@ struct VoiceTypeKeyboardLiveActivity: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    VoiceTypeActivityLogo(size: 30)
-                        .padding(.leading, 2)
+                    VoiceTypeActivityLogo(size: 24)
+                }
+                DynamicIslandExpandedRegion(.center) {
+                    VoiceTypeActivityIslandStatus(state: context.state)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     VoiceTypeActivityTimerPill(state: context.state, compact: true)
-                        .padding(.trailing, 2)
-                }
-                DynamicIslandExpandedRegion(.bottom) {
-                    VoiceTypeActivityIslandStatus(state: context.state)
-                        .padding(.top, 4)
                 }
             } compactLeading: {
-                VoiceTypeActivityLogo(size: 20)
+                VoiceTypeActivityLogo(size: 18)
             } compactTrailing: {
                 VoiceTypeActivityCompactStatus(state: context.state)
             } minimal: {
@@ -135,22 +132,21 @@ private struct VoiceTypeActivityIslandStatus: View {
     let state: VoiceTypeKeyboardActivityAttributes.ContentState
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 7) {
             VoiceTypeActivityStatusDot(color: state.statusColor, size: 7)
 
-            Text(state.title)
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundStyle(VoiceTypeActivityPalette.text)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(state.title)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(VoiceTypeActivityPalette.text)
+                    .lineLimit(1)
 
-            Spacer(minLength: 8)
-
-            Text(state.islandSubtitle)
-                .font(.system(size: 13, weight: .medium, design: .rounded))
-                .foregroundStyle(VoiceTypeActivityPalette.secondaryText)
-                .lineLimit(1)
+                Text(state.islandSubtitle)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(VoiceTypeActivityPalette.secondaryText)
+                    .lineLimit(1)
+            }
         }
-        .padding(.horizontal, 4)
     }
 }
 
@@ -158,28 +154,12 @@ private struct VoiceTypeActivityCompactStatus: View {
     let state: VoiceTypeKeyboardActivityAttributes.ContentState
 
     var body: some View {
-        if state.startedAt != nil {
-            VoiceTypeActivityTimer(state: state)
-                .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
-                .foregroundStyle(VoiceTypeActivityPalette.gold)
-        } else {
-            Image(systemName: iconName)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(state.statusColor)
-        }
-    }
-
-    private var iconName: String {
-        switch state.mode {
-        case .keyboardRecording:
-            "waveform"
-        case .transcribing:
-            "ellipsis"
-        case .keyboardReady:
-            "mic.fill"
-        case .standard:
-            "mic"
-        }
+        // The compact pill (shown while using other apps, before it is tapped open)
+        // must stay short. A running timer here is several ever-changing monospace
+        // digits, which stretched the pill wide left-to-right. A single status dot
+        // keeps it to the short, centered shape it had before -- the live timer
+        // still lives in the expanded view and on the lock screen.
+        VoiceTypeActivityStatusDot(color: state.statusColor, size: 9)
     }
 }
 
@@ -227,11 +207,11 @@ private struct VoiceTypeActivityTimerPill: View {
     let compact: Bool
 
     var body: some View {
-        VStack(alignment: .center, spacing: compact ? 0 : 1) {
+        VStack(alignment: .trailing, spacing: compact ? 0 : 2) {
             VoiceTypeActivityTimer(state: state)
                 .font(
                     .system(
-                        size: compact ? 13 : 16,
+                        size: compact ? 14 : 17,
                         weight: .semibold,
                         design: .rounded
                     )
@@ -241,18 +221,11 @@ private struct VoiceTypeActivityTimerPill: View {
 
             if !compact, state.startedAt != nil {
                 Text(state.durationLimit.label)
-                    .font(.system(size: 9.5, weight: .semibold, design: .rounded))
-                    .foregroundStyle(state.statusColor)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(VoiceTypeActivityPalette.secondaryText)
             }
         }
-        .padding(.horizontal, compact ? 9 : 12)
-        .frame(minWidth: compact ? 48 : 58, alignment: .center)
-        .frame(height: compact ? 26 : 40)
-        .background(state.statusColor.opacity(0.16), in: Capsule(style: .continuous))
-        .overlay {
-            Capsule(style: .continuous)
-                .strokeBorder(state.statusColor.opacity(0.40), lineWidth: 0.8)
-        }
+        .frame(minWidth: compact ? 48 : 58, alignment: .trailing)
         .shadow(color: VoiceTypeActivityPalette.textShadow, radius: 2, x: 0, y: 1)
     }
 }
