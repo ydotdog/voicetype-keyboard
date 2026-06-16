@@ -171,8 +171,9 @@ struct DashboardView: View {
             showToast("Sign in to turn on keyboard mic")
             return
         }
-        guard !recorder.isKeyboardReady else {
-            showToast("Keyboard mic is already on")
+        if recorder.isKeyboardReady {
+            await recorder.startKeyboardReady(account: account)
+            showToast(recorder.isKeyboardReady ? "Keyboard mic is on. Return to your app." : "Turn keyboard mic on again")
             return
         }
         guard !recorder.isRecording, !recorder.isProcessing else {

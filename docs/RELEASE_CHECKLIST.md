@@ -45,8 +45,9 @@
 - Confirm account deletion is reachable in-app (Settings → Delete account) for
   Guideline 5.1.1(v).
 - StoreKit sandbox/TestFlight validation passed for build `9`.
-- Version `1.0` was submitted for App Review on 2026-06-16 and is configured
-  for automatic release after approval.
+- Version `1.0` was submitted for App Review on 2026-06-16. After a
+  keyboard-mic stale recorder bug was reproduced in build `9`, release was
+  changed back to manual so build `9` cannot automatically go live if approved.
 
 ## Backend
 
@@ -74,7 +75,7 @@
 - StoreKit verification accepts the transaction's own environment first, then the
   configured environment, then Sandbox and Production, while keeping strict
   signature verification and `appAccountToken` matching enabled.
-- During App Review plus automatic release, keep
+- During App Review and the next public release candidate, keep
   `STOREKIT_ACCEPTED_ENVIRONMENTS=SANDBOX,PRODUCTION` so reviewer sandbox
   transactions and public production transactions both grant credit. After the
   public launch is stable, switch it to `PRODUCTION` and restart the backend.
@@ -97,7 +98,10 @@
   switcher language subtitle. Apple accepted the package, App Store Connect
   reports build `9` as `VALID`, version `1.0` is linked to build `9`, and the
   Internal Testers group has access to all builds. Version `1.0` is submitted
-  for App Review and configured for automatic release after approval.
+  for App Review and configured for manual release after approval.
+- Current source is bumped to build `10` for the stale keyboard-mic recorder
+  recovery fix. Upload build `10`, validate it on device, then replace build `9`
+  before public release.
 - Test on device:
   - Sign in with Apple succeeds.
   - First sign-in grants the welcome credit (balance is non-zero without a purchase).

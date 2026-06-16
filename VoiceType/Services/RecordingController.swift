@@ -33,10 +33,13 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     private var bridgeMode: RecordingBridgeMode = .standard
     private var keyboardClipStartTime: TimeInterval?
     private var lastBridgeHeartbeatAt: Date?
+    private var processingStartedAt: Date?
+    private var notificationObservers: [NSObjectProtocol] = []
 
     override init() {
         super.init()
         registerBridgeCommandObserver()
+        registerRecoveryObservers()
     }
 
     deinit {
@@ -121,8 +124,14 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     }
 
     func startKeyboardReady(account: AccountStore) async {
-        guard !isKeyboardReady, !isRecording, !isProcessing else { return }
         errorMessage = nil
+        if isKeyboardReady {
+            activeAccount = account
+            activeDurationLimit = durationLimit
+            recoverKeyboardRecorderIfNeeded(reason: "keyboard mic start requested while already active")
+            return
+        }
+        guard !isRecording, !isProcessing else { return }
 
         let hasPermission = await requestMicrophonePermission()
         guard hasPermission else {
@@ -173,6 +182,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         isStopping = false
         isRecording = false
         isProcessing = false
+        processingStartedAt = nil
         bridgeMode = .standard
         keyboardClipStartTime = nil
         stopTimer()
@@ -204,6 +214,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         recorder = nil
         isRecording = false
         isProcessing = true
+        processingStartedAt = Date()
         stopTimer()
         RecordingBridgeStore.state = .inactive
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -225,6 +236,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             isStopping = false
             elapsedSeconds = 0
             isProcessing = false
+            processingStartedAt = nil
         }
 
         do {
@@ -254,6 +266,8 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         recorder?.stop()
         recorder = nil
         isRecording = false
+        isProcessing = false
+        processingStartedAt = nil
         stopTimer()
         RecordingBridgeStore.state = .inactive
         KeyboardAutoInsertStore.clear()
@@ -275,7 +289,14 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
 
     nonisolated func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
         Task { @MainActor in
-            guard self.isRecording, !self.isStopping, self.recorder === recorder else { return }
+            guard !self.isStopping, self.recorder === recorder else { return }
+            if self.isKeyboardReady {
+                self.recoverKeyboardRecorderIfNeeded(
+                    reason: flag ? "keyboard recorder finished unexpectedly" : "keyboard recorder failed unexpectedly"
+                )
+                return
+            }
+            guard self.isRecording else { return }
             guard self.bridgeMode == .standard else {
                 self.stopKeyboardReady()
                 return
@@ -308,6 +329,8 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             Task { @MainActor in
                 guard let self, let startedAt = self.startedAt else { return }
                 self.elapsedSeconds = Date().timeIntervalSince(startedAt)
+                self.recoverKeyboardRecorderIfNeeded(reason: "keyboard heartbeat")
+                self.resetStaleProcessingIfNeeded()
                 await self.stopIfDurationLimitReached()
                 await self.handleBridgeCommandIfNeeded()
                 self.publishBridgeHeartbeatIfNeeded()
@@ -318,6 +341,79 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     private func stopTimer() {
         timer?.invalidate()
         timer = nil
+    }
+
+    private func recoverKeyboardRecorderIfNeeded(reason _: String) {
+        guard isKeyboardReady else { return }
+        if let recorder, recorder.isRecording { return }
+
+        // stopKeyboardClipAndTranscribe intentionally publishes `.transcribing`
+        // before its replacement recorder is started. Do not delete that source
+        // file during the small stop -> restart handoff window.
+        if isStopping, bridgeMode == .transcribing, recorder == nil {
+            return
+        }
+
+        let interruptedActiveClip = bridgeMode == .keyboardRecording
+        if interruptedActiveClip {
+            KeyboardAutoInsertStore.clear()
+            errorMessage = "The microphone session was interrupted. Try again."
+        }
+
+        recorder?.stop()
+        recorder = nil
+        if let currentFileURL {
+            try? FileManager.default.removeItem(at: currentFileURL)
+        }
+        currentFileURL = nil
+        keyboardClipStartTime = nil
+        isRecording = false
+        if bridgeMode != .transcribing {
+            isProcessing = false
+            processingStartedAt = nil
+            bridgeMode = .keyboardReady
+        }
+        if startedAt == nil {
+            startedAt = Date()
+        }
+        if activeSessionID.isEmpty {
+            activeSessionID = UUID().uuidString
+        }
+
+        do {
+            try restartKeyboardReadyRecorder()
+            publishBridgeState()
+            if timer == nil {
+                startTimer()
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+            stopKeyboardReady()
+        }
+    }
+
+    private func resetStaleProcessingIfNeeded() {
+        guard
+            isProcessing,
+            let startedProcessingAt = processingStartedAt,
+            Date().timeIntervalSince(startedProcessingAt) > Self.maximumTranscriptionWait
+        else {
+            return
+        }
+
+        KeyboardAutoInsertStore.clear()
+        errorMessage = "Transcription timed out. Try again."
+        isProcessing = false
+        processingStartedAt = nil
+        isStopping = false
+        if isKeyboardReady {
+            bridgeMode = .keyboardReady
+            recoverKeyboardRecorderIfNeeded(reason: "stale transcription watchdog")
+            publishBridgeState()
+        } else {
+            bridgeMode = .standard
+            RecordingBridgeStore.state = .inactive
+        }
     }
 
     private func makeAudioRecorder() throws -> (AVAudioRecorder, URL) {
@@ -362,6 +458,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         formatter.zeroFormattingBehavior = .pad
         return formatter
     }()
+    private static let maximumTranscriptionWait: TimeInterval = 600
 
     private func handleBridgeCommandIfNeeded() async {
         guard
@@ -426,6 +523,69 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             nil,
             .deliverImmediately
         )
+    }
+
+    private func registerRecoveryObservers() {
+        let center = NotificationCenter.default
+        let session = AVAudioSession.sharedInstance()
+
+        notificationObservers.append(
+            center.addObserver(forName: AVAudioSession.interruptionNotification, object: session, queue: nil) { [weak self] notification in
+                let typeValue = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+                Task { @MainActor [weak self] in
+                    self?.handleAudioSessionInterruption(typeValue: typeValue)
+                }
+            }
+        )
+        notificationObservers.append(
+            center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: session, queue: nil) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.recoverKeyboardRecorderIfNeeded(reason: "media services reset")
+                }
+            }
+        )
+        notificationObservers.append(
+            center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: nil) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.recoverKeyboardRecorderIfNeeded(reason: "app became active")
+                    self?.resetStaleProcessingIfNeeded()
+                }
+            }
+        )
+        notificationObservers.append(
+            center.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: nil) { _ in
+                RecordingBridgeStore.state = .inactive
+            }
+        )
+    }
+
+    private func removeRecoveryObservers() {
+        let center = NotificationCenter.default
+        notificationObservers.forEach { center.removeObserver($0) }
+        notificationObservers = []
+    }
+
+    private func handleAudioSessionInterruption(typeValue: UInt?) {
+        guard
+            let typeValue,
+            let type = AVAudioSession.InterruptionType(rawValue: typeValue)
+        else {
+            return
+        }
+
+        switch type {
+        case .began:
+            guard bridgeMode == .keyboardRecording else { return }
+            KeyboardAutoInsertStore.clear()
+            keyboardClipStartTime = nil
+            isRecording = false
+            bridgeMode = .keyboardReady
+            publishBridgeState()
+        case .ended:
+            recoverKeyboardRecorderIfNeeded(reason: "audio session interruption ended")
+        @unknown default:
+            recoverKeyboardRecorderIfNeeded(reason: "unknown audio session interruption")
+        }
     }
 
     nonisolated private func removeBridgeCommandObserver() {
@@ -493,6 +653,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         recorder.stop()
         self.recorder = nil
         isProcessing = true
+        processingStartedAt = Date()
         bridgeMode = .transcribing
         publishBridgeState()
 
@@ -501,6 +662,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             .appendingPathExtension("m4a")
         defer {
             isStopping = false
+            processingStartedAt = nil
             if backgroundTask != .invalid {
                 UIApplication.shared.endBackgroundTask(backgroundTask)
             }

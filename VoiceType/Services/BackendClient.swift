@@ -134,6 +134,7 @@ enum BackendClient {
         let boundary = "Boundary-\(UUID().uuidString)"
         var request = URLRequest(url: baseURL.appending(path: "v1/transcriptions"))
         request.httpMethod = "POST"
+        request.timeoutInterval = min(max(duration + 90, 120), 600)
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         applyUserAuth(token, to: &request)
 

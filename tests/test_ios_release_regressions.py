@@ -93,7 +93,7 @@ def test_keyboard_matches_system_background_feedback_and_stop_state() -> None:
 
 def test_uploaded_build_number_is_current() -> None:
     project = read("project.yml")
-    assert "CURRENT_PROJECT_VERSION: 9" in project
+    assert "CURRENT_PROJECT_VERSION: 10" in project
 
 
 def test_keyboard_clip_keeps_session_alive_across_stops() -> None:
@@ -104,6 +104,30 @@ def test_keyboard_clip_keeps_session_alive_across_stops() -> None:
     controller = read("VoiceType/Services/RecordingController.swift")
     assert 'beginBackgroundTask(withName: "VoiceTypeKeyboardClip")' in controller
     assert "for attempt in 0..<2" in controller
+
+
+def test_keyboard_mic_recovers_from_stale_internal_recorder_state() -> None:
+    # The app can stay alive while the underlying AVAudioRecorder has already
+    # stopped. In keyboard-ready mode isRecording is false, so the delegate must
+    # not ignore that stop, and recurring heartbeats must repair the real recorder
+    # before publishing a usable keyboard state.
+    controller = read("VoiceType/Services/RecordingController.swift")
+    backend = read("VoiceType/Services/BackendClient.swift")
+    dashboard = read("VoiceType/Views/DashboardView.swift")
+
+    assert "if self.isKeyboardReady" in controller
+    assert "recoverKeyboardRecorderIfNeeded(" in controller
+    assert "self.recoverKeyboardRecorderIfNeeded(reason:" in controller
+    assert "self.recoverKeyboardRecorderIfNeeded(reason: \"keyboard heartbeat\")" in controller
+    assert "AVAudioSession.interruptionNotification" in controller
+    assert "AVAudioSession.mediaServicesWereResetNotification" in controller
+    assert "UIApplication.didBecomeActiveNotification" in controller
+    assert "maximumTranscriptionWait" in controller
+    assert "request.timeoutInterval = min(max(duration + 90, 120), 600)" in backend
+
+    keyboard_request = dashboard[dashboard.index("private func handleKeyboardMicRequest") :]
+    assert "await recorder.startKeyboardReady(account: account)" in keyboard_request
+    assert 'showToast(recorder.isKeyboardReady ? "Keyboard mic is on. Return to your app."' in keyboard_request
 
 
 def test_keyboard_switcher_name_is_voicetype_without_suffix() -> None:
