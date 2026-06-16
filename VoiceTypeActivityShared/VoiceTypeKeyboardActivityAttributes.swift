@@ -11,11 +11,11 @@ struct VoiceTypeKeyboardActivityAttributes: ActivityAttributes {
         var title: String {
             switch mode {
             case .keyboardRecording:
-                "Recording"
+                "Listening"
             case .transcribing:
                 "Transcribing"
             case .keyboardReady:
-                "Keyboard mic ready"
+                "Ready"
             case .standard:
                 "VoiceType"
             }
@@ -24,13 +24,13 @@ struct VoiceTypeKeyboardActivityAttributes: ActivityAttributes {
         var subtitle: String {
             switch mode {
             case .keyboardRecording:
-                "Tap Stop in the keyboard when done."
+                "VoiceType keyboard"
             case .transcribing:
-                "Finishing your clip."
+                "Finishing clip"
             case .keyboardReady:
-                "Ready in other apps."
+                "Keyboard mic on"
             case .standard:
-                "Open VoiceType to start."
+                "Keyboard mic"
             }
         }
     }

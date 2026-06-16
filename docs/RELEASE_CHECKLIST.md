@@ -106,6 +106,9 @@
   surface and a stronger in-memory transcription state machine. It was uploaded
   on 2026-06-16 and is waiting for App Store Connect processing before TestFlight
   availability.
+- Build `12` redesigns the Live Activity as a smaller Liquid Glass-style pill
+  with a code-rendered VoiceType waveform mark, then uploads it for TestFlight
+  processing on 2026-06-16.
 - Test on device:
   - Sign in with Apple succeeds.
   - First sign-in grants the welcome credit (balance is non-zero without a purchase).

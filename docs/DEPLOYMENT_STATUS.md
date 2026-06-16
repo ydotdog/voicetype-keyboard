@@ -86,8 +86,8 @@ Latest real transcription smoke test:
 Latest upload:
 
 - Date: 2026-06-16.
-- Version/build: `1.0.0 (11)`.
-- Archive path: `/tmp/VoiceTypeBuild11LiveActivity.xcarchive`.
+- Version/build: `1.0.0 (12)`.
+- Archive path: `/tmp/VoiceTypeBuild12GlassLiveActivity-202606161356.xcarchive`.
 - Signing: automatic signing with team `WC3PWB5R2J`; export used
   `method=app-store-connect` and `destination=upload`.
 - Upload method: `xcodebuild -exportArchive` with `method=app-store-connect`,
@@ -149,6 +149,9 @@ Latest upload:
 - Build `11` also adds a Live Activity / Dynamic Island surface for the active
   keyboard microphone session, using the VoiceType app logo in compact and
   minimal presentations.
+- Build `12` replaces the first Live Activity presentation with a smaller
+  Liquid Glass-style pill, a code-rendered VoiceType waveform mark so the compact
+  logo cannot render blank, and tighter Dynamic Island sizing.
 
 App Store Connect configuration completed:
 
@@ -243,7 +246,7 @@ sudo docker compose -f deploy/gcp-vm/docker-compose.yml restart backend
 Still required for App Store release:
 
 - Monitor App Review and respond to any reviewer messages or rejections.
-- Validate build `11` keyboard-mic stale-recorder recovery on device and replace
+- Validate build `12` keyboard-mic stale-recorder recovery on device and replace
   build `9` before public release.
 - After public launch is stable, set `STOREKIT_ACCEPTED_ENVIRONMENTS=PRODUCTION`
   on the VM and restart the backend.
