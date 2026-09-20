@@ -37,7 +37,10 @@ def test_context_hints_and_limits():
     assert language is None
     assert "简体" in prompt and "龚玥" in prompt
     assert context["vocabulary"] == ["龚玥", "VoiceType"]
-    assert provider_hints(parse_context('["zh-Hant"]'))[0] == "zh"
+    traditional_language, traditional_prompt = provider_hints(parse_context('["zh-Hant"]', '["龚玥"]'))
+    assert traditional_language == "zh"
+    assert "繁體中文" in traditional_prompt and "龔玥" in traditional_prompt
+    assert "简体" not in traditional_prompt
     for raw in ['"en"', '["xx"]', '["zh-Hans", "zh-Hant"]', '[1]', '["en","de","fr","es"]']:
         with pytest.raises(HTTPException): parse_context(raw)
     for raw in ['["a\\nb"]', '["<instructions>"]', '["x"]', '[123]']:
