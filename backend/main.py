@@ -1,4 +1,5 @@
 from __future__ import annotations
+from dictation import parse_context, provider_hints, normalize_transcript
 
 import base64
 import asyncio
@@ -383,6 +384,16 @@ def privacy_policy_html() -> str:
 
   <p>We never ask for your Apple password. Sign in with Apple lets you hide your
   email with Apple's private relay; we support that.</p>
+
+  <h2>Language preferences and vocabulary</h2>
+  <p>Language choices and personal vocabulary are saved per account on your device.
+  You can add words or review spellings suggested from your corrections in History.
+  We do not learn from text typed in other apps. Up to 50 recent words and your
+  language choices are sent with recordings to our backend and OpenAI, and are
+  processed transiently rather than saved as a server-side vocabulary profile.
+  Failed recordings retain their original hints for retry. You can disable learning
+  and delete words in Settings. Signing out keeps preferences for the same account;
+  deleting the account removes them on this device. History edits are local.</p>
 
   <h2>How transcription works</h2>
   <p>When you record, the app keeps an audio session active so the VoiceType
@@ -1296,7 +1307,7 @@ def exchange_apple_authorization_code(authorization_code: str, *, expected_sub: 
     if response.status_code != 200:
         logger.warning(
             "apple_code_exchange_rejected",
-            extra={"status_code": response.status_code, "body": response.text[:500]},
+            extra={"status_code": response.status_code},
         )
         raise HTTPException(status_code=503, detail="Could not complete Apple sign-in. Try signing in again.")
     try:
@@ -1334,7 +1345,7 @@ def revoke_apple_token(refresh_token: str) -> bool:
     if response.status_code != 200:
         logger.warning(
             "apple_token_revoke_rejected",
-            extra={"status_code": response.status_code, "body": response.text[:500]},
+            extra={"status_code": response.status_code},
         )
         return False
     return True
@@ -1789,7 +1800,7 @@ def provider_audio_duration(payload: dict[str, Any], measured_seconds: float) ->
     return max(measured_seconds, float(value))
 
 
-async def transcribe_audio(audio: bytes, filename: str, content_type: Optional[str], model: str, language: Optional[str]) -> dict[str, Any]:
+async def transcribe_audio(audio: bytes, filename: str, content_type: Optional[str], model: str, language: Optional[str], prompt: Optional[str] = None) -> dict[str, Any]:
     require_openai_key()
     headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
     data: dict[str, str] = {"model": model, "response_format": "json"}
@@ -1799,6 +1810,8 @@ async def transcribe_audio(audio: bytes, filename: str, content_type: Optional[s
         data["chunking_strategy"] = "auto"
     if language:
         data["language"] = language
+    if prompt and model != "gpt-4o-transcribe-diarize":
+        data["prompt"] = prompt
     files = {"file": (filename, audio, content_type or "audio/m4a")}
     async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
         response = await client.post(f"{OPENAI_BASE_URL}/v1/audio/transcriptions", headers=headers, data=data, files=files)
@@ -1807,7 +1820,7 @@ async def transcribe_audio(audio: bytes, filename: str, content_type: Optional[s
         # account-specific details that must not reach the client.
         logger.error(
             "transcription_provider_error",
-            extra={"status_code": response.status_code, "body": response.text[:500]},
+            extra={"status_code": response.status_code},
         )
         raise HTTPException(status_code=502, detail="Transcription provider request failed.")
     try:
@@ -2169,13 +2182,16 @@ async def create_transcription(
     language: Annotated[Optional[str], Form(max_length=32)] = None,
     model: Annotated[Optional[str], Form(max_length=128)] = None,
     idempotency_key: Annotated[Optional[str], Header(alias="Idempotency-Key", max_length=128)] = None,
+    preferred_languages: Annotated[Optional[str], Form(max_length=256)] = None,
+    vocabulary: Annotated[Optional[str], Form(max_length=16000)] = None,
 ) -> JSONResponse:
     # Reject excess work before loading/decoding the upload. No waiting queue
     # retains many 24 MB audio buffers on the small production server.
     if not _transcription_slots.acquire(blocking=False):
         raise HTTPException(status_code=503, detail="Transcription service is busy. Please retry shortly.", headers={"Retry-After": "3"})
     try:
-        return await perform_transcription(user, file, audio_seconds, language, model, idempotency_key)
+        return await perform_transcription(user, file, audio_seconds, language, model, idempotency_key,
+                                           parse_context(preferred_languages, vocabulary))
     finally:
         _transcription_slots.release()
 
@@ -2183,6 +2199,7 @@ async def create_transcription(
 async def perform_transcription(
     user: dict[str, Any], file: UploadFile, audio_seconds: float,
     language: Optional[str], model: Optional[str], idempotency_key: Optional[str],
+    context: Optional[dict] = None,
 ) -> JSONResponse:
     selected_model = resolve_model(model)
     audio = await file.read(MAX_AUDIO_BYTES + 1)
@@ -2194,8 +2211,13 @@ async def perform_transcription(
     if idempotency_key is not None and (not request_key or not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", request_key)):
         raise HTTPException(status_code=400, detail="Invalid transcription request key.")
     requested_model = model.strip() if model is not None else None
+    context = context or {"languages": [], "vocabulary": []}
+    fingerprint_fields = {"model": requested_model, "language": language, "audio_seconds": float(audio_seconds)}
+    has_context = bool(context["languages"] or context["vocabulary"])
+    if has_context:
+        fingerprint_fields["dictation_context"] = context
     fingerprint = hashlib.sha256(audio + json.dumps(
-        {"model": requested_model, "language": language, "audio_seconds": float(audio_seconds)},
+        fingerprint_fields,
         separators=(",", ":"),
     ).encode()).hexdigest()
 
@@ -2216,6 +2238,8 @@ async def perform_transcription(
                         (previous["transcription_id"], user["id"]),
                     ).fetchone())
                 if previous["fingerprint_version"] == 1:
+                    if has_context:
+                        raise HTTPException(status_code=409, detail="This request key was already used with different preferences.")
                     # Old fingerprints included the then-current server default.
                     # Infer a pending legacy model only by an exact full-content
                     # hash match; completed records supply their original model.
@@ -2270,13 +2294,15 @@ async def perform_transcription(
 
     try:
         try:
+            input_language, prompt = provider_hints(context, language)
+            hint_args = {"prompt": prompt} if prompt else {}
             payload = await asyncio.wait_for(
-                transcribe_audio(audio, file.filename or "recording.m4a", file.content_type, selected_model, language),
+                transcribe_audio(audio, file.filename or "recording.m4a", file.content_type, selected_model, input_language, **hint_args),
                 timeout=PROVIDER_REQUEST_TIMEOUT_SECONDS,
             )
         except (httpx.HTTPError, asyncio.TimeoutError) as exc:
             raise HTTPException(status_code=502, detail="Transcription service is temporarily unavailable. Try again.") from exc
-        transcript = validated_transcript(payload)
+        transcript = normalize_transcript(validated_transcript(payload), context["languages"])
         input_tokens, output_tokens = extract_usage(payload)
         billable_seconds = provider_audio_duration(payload, measured_seconds)
         cost, pricing_basis, charged_input, charged_output = calculate_cost(

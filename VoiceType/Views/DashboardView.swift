@@ -100,7 +100,7 @@ struct DashboardView: View {
                             recorder: recorder
                         )
                     case .history:
-                        HistoryScreen(recorder: recorder, account: account, history: transcriptHistory, copy: copyTranscript)
+                        HistoryScreen(recorder: recorder, account: account, history: transcriptHistory, copy: copyTranscript, refresh: refreshHistory)
                     case .credit:
                         CreditScreen(store: store, account: account)
                             .task {
@@ -653,6 +653,8 @@ private struct HistoryScreen: View {
     @ObservedObject var account: AccountStore
     let history: [TranscriptSnapshot]
     let copy: (TranscriptSnapshot) -> Void
+    let refresh: () -> Void
+    @State private var editing: TranscriptSnapshot?
 
     var body: some View {
         HistoryContent(
@@ -665,8 +667,12 @@ private struct HistoryScreen: View {
             retry: { id in
                 Task { await recorder.retryFailedTranscription(id: id, account: account) }
             },
-            delete: { id in recorder.discardFailedTranscription(id: id) }
+            delete: { id in recorder.discardFailedTranscription(id: id) },
+            edit: { editing = $0 }
         )
+        .sheet(item: $editing) { snapshot in
+            TranscriptCorrectionView(snapshot: snapshot, userID: account.userID, onSave: refresh)
+        }
     }
 }
 
@@ -679,6 +685,7 @@ struct HistoryContent: View {
     let copy: (TranscriptSnapshot) -> Void
     let retry: (UUID) -> Void
     let delete: (UUID) -> Void
+    var edit: ((TranscriptSnapshot) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -710,9 +717,7 @@ struct HistoryContent: View {
                                 ForEach(group.items, id: \.id) { item in
                                     switch item {
                                     case .transcript(let snapshot):
-                                        HistoryRow(snapshot: snapshot) {
-                                            copy(snapshot)
-                                        }
+                                        HistoryRow(snapshot: snapshot, copy: { copy(snapshot) }, edit: edit.map { action in { action(snapshot) } })
                                     case .failed(let snapshot):
                                         FailedTranscriptionHistoryRow(
                                             snapshot: snapshot,
@@ -852,6 +857,7 @@ private struct FailedTranscriptionHistoryRow: View {
 private struct HistoryRow: View {
     let snapshot: TranscriptSnapshot
     let copy: () -> Void
+    var edit: (() -> Void)? = nil
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
@@ -875,6 +881,13 @@ private struct HistoryRow: View {
 
             Spacer()
 
+            if let edit {
+                Button(action: edit) {
+                    Image(systemName: "square.and.pencil").frame(width: 44, height: 44)
+                }
+                .buttonStyle(GhostButtonStyle())
+                .accessibilityLabel("Edit transcript and teach a spelling")
+            }
             Button(action: copy) {
                 Image(systemName: "doc.on.doc")
                     .font(.system(size: 14, weight: .semibold))
@@ -1095,6 +1108,7 @@ private struct LedgerNoteCard: View {
 }
 
 private struct SettingsScreen: View {
+    @State private var isDictationPresented = false
     @ObservedObject var account: AccountStore
     @ObservedObject var store: StoreKitService
     let openKeyboardSetup: () -> Void
@@ -1114,6 +1128,10 @@ private struct SettingsScreen: View {
                     .foregroundStyle(AppTheme.secondary)
 
                 VStack(spacing: 0) {
+                    SettingsRow(title: "Languages & vocabulary", detail: "Dictation", systemName: "character.bubble") {
+                        isDictationPresented = true
+                    }
+                    Divider().background(AppTheme.borderSoft)
                     SettingsRow(title: "VoiceType keyboard", detail: "Set up", systemName: "keyboard", action: openKeyboardSetup)
                     Divider().background(AppTheme.borderSoft)
                     SettingsRow(title: "Open iOS Settings", detail: "", systemName: "gearshape") {
@@ -1194,6 +1212,7 @@ private struct SettingsScreen: View {
                 .frame(maxWidth: .infinity)
                 .padding(.top, 4)
         }
+        .sheet(isPresented: $isDictationPresented) { DictationSettingsView(userID: account.userID) }
         .alert("Delete account?", isPresented: $isConfirmingDelete) {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) {

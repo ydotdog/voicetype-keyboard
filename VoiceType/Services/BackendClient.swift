@@ -130,7 +130,7 @@ enum BackendClient {
     }
     #endif
 
-    static func transcribe(fileURL: URL, duration: TimeInterval, token: String, requestID: UUID = UUID()) async throws -> TranscriptionResponse {
+    static func transcribe(fileURL: URL, duration: TimeInterval, token: String, requestID: UUID = UUID(), context: DictationContext = .empty) async throws -> TranscriptionResponse {
         guard let baseURL else { throw BackendClientError.missingBackendURL }
         guard let audioData = try? Data(contentsOf: fileURL) else { throw BackendClientError.missingFile }
 
@@ -144,6 +144,12 @@ enum BackendClient {
 
         var body = Data()
         body.appendMultipartField(name: "audio_seconds", value: String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), duration), boundary: boundary)
+        if !context.languages.isEmpty {
+            body.appendMultipartField(name: "preferred_languages", value: String(decoding: try JSONEncoder().encode(context.languages), as: UTF8.self), boundary: boundary)
+        }
+        if !context.vocabulary.isEmpty {
+            body.appendMultipartField(name: "vocabulary", value: String(decoding: try JSONEncoder().encode(context.vocabulary), as: UTF8.self), boundary: boundary)
+        }
         body.appendMultipartFile(
             name: "file",
             filename: fileURL.lastPathComponent,

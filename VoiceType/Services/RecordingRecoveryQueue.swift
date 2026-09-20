@@ -13,19 +13,21 @@ struct RecoverableRecording: Codable {
     let requestID: UUID
     let userID: String
     var createdAt: Date
+    let context: DictationContext
 
     init(fileURL: URL, duration: TimeInterval, clipStartTime: TimeInterval?, requestID: UUID,
-         userID: String, createdAt: Date = Date()) {
+         userID: String, createdAt: Date = Date(), context: DictationContext = .empty) {
         self.fileURL = fileURL
         self.duration = duration
         self.clipStartTime = clipStartTime
         self.requestID = requestID
         self.userID = userID
         self.createdAt = createdAt
+        self.context = context
     }
 
     private enum CodingKeys: String, CodingKey {
-        case fileURL, duration, clipStartTime, requestID, userID, createdAt
+        case fileURL, duration, clipStartTime, requestID, userID, createdAt, context
     }
 
     init(from decoder: Decoder) throws {
@@ -36,6 +38,7 @@ struct RecoverableRecording: Codable {
         requestID = try values.decode(UUID.self, forKey: .requestID)
         userID = try values.decode(String.self, forKey: .userID)
         createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt) ?? .distantPast
+        context = try values.decodeIfPresent(DictationContext.self, forKey: .context) ?? .empty
     }
 }
 

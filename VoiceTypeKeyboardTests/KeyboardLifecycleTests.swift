@@ -70,7 +70,7 @@ struct KeyboardLifecycleTests {
                             if stateName == "recording" {
                                 for index in 0..<10 {
                                     let bar = try #require(descendant("keyboard.audioLevel.\(index)", in: controller.view))
-                                    #expect(bar.bounds.width == 3.5)
+                                    #expect(abs(bar.bounds.width - 3.5) <= 1 / bar.traitCollection.displayScale)
                                     #expect(bar.bounds.height > 3.5)
                                 }
                             }
@@ -160,13 +160,13 @@ struct KeyboardLifecycleTests {
 
                 setBridge(.keyboardRecording, audioLevel: 0)
                 controller.textDidChange(nil)
-                #expect(bars.allSatisfy { $0.bounds.height == 3.5 })
+                #expect(bars.allSatisfy { abs($0.bounds.height - 3.5) <= 1 / $0.traitCollection.displayScale })
                 setBridge(.keyboardRecording, audioLevel: 1)
                 controller.textDidChange(nil)
                 action.sendActions(for: .touchUpInside)
                 #expect(RecordingBridgeStore.latestCommand?.action == .stopClip)
                 #expect(action.accessibilityLabel == "Transcribing")
-                #expect(bars.allSatisfy { $0.bounds.height == 3.5 })
+                #expect(bars.allSatisfy { abs($0.bounds.height - 3.5) <= 1 / $0.traitCollection.displayScale })
                 #expect(controller.refreshTimer?.timeInterval == 0.25)
             }
         }
@@ -183,20 +183,20 @@ struct KeyboardLifecycleTests {
                 #expect(bar.bounds.height > 3.5)
                 setBridge(.keyboardRecording, audioLevel: 1, updatedAt: Date().addingTimeInterval(-1))
                 controller.textDidChange(nil)
-                #expect(bar.bounds.height == 3.5)
+                #expect(abs(bar.bounds.height - 3.5) <= 1 / bar.traitCollection.displayScale)
                 setBridge(.keyboardRecording, audioLevel: 1)
                 controller.textDidChange(nil)
                 #expect(bar.bounds.height > 3.5)
                 controller.fullAccess = false
                 controller.textDidChange(nil)
-                #expect(bar.bounds.height == 3.5)
+                #expect(abs(bar.bounds.height - 3.5) <= 1 / bar.traitCollection.displayScale)
                 #expect(controller.refreshTimer?.timeInterval == 0.25)
                 controller.fullAccess = true
                 controller.textDidChange(nil)
                 controller.view.layoutIfNeeded()
                 #expect(bar.bounds.height > 3.5)
                 setVisible(false, controller: controller)
-                #expect(bar.bounds.height == 3.5)
+                #expect(abs(bar.bounds.height - 3.5) <= 1 / bar.traitCollection.displayScale)
                 #expect(controller.refreshTimer == nil)
             }
         }

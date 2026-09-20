@@ -455,7 +455,8 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         recorder = nil
         activeTranscriptionAudio = RecoverableRecording(
             fileURL: fileURL, duration: duration, clipStartTime: nil,
-            requestID: transcriptionID, userID: activeAccountUserID
+            requestID: transcriptionID, userID: activeAccountUserID,
+            context: DictationPreferencesStore.load(userID: activeAccountUserID).context
         )
         // Preserve the finalized file before yielding to any authentication or
         // lifecycle event, including before the upload task first runs.
@@ -539,7 +540,8 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             guard isActiveTranscription(id), account.matchesSession(accountSessionID, token: token) else { return }
             activeTranscriptionAudio = RecoverableRecording(
                 fileURL: preparedURL, duration: duration, clipStartTime: nil,
-                requestID: requestID, userID: account.userID
+                requestID: requestID, userID: account.userID,
+                context: activeTranscriptionAudio?.context ?? .empty
             )
             guard retainFailedTranscription(showRetry: false) else { throw RecorderError.failedToSaveAudio }
             let response = try await transcribe(fileURL: preparedURL, duration: duration, token: token, requestID: requestID)
@@ -750,7 +752,8 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         guard duration > 0 else { return }
         retainRecording(RecoverableRecording(
             fileURL: fileURL, duration: duration, clipStartTime: clipStart,
-            requestID: UUID(), userID: activeAccountUserID
+            requestID: UUID(), userID: activeAccountUserID,
+            context: DictationPreferencesStore.load(userID: activeAccountUserID).context
         ), showRetry: showRetry)
     }
 
@@ -844,7 +847,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             }
             guard isCurrentHistoryRetry(executionID, account: account, sessionID: sessionID, token: token) else { return }
             let prepared = RecoverableRecording(fileURL: preparedURL, duration: recording.duration, clipStartTime: nil,
-                                               requestID: recording.requestID, userID: recording.userID, createdAt: recording.createdAt)
+                                               requestID: recording.requestID, userID: recording.userID, createdAt: recording.createdAt, context: recording.context)
             guard recoveryQueue.save(prepared) else { throw RecorderError.failedToSaveAudio }
             let response = try await transcribe(fileURL: preparedURL, duration: recording.duration, token: token, requestID: recording.requestID)
             guard isCurrentHistoryRetry(executionID, account: account, sessionID: sessionID, token: token) else { return }
@@ -880,7 +883,8 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
 
     private func transcribe(fileURL: URL, duration: TimeInterval, token: String, requestID: UUID) async throws -> TranscriptionResponse {
         if let transcriptionRequest { return try await transcriptionRequest(fileURL, duration, token, requestID) }
-        return try await BackendClient.transcribe(fileURL: fileURL, duration: duration, token: token, requestID: requestID)
+        let context = recoveryQueue.recordings[requestID]?.context ?? activeTranscriptionAudio?.context ?? .empty
+        return try await BackendClient.transcribe(fileURL: fileURL, duration: duration, token: token, requestID: requestID, context: context)
     }
 
     private func finishPendingStart(_ id: UUID) {
@@ -1293,7 +1297,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         lastLiveActivitySyncAt = now.monotonicSeconds
         let expiresAt = sessionPolicy?.remainingDuration(at: now, keyboardSession: isKeyboardSessionActive)
             .map { now.date.addingTimeInterval($0) }
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
             await KeyboardMicLiveActivityController.shared.update(
                 sessionID: sessionID,
                 mode: mode,
@@ -1301,9 +1305,19 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
                 durationLimit: durationLimit,
                 epoch: epoch,
                 expiresAt: expiresAt,
-                force: force
+                force: force,
+                onDismiss: { [weak self] sessionID in
+                    self?.liveActivityWasDismissed(sessionID: sessionID)
+                }
             )
         }
+    }
+
+    func liveActivityWasDismissed(sessionID: String) {
+        guard !sessionID.isEmpty, sessionID == activeSessionID, isKeyboardSessionActive else { return }
+        // Keep an interrupted clip recoverable, but release the microphone now.
+        preserveCapturedRecording(showRetry: true)
+        stopKeyboardReady()
     }
 
     private func endLiveActivity() {
@@ -1355,6 +1369,9 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             return
         }
         switch command.action {
+        case .dismissKeyboardSession:
+            RecordingBridgeStore.clearCommand(id: command.id)
+            liveActivityWasDismissed(sessionID: command.sessionID ?? "")
         case .stop:
             RecordingBridgeStore.clearCommand(id: command.id)
             if isKeyboardSessionActive {
@@ -1644,7 +1661,8 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         self.recorder = nil
         activeTranscriptionAudio = RecoverableRecording(
             fileURL: sourceURL, duration: clipDuration, clipStartTime: clipStartTime,
-            requestID: transcriptionID, userID: activeAccountUserID
+            requestID: transcriptionID, userID: activeAccountUserID,
+            context: DictationPreferencesStore.load(userID: activeAccountUserID).context
         )
         // Export is asynchronous. Keep the original segment and its start
         // offset durable before an expired sign-in can cancel that export.
@@ -1708,7 +1726,8 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             guard isActiveTranscription(id), account.matchesSession(accountSessionID, token: token) else { return }
             activeTranscriptionAudio = RecoverableRecording(
                 fileURL: clipURL, duration: clipDuration, clipStartTime: nil,
-                requestID: id, userID: account.userID
+                requestID: id, userID: account.userID,
+                context: activeTranscriptionAudio?.context ?? .empty
             )
             guard retainFailedTranscription(showRetry: false) else { throw RecorderError.failedToSaveAudio }
 

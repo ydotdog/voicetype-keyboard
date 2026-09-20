@@ -5,7 +5,7 @@ import WidgetKit
 struct VoiceTypeKeyboardLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: VoiceTypeKeyboardActivityAttributes.self) { context in
-            VoiceTypeLiveActivityView(state: context.state, isStale: context.isStale)
+            VoiceTypeLiveActivityView(state: context.state, isStale: context.isStale, sessionID: context.attributes.sessionID)
                 .activityBackgroundTint(.clear)
                 .activitySystemActionForegroundColor(VoiceTypeActivityPalette.text)
                 .widgetURL(URL(string: "voicetype://keyboard"))
@@ -16,6 +16,9 @@ struct VoiceTypeKeyboardLiveActivity: Widget {
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     VoiceTypeActivityIslandStatus(state: context.state, isStale: context.isStale)
+                }
+                DynamicIslandExpandedRegion(.bottom) {
+                    StopKeyboardMicButton(sessionID: context.attributes.sessionID)
                 }
             } compactLeading: {
                 VoiceTypeActivityLogo(size: 18)
@@ -39,6 +42,7 @@ struct VoiceTypeKeyboardLiveActivity: Widget {
 private struct VoiceTypeLiveActivityView: View {
     let state: VoiceTypeKeyboardActivityAttributes.ContentState
     let isStale: Bool
+    let sessionID: String
 
     var body: some View {
         ZStack {
@@ -50,6 +54,8 @@ private struct VoiceTypeLiveActivityView: View {
                 VoiceTypeActivityLockScreenText(state: state, isStale: isStale)
 
                 Spacer(minLength: 8)
+                StopKeyboardMicButton(sessionID: sessionID)
+                    .labelStyle(.iconOnly)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 13)
@@ -58,8 +64,23 @@ private struct VoiceTypeLiveActivityView: View {
         .containerBackground(for: .widget) {
             VoiceTypeActivityGlassPanel(cornerRadius: 26, scrim: VoiceTypeActivityPalette.readabilityScrim)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityHint(isStale ? "Open VoiceType to check microphone status" : "Open VoiceType to manage the microphone")
+    }
+}
+
+private struct StopKeyboardMicButton: View {
+    let sessionID: String
+    var body: some View {
+        Button(intent: StopKeyboardMicIntent(sessionID: sessionID)) {
+            Label("Turn off mic", systemImage: "mic.slash.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .buttonStyle(.bordered)
+        .tint(.red)
+        .accessibilityLabel("Turn off microphone")
+        .accessibilityHint("Stops capture immediately. An unfinished clip is saved in History for retry.")
     }
 }
 
