@@ -78,6 +78,14 @@ enum SharedTranscriptStore {
         defaults.synchronize()
     }
 
+    /// A recovered older clip belongs in History. Publishing it as `latest`
+    /// could insert it into a different, newly armed keyboard dictation.
+    static func appendHistory(_ snapshot: TranscriptSnapshot) {
+        guard let defaults = UserDefaults(suiteName: AppConstants.appGroup) else { return }
+        appendToHistory(snapshot, defaults: defaults)
+        defaults.synchronize()
+    }
+
     private static func appendToHistory(_ snapshot: TranscriptSnapshot, defaults: UserDefaults) {
         guard !snapshot.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         var snapshots = history.filter { $0.id != snapshot.id }

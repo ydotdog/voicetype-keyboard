@@ -1,10 +1,11 @@
-import AudioToolbox
-import ObjectiveC
 import UIKit
+import SwiftUI
 
-final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
+@MainActor
+class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
     private let viewModel = KeyboardViewModel()
-    private var refreshTimer: Timer?
+    private(set) var refreshTimer: Timer?
+    private var lastStateRefreshAt: TimeInterval = 0
     private var pendingAction: PendingKeyboardAction?
     private var pendingActionStartedAt: Date?
     private var actionNotice: String?
@@ -22,23 +23,43 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private let micImageView = UIImageView()
     private let actionTitleLabel = UILabel()
     private let waveStack = UIStackView()
+    private var waveHeights: [NSLayoutConstraint] = []
+    private var waveLevels = Array(repeating: CGFloat.zero, count: 10)
+    private var waveSessionID: String?
+    private var waveUpdatedAt: Date?
     private let helperLabel = UILabel()
+    private var openAppController: UIHostingController<KeyboardOpenAppLink>?
+    private(set) var keyboardActivationURL: URL?
+    private var activationPreparedAt: TimeInterval?
+    private var issuedActivationURLs: [URL] = []
     private let bottomRow = UIStackView()
     private let returnButton = UIButton(type: .system)
     private let deleteButton = UIButton(type: .system)
+    private let nextKeyboardButton = UIButton(type: .system)
     private let keyFeedback = UIImpactFeedbackGenerator(style: .light)
     private let actionFeedback = UIImpactFeedbackGenerator(style: .medium)
-    private let selectionFeedback = UISelectionFeedbackGenerator()
     private var deleteRepeatTimer: Timer?
-    private var openAppFallbackWorkItem: DispatchWorkItem?
+    private var deleteRepeatDocumentIdentifier: UUID?
     private var styleTraitRegistration: UITraitChangeRegistration?
     private var renderedUIState: KeyboardUIState?
+    private var isKeyboardVisible = false
+    private var activeDocumentIdentifier: UUID?
+    private var insertionDocumentIdentifier: UUID?
+    private var keyboardHeightConstraint: NSLayoutConstraint?
+    private var helperHeightConstraint: NSLayoutConstraint?
 
     private let palette = KeyboardPalette()
-    private let keyboardHeight: CGFloat = 188
+    private let keyboardHeight: CGFloat = 160
 
     var enableInputClicksWhenVisible: Bool {
         true
+    }
+
+    isolated deinit {
+        // A host can tear down its extension without a disappearance callback.
+        // The run loop retains scheduled timers even when their owner is gone.
+        refreshTimer?.invalidate()
+        deleteRepeatTimer?.invalidate()
     }
 
     override func viewDidLoad() {
@@ -54,37 +75,46 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        applyKeyboardAppearanceOverride()
         refreshKeyboardState()
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
-        applyKeyboardAppearanceOverride()
+        refreshKeyboardState()
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        isKeyboardVisible = true
+        // Returning after a previous launch gets a fresh single-use capability.
+        keyboardActivationURL = nil
+        activationPreparedAt = nil
+        refreshKeyboardState()
         prepareHaptics()
         startRefreshing()
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        nextKeyboardButton.isHidden = !needsInputModeSwitchKey
         updateKeyboardChrome()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        cancelOpenAppFallback()
+        isKeyboardVisible = false
+        activeDocumentIdentifier = nil
         stopDeleteRepeat()
         stopRefreshing()
+        resetWaveform()
         // Sever auto-insert when the keyboard leaves this field so a transcript
         // finished later cannot land in another app's text field.
-        KeyboardAutoInsertStore.clear()
+        clearAutoInsert()
+        setPendingAction(nil)
     }
 
     private func applyKeyboardAppearanceOverride() {
+        guard activeDocumentIdentifier != nil else { return }
         let style: UIUserInterfaceStyle
         switch textDocumentProxy.keyboardAppearance ?? .default {
         case .dark:
@@ -122,6 +152,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         let height = view.heightAnchor.constraint(equalToConstant: keyboardHeight)
         height.priority = .defaultHigh
         height.isActive = true
+        keyboardHeightConstraint = height
 
         contentView.translatesAutoresizingMaskIntoConstraints = false
         contentView.backgroundColor = .clear
@@ -138,6 +169,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
         setupTopRow()
         setupActionArea()
+        setupOpenAppLink()
         setupBottomRow()
         applyPalette()
     }
@@ -161,6 +193,8 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         returnButton.setTitleColor(palette.ink, for: .normal)
         deleteButton.backgroundColor = palette.keyGray
         deleteButton.tintColor = palette.inkSoft
+        nextKeyboardButton.backgroundColor = palette.keyGray
+        nextKeyboardButton.tintColor = palette.inkSoft
         for bar in waveStack.arrangedSubviews {
             bar.backgroundColor = palette.live
         }
@@ -190,13 +224,12 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         wordmarkLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         topRow.addArrangedSubview(brandStack)
-        topRow.addArrangedSubview(UIView())
 
         NSLayoutConstraint.activate([
             topRow.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 18),
-            topRow.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -18),
-            topRow.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 5),
-            topRow.heightAnchor.constraint(equalToConstant: 32)
+            topRow.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -18),
+            topRow.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
+            topRow.heightAnchor.constraint(equalToConstant: 26)
         ])
     }
 
@@ -212,11 +245,12 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
         actionControl.translatesAutoresizingMaskIntoConstraints = false
         actionControl.layer.cornerCurve = .continuous
-        actionControl.layer.cornerRadius = 28
+        actionControl.layer.cornerRadius = 24
         actionControl.addTarget(self, action: #selector(actionTapped), for: .touchUpInside)
         installActionPressFeedback(on: actionControl)
         actionControl.isAccessibilityElement = true
         actionControl.accessibilityTraits = .button
+        actionControl.accessibilityIdentifier = "keyboard.primaryAction"
         contentView.addSubview(actionControl)
 
         actionStack.axis = .horizontal
@@ -237,11 +271,11 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         micImageView.isUserInteractionEnabled = false
         micImageView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            micImageView.widthAnchor.constraint(equalToConstant: 32),
-            micImageView.heightAnchor.constraint(equalToConstant: 32)
+            micImageView.widthAnchor.constraint(equalToConstant: 24),
+            micImageView.heightAnchor.constraint(equalToConstant: 24)
         ])
 
-        actionTitleLabel.font = .systemFont(ofSize: 18, weight: .semibold)
+        actionTitleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
         actionTitleLabel.textColor = palette.keySurface
         actionTitleLabel.adjustsFontSizeToFitWidth = true
         actionTitleLabel.minimumScaleFactor = 0.72
@@ -254,30 +288,43 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         waveStack.distribution = .equalCentering
         waveStack.spacing = 5
         waveStack.isUserInteractionEnabled = false
+        waveStack.accessibilityElementsHidden = true
+        waveStack.accessibilityIdentifier = "keyboard.audioWaveform"
         waveStack.translatesAutoresizingMaskIntoConstraints = false
         waveStack.heightAnchor.constraint(equalToConstant: 34).isActive = true
-        for height in [12, 22, 30, 18, 34, 26, 14, 31, 28, 20] as [CGFloat] {
+        for index in waveLevels.indices {
             let bar = UIView()
             bar.backgroundColor = palette.live
             bar.layer.cornerCurve = .continuous
             bar.layer.cornerRadius = 2
             bar.isUserInteractionEnabled = false
             bar.translatesAutoresizingMaskIntoConstraints = false
+            bar.accessibilityIdentifier = "keyboard.audioLevel.\(index)"
+            let height = bar.heightAnchor.constraint(equalToConstant: 3.5)
+            waveHeights.append(height)
             NSLayoutConstraint.activate([
                 bar.widthAnchor.constraint(equalToConstant: 3.5),
-                bar.heightAnchor.constraint(equalToConstant: height)
+                height
             ])
             waveStack.addArrangedSubview(bar)
         }
 
-        helperLabel.font = .systemFont(ofSize: 10.5, weight: .medium)
+        // Normal states need no footnote. Keep failures/permission guidance
+        // visible and accessible instead of hiding actionable errors.
+        helperLabel.font = .systemFont(ofSize: 13, weight: .medium)
         helperLabel.textColor = palette.muted
         helperLabel.textAlignment = .center
         helperLabel.numberOfLines = 2
         helperLabel.adjustsFontSizeToFitWidth = true
         helperLabel.minimumScaleFactor = 0.72
         helperLabel.translatesAutoresizingMaskIntoConstraints = false
+        helperLabel.accessibilityIdentifier = "keyboard.helper"
         contentView.addSubview(helperLabel)
+
+        let actionWidth = actionControl.widthAnchor.constraint(equalToConstant: 224)
+        actionWidth.priority = .defaultHigh
+        let helperHeight = helperLabel.heightAnchor.constraint(equalToConstant: 0)
+        helperHeightConstraint = helperHeight
 
         NSLayoutConstraint.activate([
             promptLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 18),
@@ -287,13 +334,15 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
             helperLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
             helperLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
-            helperLabel.topAnchor.constraint(equalTo: actionControl.bottomAnchor, constant: 6),
-            helperLabel.heightAnchor.constraint(equalToConstant: 26),
+            helperLabel.topAnchor.constraint(equalTo: actionControl.bottomAnchor, constant: 4),
+            helperHeight,
 
-            actionControl.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 18),
-            actionControl.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -18),
-            actionControl.topAnchor.constraint(equalTo: topRow.bottomAnchor, constant: 7),
-            actionControl.heightAnchor.constraint(equalToConstant: 56)
+            actionControl.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            actionControl.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 24),
+            actionControl.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -24),
+            actionWidth,
+            actionControl.topAnchor.constraint(equalTo: topRow.bottomAnchor, constant: 18),
+            actionControl.heightAnchor.constraint(equalToConstant: 48)
         ])
     }
 
@@ -306,12 +355,14 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         contentView.addSubview(bottomRow)
 
         configureTextKey(returnButton, text: "return", accessibilityLabel: "Return")
+        returnButton.accessibilityIdentifier = "keyboard.return"
         installKeyPressFeedback(on: returnButton)
         returnButton.addTarget(self, action: #selector(returnTapped), for: .touchUpInside)
         returnButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
         returnButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         configureIconKey(deleteButton, systemName: "delete.left", accessibilityLabel: "Delete")
+        deleteButton.accessibilityIdentifier = "keyboard.delete"
         installKeyPressFeedback(on: deleteButton)
         deleteButton.addTarget(self, action: #selector(deleteTapped), for: .touchUpInside)
         deleteButton.setContentHuggingPriority(.required, for: .horizontal)
@@ -320,20 +371,80 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         deleteLongPress.minimumPressDuration = 0.35
         deleteButton.addGestureRecognizer(deleteLongPress)
 
+        configureIconKey(nextKeyboardButton, systemName: "globe", accessibilityLabel: "Next keyboard")
+        nextKeyboardButton.accessibilityIdentifier = "keyboard.nextKeyboard"
+        nextKeyboardButton.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
+        nextKeyboardButton.isHidden = !needsInputModeSwitchKey
+        bottomRow.addArrangedSubview(nextKeyboardButton)
         bottomRow.addArrangedSubview(returnButton)
         bottomRow.addArrangedSubview(deleteButton)
 
+        // UIStackView gives hidden arranged views a required zero width.
+        let globeWidth = nextKeyboardButton.widthAnchor.constraint(equalToConstant: 44)
+        globeWidth.priority = UILayoutPriority(999)
         NSLayoutConstraint.activate([
-            bottomRow.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 18),
-            bottomRow.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -18),
-            bottomRow.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -4),
-            bottomRow.heightAnchor.constraint(equalToConstant: 48),
+            bottomRow.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            bottomRow.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 18),
+            bottomRow.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -18),
+            bottomRow.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
+            bottomRow.heightAnchor.constraint(equalToConstant: 44),
 
-            returnButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
-            returnButton.heightAnchor.constraint(equalToConstant: 48),
-            deleteButton.widthAnchor.constraint(equalToConstant: 48),
-            deleteButton.heightAnchor.constraint(equalToConstant: 48)
+            globeWidth,
+            nextKeyboardButton.heightAnchor.constraint(equalToConstant: 44),
+            returnButton.widthAnchor.constraint(equalToConstant: 160),
+            returnButton.heightAnchor.constraint(equalToConstant: 44),
+            deleteButton.widthAnchor.constraint(equalToConstant: 44),
+            deleteButton.heightAnchor.constraint(equalToConstant: 44)
         ])
+    }
+
+    private func setupOpenAppLink() {
+        // A real user-tapped SwiftUI Link uses the system URL action. Keep it
+        // beside the UIKit control, whose hitTest intentionally captures taps.
+        let controller = UIHostingController(rootView: makeOpenAppLink())
+        openAppController = controller
+        addChild(controller)
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        controller.view.backgroundColor = .clear
+        controller.view.accessibilityIdentifier = "keyboard.openApp"
+        contentView.addSubview(controller.view)
+        NSLayoutConstraint.activate([
+            controller.view.leadingAnchor.constraint(equalTo: actionControl.leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: actionControl.trailingAnchor),
+            controller.view.topAnchor.constraint(equalTo: actionControl.topAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: actionControl.bottomAnchor)
+        ])
+        controller.didMove(toParent: self)
+    }
+
+    private func makeOpenAppLink() -> KeyboardOpenAppLink {
+        KeyboardOpenAppLink(destination: keyboardActivationURL ?? URL(string: "voicetype://keyboard")!) { [weak self] in
+            self?.playActionFeedback()
+        }
+    }
+
+    private func refreshOpenAppActivation() {
+        guard hasFullAccess, !viewModel.isKeyboardReady, !viewModel.isKeyboardRecording,
+              !viewModel.isTranscribing, pendingAction == nil else {
+            issuedActivationURLs.forEach { KeyboardMicActivationStore.shared.revoke($0) }
+            issuedActivationURLs.removeAll()
+            keyboardActivationURL = nil
+            activationPreparedAt = nil
+            return
+        }
+        guard isKeyboardVisible, viewIfLoaded?.window != nil else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if let activationPreparedAt, now - activationPreparedAt >= 0,
+           now - activationPreparedAt < 30 { return }
+        activationPreparedAt = now
+        keyboardActivationURL = KeyboardMicActivationStore.shared.makeURL(uptime: now)
+        if let keyboardActivationURL { issuedActivationURLs.append(keyboardActivationURL) }
+        // Retain the previous URL briefly: rotating the Link while a finger or
+        // VoiceOver is on it must not invalidate an in-flight system open.
+        while issuedActivationURLs.count > 4 {
+            KeyboardMicActivationStore.shared.revoke(issuedActivationURLs.removeFirst())
+        }
+        openAppController?.rootView = makeOpenAppLink()
     }
 
     private func configureIconKey(_ button: UIButton, systemName: String, accessibilityLabel: String) {
@@ -341,7 +452,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         button.backgroundColor = palette.keyGray
         button.tintColor = palette.inkSoft
         button.layer.cornerCurve = .continuous
-        button.layer.cornerRadius = 24
+        button.layer.cornerRadius = 22
         button.setImage(UIImage(systemName: systemName), for: .normal)
         button.imageView?.contentMode = .scaleAspectFit
         button.accessibilityLabel = accessibilityLabel
@@ -352,10 +463,10 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         button.backgroundColor = palette.keySurface
         button.tintColor = palette.ink
         button.layer.cornerCurve = .continuous
-        button.layer.cornerRadius = 24
+        button.layer.cornerRadius = 22
         button.setTitle(text, for: .normal)
         button.setTitleColor(palette.ink, for: .normal)
-        button.titleLabel?.font = .systemFont(ofSize: 22, weight: .regular)
+        button.titleLabel?.font = .systemFont(ofSize: 17, weight: .regular)
         button.accessibilityLabel = accessibilityLabel
     }
 
@@ -363,8 +474,8 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         let result = NSMutableAttributedString()
         let base = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .title3)
             .withDesign(.serif) ?? UIFontDescriptor.preferredFontDescriptor(withTextStyle: .title3)
-        let voiceFont = UIFont(descriptor: base.withSymbolicTraits([]) ?? base, size: 25)
-        let typeFont = UIFont(descriptor: base.withSymbolicTraits(.traitItalic) ?? base, size: 25)
+        let voiceFont = UIFont(descriptor: base.withSymbolicTraits([]) ?? base, size: 20)
+        let typeFont = UIFont(descriptor: base.withSymbolicTraits(.traitItalic) ?? base, size: 20)
         result.append(NSAttributedString(string: "Voice", attributes: [.font: voiceFont, .foregroundColor: palette.ink]))
         result.append(NSAttributedString(string: "Type", attributes: [.font: typeFont, .foregroundColor: palette.ink]))
         return result
@@ -373,7 +484,6 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private func prepareHaptics() {
         keyFeedback.prepare()
         actionFeedback.prepare()
-        selectionFeedback.prepare()
     }
 
     // Haptics inside a keyboard extension only fire when the user has granted
@@ -384,19 +494,13 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private func playKeyFeedback(intensity: CGFloat = 0.85) {
         keyFeedback.impactOccurred(intensity: intensity)
         keyFeedback.prepare()
-        selectionFeedback.selectionChanged()
-        selectionFeedback.prepare()
         UIDevice.current.playInputClick()
-        AudioServicesPlaySystemSound(1519)
     }
 
     private func playActionFeedback(intensity: CGFloat = 0.9) {
         actionFeedback.impactOccurred(intensity: intensity)
         actionFeedback.prepare()
-        selectionFeedback.selectionChanged()
-        selectionFeedback.prepare()
         UIDevice.current.playInputClick()
-        AudioServicesPlaySystemSound(1520)
     }
 
     private func installKeyPressFeedback(on control: UIControl) {
@@ -432,6 +536,11 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     }
 
     private func setPressed(_ isPressed: Bool, for control: UIControl) {
+        if UIAccessibility.isReduceMotionEnabled {
+            control.transform = .identity
+            control.alpha = isPressed ? 0.82 : 1
+            return
+        }
         UIView.animate(
             withDuration: isPressed ? 0.08 : 0.14,
             delay: 0,
@@ -443,11 +552,80 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     }
 
     private func startRefreshing() {
+        let interval: TimeInterval = shouldShowLiveWaveform ? 0.05 : 0.25
+        guard refreshTimer?.isValid != true || refreshTimer?.timeInterval != interval else { return }
         stopRefreshing()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.refreshKeyboardState()
+                guard let self else { return }
+                if self.shouldShowLiveWaveform,
+                   ProcessInfo.processInfo.systemUptime - self.lastStateRefreshAt < 0.25 {
+                    self.updateWaveform()
+                } else {
+                    self.refreshKeyboardState()
+                }
             }
+        }
+        refreshTimer = timer
+        timer.tolerance = interval * 0.1
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private var shouldShowLiveWaveform: Bool {
+        isKeyboardVisible && hasFullAccess && viewModel.isKeyboardRecording
+            && viewModel.recordingState.isRecording && pendingAction != .stoppingClip
+    }
+
+    private func updateWaveform() {
+        guard shouldShowLiveWaveform else {
+            resetWaveform()
+            return
+        }
+        let state = viewModel.recordingState
+        guard let sample = RecordingAudioLevelStore.latest(for: state.sessionID) else {
+            // A stalled producer must not leave a frozen "live" sound signal.
+            resetWaveform()
+            return
+        }
+        if waveSessionID != state.sessionID {
+            resetWaveform()
+            waveSessionID = state.sessionID
+        }
+        guard waveUpdatedAt != sample.date else { return }
+        waveUpdatedAt = sample.date
+        let level = CGFloat(sample.level)
+        if level == 0 {
+            waveLevels = Array(repeating: 0, count: waveLevels.count)
+        } else {
+            waveLevels.removeFirst()
+            waveLevels.append(level)
+        }
+        renderWaveform(animated: true)
+    }
+
+    private func resetWaveform() {
+        waveSessionID = nil
+        waveUpdatedAt = nil
+        guard waveLevels.contains(where: { $0 != 0 }) else { return }
+        waveLevels = Array(repeating: 0, count: waveLevels.count)
+        waveStack.layer.removeAllAnimations()
+        waveStack.arrangedSubviews.forEach { $0.layer.removeAllAnimations() }
+        renderWaveform(animated: false)
+    }
+
+    private func renderWaveform(animated: Bool) {
+        for (constraint, level) in zip(waveHeights, waveLevels) {
+            constraint.constant = 3.5 + 30.5 * level
+        }
+        // Interpolate between measured samples only. There is no repeating or
+        // random animation, and VoiceOver keeps the same accessible Stop action.
+        if animated && !UIAccessibility.isReduceMotionEnabled {
+            UIView.animate(withDuration: 0.06, delay: 0,
+                           options: [.beginFromCurrentState, .allowUserInteraction, .curveLinear]) {
+                self.waveStack.layoutIfNeeded()
+            }
+        } else {
+            UIView.performWithoutAnimation { self.waveStack.layoutIfNeeded() }
         }
     }
 
@@ -458,24 +636,91 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
     @MainActor
     private func refreshKeyboardState() {
+        lastStateRefreshAt = ProcessInfo.processInfo.systemUptime
+        updateDocumentContext()
+        let wasKeyboardReady = viewModel.isKeyboardReady
         viewModel.refresh()
-        if viewModel.isKeyboardReady {
-            cancelOpenAppFallback()
-            actionNotice = nil
+        if viewModel.isKeyboardReady && hasFullAccess {
+            if !wasKeyboardReady { actionNotice = nil }
         }
+        if !hasFullAccess { clearAutoInsert() }
+        applyKeyboardAppearanceOverride()
+        updateReturnKey()
         clearResolvedPendingAction()
         updateUI()
-        guard !viewModel.isRecording, KeyboardAutoInsertStore.claimForInsert(viewModel.snapshot) else { return }
+        guard hasFullAccess, !viewModel.isRecording, let insertionDocumentIdentifier else { return }
+        guard let identifier = visibleDocumentIdentifier(),
+              insertionDocumentIdentifier == identifier, identifier == activeDocumentIdentifier else {
+            clearAutoInsert()
+            updateDocumentContext()
+            updateUI()
+            return
+        }
+        guard KeyboardAutoInsertStore.claimForInsert(viewModel.snapshot) else { return }
         textDocumentProxy.insertText(viewModel.snapshot.text)
+        self.insertionDocumentIdentifier = nil
+    }
+
+    private func visibleDocumentIdentifier() -> UUID? {
+        guard isKeyboardVisible, viewIfLoaded?.window != nil else { return nil }
+        // Do not read textDocumentProxy.documentIdentifier in Swift: UIKit may
+        // return nil during startup/field changes despite its nonnull contract.
+        return VTKeyboardDocumentIdentifier(self) as UUID?
+    }
+
+    private func updateDocumentContext() {
+        let identifier = visibleDocumentIdentifier()
+        if identifier == nil || activeDocumentIdentifier != identifier {
+            clearAutoInsert()
+            stopDeleteRepeat()
+            setPendingAction(nil)
+        }
+        activeDocumentIdentifier = identifier
+    }
+
+    private func armAutoInsert() -> Bool {
+        updateDocumentContext()
+        guard let identifier = activeDocumentIdentifier else { return false }
+        insertionDocumentIdentifier = identifier
+        KeyboardAutoInsertStore.arm(baselineTranscriptID: viewModel.snapshot.id)
+        return true
+    }
+
+    private func clearAutoInsert() {
+        insertionDocumentIdentifier = nil
+        KeyboardAutoInsertStore.clear()
+    }
+
+    private func updateReturnKey() {
+        guard activeDocumentIdentifier != nil else { return }
+        let title: String
+        switch textDocumentProxy.returnKeyType ?? .default {
+        case .go: title = "go"
+        case .google, .search, .yahoo: title = "search"
+        case .join: title = "join"
+        case .next: title = "next"
+        case .route: title = "route"
+        case .send: title = "send"
+        case .done: title = "done"
+        case .emergencyCall: title = "call"
+        case .continue: title = "continue"
+        default: title = "return"
+        }
+        returnButton.setTitle(title, for: .normal)
+        returnButton.accessibilityLabel = title.capitalized
     }
 
     private func updateUI(force: Bool = false) {
+        updateWaveform()
+        refreshOpenAppActivation()
+        if isKeyboardVisible { startRefreshing() }
         let uiState = KeyboardUIState(
             pendingAction: pendingAction,
             isKeyboardRecording: viewModel.isKeyboardRecording,
             isTranscribing: viewModel.isTranscribing,
             isKeyboardReady: viewModel.isKeyboardReady,
             hasFullAccess: hasFullAccess,
+            hasDocumentContext: activeDocumentIdentifier != nil,
             notice: actionNotice
         )
         guard force || uiState != renderedUIState else { return }
@@ -486,13 +731,30 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             view.removeFromSuperview()
         }
 
+        let hasDocumentContext = activeDocumentIdentifier != nil
         let canUseBridge = viewModel.isKeyboardReady && hasFullAccess
-        actionControl.isEnabled = pendingAction == nil && !viewModel.isTranscribing
+        let microphoneOff = hasFullAccess && !viewModel.isKeyboardReady
+            && !viewModel.isKeyboardRecording && !viewModel.isTranscribing && pendingAction == nil
+        openAppController?.view.isHidden = !microphoneOff
+        actionControl.isHidden = microphoneOff
+        let needsDocument = hasFullAccess && (viewModel.isKeyboardReady || viewModel.isKeyboardRecording)
+        actionControl.isEnabled = pendingAction == nil && (!viewModel.isTranscribing || !hasFullAccess)
+            && (!needsDocument || hasDocumentContext) && !microphoneOff
+        returnButton.isEnabled = hasDocumentContext
+        deleteButton.isEnabled = hasDocumentContext
         let helperText = actionNotice ?? defaultHelperText(canUseBridge: canUseBridge, pendingAction: pendingAction)
-        helperLabel.text = helperText
-        helperLabel.isHidden = helperText.isEmpty
+        helperLabel.text = actionNotice
+        helperLabel.isHidden = actionNotice?.isEmpty != false
+        // Reserve explanation space only when it is actually needed. Normal
+        // recording stays compact, with the waveform near the keyboard center.
+        let showsNotice = !helperLabel.isHidden
+        helperHeightConstraint?.constant = showsNotice ? 32 : 0
+        keyboardHeightConstraint?.constant = keyboardHeight + (showsNotice ? 36 : 0)
 
-        if pendingAction == .startingClip {
+        actionControl.accessibilityHint = helperText
+        if !hasFullAccess {
+            setStatusAction(systemName: "gearshape", title: "Enable Access", accessibilityLabel: "Show Full Access instructions", tintColor: palette.inkSoft)
+        } else if pendingAction == .startingClip {
             setStatusAction(systemName: "mic.fill", title: "Starting", accessibilityLabel: "Starting recording", tintColor: palette.live)
         } else if pendingAction == .stoppingClip {
             // The moment the user taps Stop we leave the recording look behind and
@@ -501,26 +763,25 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             // staring at the "recording" wave wondering if it is still capturing.
             setStatusAction(systemName: "waveform", title: "Transcribing", accessibilityLabel: "Transcribing", tintColor: palette.live)
         } else if viewModel.isKeyboardRecording {
-            setStatusAction(title: "Stop", accessibilityLabel: "Tap to finish recording", tintColor: palette.live, showsWave: true)
+            setStatusAction(title: "", accessibilityLabel: "Tap to finish recording", tintColor: palette.live, showsWave: true)
         } else if viewModel.isTranscribing {
             setStatusAction(systemName: "waveform", title: "Transcribing", accessibilityLabel: "Transcribing", tintColor: palette.live)
         } else {
             promptLabel.textColor = palette.inkSoft
-            actionControl.backgroundColor = canUseBridge ? palette.ink : palette.disabledInk
+            actionControl.backgroundColor = palette.ink
             actionControl.layer.borderWidth = 0
-            micImageView.image = UIImage(systemName: canUseBridge ? "mic.fill" : "arrow.up.forward.app.fill")
+            micImageView.image = UIImage(systemName: "mic.fill")
             micImageView.tintColor = palette.keySurface
-            actionTitleLabel.text = actionTitle(canUseBridge: canUseBridge)
+            actionTitleLabel.text = ""
             actionTitleLabel.textColor = palette.keySurface
             actionStack.addArrangedSubview(micImageView)
-            actionStack.addArrangedSubview(actionTitleLabel)
 
             if !hasFullAccess {
                 actionControl.accessibilityLabel = "Enable Full Access for VoiceType Keyboard"
             } else if viewModel.isKeyboardReady {
                 actionControl.accessibilityLabel = "Tap to speak"
             } else {
-                actionControl.accessibilityLabel = "Open VoiceType to turn on keyboard microphone"
+                actionControl.accessibilityLabel = "Microphone off"
             }
         }
     }
@@ -546,14 +807,9 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         }
         actionTitleLabel.text = title
         actionTitleLabel.textColor = tintColor
-        actionStack.addArrangedSubview(actionTitleLabel)
-    }
-
-    private func actionTitle(canUseBridge: Bool) -> String {
-        if !hasFullAccess {
-            return "Enable Access"
+        if !title.isEmpty {
+            actionStack.addArrangedSubview(actionTitleLabel)
         }
-        return canUseBridge ? "Speak" : "Open VoiceType"
     }
 
     private func defaultHelperText(canUseBridge: Bool, pendingAction: PendingKeyboardAction?) -> String {
@@ -566,8 +822,11 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         if !hasFullAccess {
             return "Enable Full Access in Settings."
         }
+        if activeDocumentIdentifier == nil {
+            return "Tap a text field to use VoiceType."
+        }
         if viewModel.isKeyboardRecording {
-            return "Recording. Tap Stop when done."
+            return "Recording. Tap to finish."
         }
         if viewModel.isTranscribing {
             return "Processing audio..."
@@ -575,39 +834,36 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         if canUseBridge {
             return ""
         }
-        return "Open VoiceType and tap Turn on keyboard mic."
+        return "Open VoiceType from your Home Screen and tap Turn on keyboard mic."
     }
 
     @objc private func actionTapped() {
-        playActionFeedback(intensity: 0.55)
+        updateDocumentContext()
         viewModel.refresh()
         clearResolvedPendingAction()
-        guard pendingAction == nil else {
+        guard pendingAction == nil, !viewModel.isTranscribing || !hasFullAccess else {
             updateUI()
             return
         }
         actionNotice = nil
 
-        if viewModel.isKeyboardRecording {
+        if !hasFullAccess {
+            clearAutoInsert()
+            actionNotice = "Settings → General → Keyboard → Keyboards → VoiceType → Allow Full Access."
+        } else if viewModel.isKeyboardRecording {
+            guard armAutoInsert() else { updateUI(); return }
             setPendingAction(.stoppingClip)
             updateUI(force: true)
             // Re-arm here: the armed state is cleared whenever the keyboard
             // disappears, so the transcript follows the field where the user
             // actually finished the clip.
-            KeyboardAutoInsertStore.arm(baselineTranscriptID: viewModel.snapshot.id)
             RecordingBridgeStore.requestStopClip()
-        } else if !hasFullAccess {
-            setPendingAction(nil)
-            actionNotice = nil
-            openContainingApp(route: .keyboardSetup)
         } else if viewModel.isKeyboardReady, hasFullAccess {
+            guard armAutoInsert() else { updateUI(); return }
             setPendingAction(.startingClip)
-            KeyboardAutoInsertStore.arm(baselineTranscriptID: viewModel.snapshot.id)
             RecordingBridgeStore.requestStartClip()
         } else {
             setPendingAction(nil)
-            actionNotice = nil
-            openContainingApp(route: .keyboardMic)
         }
         viewModel.refresh()
         clearResolvedPendingAction()
@@ -615,18 +871,22 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     }
 
     @objc private func returnTapped() {
-        playKeyFeedback(intensity: 0.5)
+        updateDocumentContext()
+        guard activeDocumentIdentifier != nil else { updateUI(); return }
         textDocumentProxy.insertText("\n")
     }
 
     @objc private func deleteTapped() {
-        playKeyFeedback(intensity: 0.5)
+        updateDocumentContext()
+        guard activeDocumentIdentifier != nil else { updateUI(); return }
         textDocumentProxy.deleteBackward()
     }
 
     @objc private func deleteLongPressed(_ recognizer: UILongPressGestureRecognizer) {
         switch recognizer.state {
         case .began:
+            updateDocumentContext()
+            guard activeDocumentIdentifier != nil else { updateUI(); return }
             playKeyFeedback(intensity: 0.9)
             setPressed(true, for: deleteButton)
             textDocumentProxy.deleteBackward()
@@ -634,6 +894,14 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         case .ended, .cancelled, .failed:
             stopDeleteRepeat()
             setPressed(false, for: deleteButton)
+        case .changed:
+            let isInside = deleteButton.bounds.contains(recognizer.location(in: deleteButton))
+            if !isInside {
+                stopDeleteRepeat()
+            } else if deleteRepeatTimer == nil {
+                startDeleteRepeat()
+            }
+            setPressed(isInside, for: deleteButton)
         default:
             break
         }
@@ -641,16 +909,22 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
     private func startDeleteRepeat() {
         stopDeleteRepeat()
-        deleteRepeatTimer = Timer.scheduledTimer(
-            timeInterval: 0.08,
-            target: self,
-            selector: #selector(deleteRepeatTick),
-            userInfo: nil,
-            repeats: true
-        )
+        guard let identifier = visibleDocumentIdentifier(), identifier == activeDocumentIdentifier else { return }
+        deleteRepeatDocumentIdentifier = identifier
+        let timer = Timer(timeInterval: 0.08, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.deleteRepeatTick() }
+        }
+        deleteRepeatTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     @objc private func deleteRepeatTick() {
+        guard deleteRepeatTimer != nil, let deleteRepeatDocumentIdentifier,
+              let identifier = visibleDocumentIdentifier(),
+              deleteRepeatDocumentIdentifier == identifier, activeDocumentIdentifier == identifier else {
+            stopDeleteRepeat()
+            return
+        }
         textDocumentProxy.deleteBackward()
         playKeyFeedback(intensity: 0.45)
     }
@@ -658,90 +932,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private func stopDeleteRepeat() {
         deleteRepeatTimer?.invalidate()
         deleteRepeatTimer = nil
-    }
-
-    private func openContainingApp(route: ContainingAppRoute) {
-        guard let url = route.url else { return }
-        scheduleOpenAppFallback(route: route)
-        // Primary path: walk the responder chain to the hosting UIApplication and
-        // call the modern open(_:options:completionHandler:). This is what
-        // actually launches the containing app from a Full Access keyboard.
-        // Fall back to the runtime sharedApplication trick, then to the
-        // extension context as a last resort.
-        if openURLThroughResponderChain(url) || openURLThroughApplicationRuntime(url) {
-            return
-        }
-        if let extensionContext {
-            extensionContext.open(url) { [weak self] didOpen in
-                DispatchQueue.main.async {
-                    guard let self, !didOpen else { return }
-                    self.showOpenAppFallback(route: route)
-                }
-            }
-        } else {
-            showOpenAppFallback(route: route)
-        }
-    }
-
-    @discardableResult
-    private func openURLThroughResponderChain(_ url: URL) -> Bool {
-        var responder: UIResponder? = self
-        while let current = responder {
-            if let application = current as? UIApplication {
-                application.open(url, options: [:], completionHandler: nil)
-                return true
-            }
-            responder = current.next
-        }
-        return false
-    }
-
-    @discardableResult
-    private func openURLThroughApplicationRuntime(_ url: URL) -> Bool {
-        let sharedSelector = NSSelectorFromString("sharedApplication")
-        let openSelector = NSSelectorFromString("openURL:")
-        guard
-            let applicationClass = NSClassFromString("UIApplication"),
-            let sharedMethod = class_getClassMethod(applicationClass, sharedSelector),
-            let openMethod = class_getInstanceMethod(applicationClass, openSelector)
-        else {
-            return false
-        }
-
-        typealias SharedApplicationFunction = @convention(c) (AnyClass, Selector) -> AnyObject
-        typealias OpenURLFunction = @convention(c) (AnyObject, Selector, NSURL) -> Bool
-        let sharedApplication = unsafeBitCast(
-            method_getImplementation(sharedMethod),
-            to: SharedApplicationFunction.self
-        )
-        let openURL = unsafeBitCast(
-            method_getImplementation(openMethod),
-            to: OpenURLFunction.self
-        )
-        let application = sharedApplication(applicationClass, sharedSelector)
-        return openURL(application, openSelector, url as NSURL)
-    }
-
-    private func scheduleOpenAppFallback(route: ContainingAppRoute) {
-        cancelOpenAppFallback()
-        let workItem = DispatchWorkItem { [weak self] in
-            guard let self, !self.viewModel.isKeyboardReady else { return }
-            self.actionNotice = route.fallbackMessage
-            self.updateUI()
-        }
-        openAppFallbackWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1, execute: workItem)
-    }
-
-    private func showOpenAppFallback(route: ContainingAppRoute) {
-        cancelOpenAppFallback()
-        actionNotice = route.fallbackMessage
-        updateUI(force: true)
-    }
-
-    private func cancelOpenAppFallback() {
-        openAppFallbackWorkItem?.cancel()
-        openAppFallbackWorkItem = nil
+        deleteRepeatDocumentIdentifier = nil
     }
 
     private func setPendingAction(_ action: PendingKeyboardAction?) {
@@ -773,9 +964,42 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
                 return
             }
             setPendingAction(nil)
-            KeyboardAutoInsertStore.clear()
+            clearAutoInsert()
             actionNotice = pendingAction.timeoutMessage
         }
+    }
+}
+
+private struct KeyboardOpenAppLink: View {
+    private let palette = KeyboardPalette()
+    let destination: URL
+    let onPress: @MainActor () -> Void
+
+    var body: some View {
+        Link(destination: destination) {
+            Image(systemName: "mic")
+                .font(.system(size: 24, weight: .regular))
+                .foregroundStyle(Color(uiColor: palette.keySurface))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(uiColor: palette.ink), in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(KeyboardLinkButtonStyle(onPress: onPress))
+        .accessibilityLabel("Turn on keyboard microphone")
+        .accessibilityHint("Opens VoiceType and enables the background microphone. Return here to dictate.")
+        .accessibilityIdentifier("keyboard.openAppLink")
+    }
+}
+
+private struct KeyboardLinkButtonStyle: ButtonStyle {
+    let onPress: @MainActor () -> Void
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.82 : 1)
+            .onChange(of: configuration.isPressed) { _, pressed in
+                if pressed { onPress() }
+            }
     }
 }
 
@@ -785,6 +1009,7 @@ private struct KeyboardUIState: Equatable {
     let isTranscribing: Bool
     let isKeyboardReady: Bool
     let hasFullAccess: Bool
+    let hasDocumentContext: Bool
     let notice: String?
 }
 
@@ -798,33 +1023,6 @@ private enum PendingKeyboardAction {
             return "VoiceType did not respond. Reopen it and try again."
         case .stoppingClip:
             return "Clip did not finish. Reopen VoiceType to check it."
-        }
-    }
-}
-
-private enum ContainingAppRoute {
-    case keyboardMic
-    case keyboardSetup
-
-    var url: URL? {
-        var components = URLComponents()
-        components.scheme = AppConstants.appURLScheme
-        switch self {
-        case .keyboardMic:
-            components.host = "keyboard"
-            components.queryItems = [URLQueryItem(name: "autostart", value: "1")]
-        case .keyboardSetup:
-            components.host = "keyboard-setup"
-        }
-        return components.url
-    }
-
-    var fallbackMessage: String {
-        switch self {
-        case .keyboardMic:
-            return "Open VoiceType and tap Turn on keyboard mic."
-        case .keyboardSetup:
-            return "Open VoiceType and finish keyboard setup."
         }
     }
 }
@@ -886,7 +1084,7 @@ private struct KeyboardPalette {
     let accent = UIColor.voiceType(light: UIColor(red: 0.878, green: 0.631, blue: 0.102, alpha: 1),
                                    dark: UIColor(red: 0.941, green: 0.737, blue: 0.271, alpha: 1))
     let live = UIColor.voiceType(light: UIColor(red: 0.812, green: 0.290, blue: 0.125, alpha: 1),
-                                 dark: UIColor(red: 0.941, green: 0.380, blue: 0.184, alpha: 1))
+                                 dark: UIColor(red: 0.980, green: 0.480, blue: 0.260, alpha: 1))
 }
 
 private extension UIColor {

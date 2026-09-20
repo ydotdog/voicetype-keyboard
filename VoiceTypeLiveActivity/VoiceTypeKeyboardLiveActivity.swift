@@ -5,31 +5,40 @@ import WidgetKit
 struct VoiceTypeKeyboardLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: VoiceTypeKeyboardActivityAttributes.self) { context in
-            VoiceTypeLiveActivityView(state: context.state)
+            VoiceTypeLiveActivityView(state: context.state, isStale: context.isStale)
                 .activityBackgroundTint(.clear)
                 .activitySystemActionForegroundColor(VoiceTypeActivityPalette.text)
+                .widgetURL(URL(string: "voicetype://keyboard"))
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     VoiceTypeActivityLogo(size: 24)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    VoiceTypeActivityIslandStatus(state: context.state)
+                    VoiceTypeActivityIslandStatus(state: context.state, isStale: context.isStale)
                 }
             } compactLeading: {
                 VoiceTypeActivityLogo(size: 18)
             } compactTrailing: {
-                VoiceTypeActivityCompactStatus(state: context.state)
+                VoiceTypeActivityCompactStatus(state: context.state, isStale: context.isStale)
             } minimal: {
-                VoiceTypeActivityLogo(size: 18)
+                if context.isStale {
+                    Image(systemName: "questionmark.circle")
+                        .foregroundStyle(VoiceTypeActivityPalette.secondaryText)
+                        .accessibilityLabel("Mic status unavailable. Open VoiceType to check.")
+                } else {
+                    VoiceTypeActivityLogo(size: 18)
+                }
             }
-            .keylineTint(VoiceTypeActivityPalette.gold)
+            .keylineTint(context.isStale ? VoiceTypeActivityPalette.secondaryText : VoiceTypeActivityPalette.gold)
+            .widgetURL(URL(string: "voicetype://keyboard"))
         }
     }
 }
 
 private struct VoiceTypeLiveActivityView: View {
     let state: VoiceTypeKeyboardActivityAttributes.ContentState
+    let isStale: Bool
 
     var body: some View {
         ZStack {
@@ -38,7 +47,7 @@ private struct VoiceTypeLiveActivityView: View {
             HStack(spacing: 13) {
                 VoiceTypeActivityLogo(size: 40)
 
-                VoiceTypeActivityLockScreenText(state: state)
+                VoiceTypeActivityLockScreenText(state: state, isStale: isStale)
 
                 Spacer(minLength: 8)
             }
@@ -49,6 +58,8 @@ private struct VoiceTypeLiveActivityView: View {
         .containerBackground(for: .widget) {
             VoiceTypeActivityGlassPanel(cornerRadius: 26, scrim: VoiceTypeActivityPalette.readabilityScrim)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityHint(isStale ? "Open VoiceType to check microphone status" : "Open VoiceType to manage the microphone")
     }
 }
 
@@ -102,21 +113,24 @@ private struct VoiceTypeActivityStatusDot: View {
 
 private struct VoiceTypeActivityLockScreenText: View {
     let state: VoiceTypeKeyboardActivityAttributes.ContentState
+    let isStale: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(state.title)
+            Text(isStale ? "Mic status unavailable" : state.title)
                 .font(.system(size: 19, weight: .bold, design: .rounded))
                 .foregroundStyle(VoiceTypeActivityPalette.text)
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
 
             HStack(spacing: 6) {
-                VoiceTypeActivityStatusDot(color: state.statusColor, size: 7)
+                VoiceTypeActivityStatusDot(color: isStale ? VoiceTypeActivityPalette.secondaryText : state.statusColor, size: 7)
 
-                Text(state.subtitle)
+                Text(isStale ? "Open VoiceType to check" : state.subtitle)
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundStyle(VoiceTypeActivityPalette.secondaryText)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
         }
         .shadow(color: VoiceTypeActivityPalette.textShadow, radius: 2.5, x: 0, y: 1)
@@ -125,33 +139,45 @@ private struct VoiceTypeActivityLockScreenText: View {
 
 private struct VoiceTypeActivityIslandStatus: View {
     let state: VoiceTypeKeyboardActivityAttributes.ContentState
+    let isStale: Bool
 
     var body: some View {
         HStack(spacing: 7) {
-            VoiceTypeActivityStatusDot(color: state.statusColor, size: 7)
+            VoiceTypeActivityStatusDot(color: isStale ? VoiceTypeActivityPalette.secondaryText : state.statusColor, size: 7)
 
             HStack(spacing: 4) {
-                Text(state.islandSubtitle)
+                Text(isStale ? "Mic status unavailable" : state.islandSubtitle)
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundStyle(VoiceTypeActivityPalette.secondaryText)
                     .lineLimit(1)
 
-                Text(state.title)
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundStyle(VoiceTypeActivityPalette.text)
-                    .lineLimit(1)
+                if !isStale {
+                    Text(state.title)
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(VoiceTypeActivityPalette.text)
+                        .lineLimit(1)
+                }
             }
         }
         .frame(minWidth: 86, alignment: .trailing)
         .shadow(color: VoiceTypeActivityPalette.textShadow, radius: 2, x: 0, y: 1)
+        .accessibilityHint("Open VoiceType to check microphone status")
     }
 }
 
 private struct VoiceTypeActivityCompactStatus: View {
     let state: VoiceTypeKeyboardActivityAttributes.ContentState
+    let isStale: Bool
 
     var body: some View {
-        VoiceTypeActivityStatusDot(color: state.statusColor, size: 9)
+        if isStale {
+            Image(systemName: "questionmark.circle")
+                .foregroundStyle(VoiceTypeActivityPalette.secondaryText)
+                .accessibilityLabel("Mic status unavailable. Open VoiceType to check.")
+        } else {
+            VoiceTypeActivityStatusDot(color: state.statusColor, size: 9)
+                .accessibilityLabel(state.islandSubtitle)
+        }
     }
 }
 

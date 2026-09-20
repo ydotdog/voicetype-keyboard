@@ -11,20 +11,7 @@ struct VoiceTypeApp: App {
                 .environmentObject(account)
                 .environmentObject(appState)
                 .onOpenURL { url in
-                    guard url.scheme == AppConstants.appURLScheme else { return }
-                    let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-                    let autoStart = components?.queryItems?.contains {
-                        $0.name == "autostart" && $0.value == "1"
-                    } ?? false
-                    let route = url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-
-                    if route == "record" {
-                        appState.presentRecorder(autoStart: autoStart)
-                    } else if route == "keyboard" {
-                        appState.presentKeyboardMic(autoStart: autoStart)
-                    } else if route == "keyboard-setup" {
-                        appState.presentKeyboardSetup()
-                    }
+                    appState.handleIncomingURL(url)
                 }
         }
     }
@@ -32,37 +19,62 @@ struct VoiceTypeApp: App {
 
 @MainActor
 final class AppState: ObservableObject {
-    @Published var isRecorderPresented = false
     @Published private(set) var keyboardMicRequestID: UUID?
     @Published private(set) var keyboardSetupRequestID: UUID?
-    @Published private(set) var recorderRequestID = UUID()
-    private(set) var shouldAutoStartRecorder = false
-    private(set) var shouldAutoStartKeyboardMic = false
+    private let activationStore: KeyboardMicActivationStore
+    private let uptime: @MainActor () -> TimeInterval
+    private var keyboardMicRequestedAt: TimeInterval?
+    private var lastAcceptedActivationURL: URL?
 
-    func presentRecorder(autoStart: Bool) {
-        shouldAutoStartRecorder = autoStart
-        recorderRequestID = UUID()
-        isRecorderPresented = true
+    init(
+        activationStore: KeyboardMicActivationStore = .shared,
+        uptime: @escaping @MainActor () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    ) {
+        self.activationStore = activationStore
+        self.uptime = uptime
+    }
+
+    var hasPendingKeyboardMicAutoStart: Bool {
+        guard let keyboardMicRequestedAt else { return false }
+        let elapsed = uptime() - keyboardMicRequestedAt
+        return elapsed.isFinite && elapsed >= 0 && elapsed < 120
+    }
+
+    func handleIncomingURL(_ url: URL) {
+        guard url.scheme?.lowercased() == AppConstants.appURLScheme else { return }
+        let route = url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        // Public links only reveal controls. The keyboard's native Link carries
+        // a short-lived App Group capability to request one background session.
+        switch route {
+        // Legacy clip links now lead to the keyboard microphone controls.
+        case "record": presentKeyboardMic(autoStart: false)
+        case "keyboard":
+            // iOS can deliver the same open again before the first foreground
+            // handler consumes it. Do not cancel that pending user request.
+            guard url != lastAcceptedActivationURL else { return }
+            let shouldActivate = activationStore.consume(url, uptime: uptime())
+            presentKeyboardMic(autoStart: shouldActivate)
+            if shouldActivate { lastAcceptedActivationURL = url }
+        case "keyboard-setup": presentKeyboardSetup()
+        default: keyboardMicRequestedAt = nil
+        }
     }
 
     func presentKeyboardMic(autoStart: Bool) {
-        shouldAutoStartKeyboardMic = autoStart
+        keyboardMicRequestedAt = autoStart ? uptime() : nil
+        if !autoStart { lastAcceptedActivationURL = nil }
         keyboardMicRequestID = UUID()
     }
 
     func presentKeyboardSetup() {
+        keyboardMicRequestedAt = nil
+        lastAcceptedActivationURL = nil
         keyboardSetupRequestID = UUID()
     }
 
-    func consumeRecorderAutoStart() -> Bool {
-        let value = shouldAutoStartRecorder
-        shouldAutoStartRecorder = false
-        return value
-    }
-
     func consumeKeyboardMicAutoStart() -> Bool {
-        let value = shouldAutoStartKeyboardMic
-        shouldAutoStartKeyboardMic = false
+        let value = hasPendingKeyboardMicAutoStart
+        keyboardMicRequestedAt = nil
         return value
     }
 }

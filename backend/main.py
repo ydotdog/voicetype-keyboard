@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import asyncio
 import hashlib
+import hmac
 import ipaddress
 import json
 import logging
@@ -9,6 +11,9 @@ import math
 import os
 import re
 import sqlite3
+import shutil
+import tempfile
+from threading import BoundedSemaphore
 import time
 import uuid
 from collections import deque
@@ -22,6 +27,7 @@ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from jwt import PyJWKClient
 from pydantic import BaseModel, Field
+from starlette.formparsers import MultiPartException
 
 try:
     import psycopg
@@ -94,6 +100,7 @@ DEV_CREDIT_MAX_USD_MICROS = int(os.getenv("DEV_CREDIT_MAX_USD_MICROS", str(20 * 
 # Review (and real first-run users) something to transcribe without a purchase.
 SIGNUP_GRANT_ENABLED = os.getenv("SIGNUP_GRANT_ENABLED", "true").lower() in {"1", "true", "yes"}
 SIGNUP_GRANT_USD_MICROS = int(os.getenv("SIGNUP_GRANT_USD_MICROS", "100000"))
+SIGNUP_GRANT_HMAC_SECRET = os.getenv("SIGNUP_GRANT_HMAC_SECRET", "")
 
 
 def default_cost_markup_bps() -> int:
@@ -106,8 +113,12 @@ def default_cost_markup_bps() -> int:
 DEFAULT_COST_MARKUP_BPS = default_cost_markup_bps()
 COST_MARKUP_BPS = int(os.getenv("COST_MARKUP_BPS", str(DEFAULT_COST_MARKUP_BPS)))
 MIN_TRANSCRIPTION_RESERVATION_USD_MICROS = int(os.getenv("MIN_TRANSCRIPTION_RESERVATION_USD_MICROS", "20000"))
-AUDIO_BYTES_PER_SECOND_FLOOR = max(1, int(os.getenv("AUDIO_BYTES_PER_SECOND_FLOOR", "2500")))
 CREDIT_RESERVATION_TTL_SECONDS = int(os.getenv("CREDIT_RESERVATION_TTL_SECONDS", "1800"))
+TRANSCRIPTION_PROCESSING_LEASE_SECONDS = max(180, int(os.getenv("TRANSCRIPTION_PROCESSING_LEASE_SECONDS", "300")))
+MAX_AUDIO_SECONDS = 600
+AUDIO_DECODE_TIMEOUT_SECONDS = 20
+PROVIDER_REQUEST_TIMEOUT_SECONDS = 120
+_transcription_slots = BoundedSemaphore(max(1, min(4, int(os.getenv("MAX_CONCURRENT_TRANSCRIPTIONS", "2")))))
 
 RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() in {"1", "true", "yes"}
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
@@ -213,7 +224,73 @@ async def lifespan(_: FastAPI) -> Any:
         on_shutdown()
 
 
+def request_body_limit(path: str) -> int:
+    path = path.rstrip("/")
+    if path == "/v1/transcriptions":
+        return MAX_AUDIO_BYTES + 65536
+    return {
+        "/v1/auth/apple": 32768,
+        "/v1/billing/storekit/transactions": 98304,
+        "/v1/billing/storekit/notifications": 196608,
+    }.get(path, 1048576)
+
+
+def request_size_error(path: str) -> str:
+    return "Audio upload is too large." if path.rstrip("/") == "/v1/transcriptions" else "Request body is too large."
+
+
+class RequestBodyLimitMiddleware:
+    """Bound bytes before JSON parsing or multipart spooling, independent of headers."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        limit = request_body_limit(scope.get("path", ""))
+        detail = request_size_error(scope.get("path", ""))
+        received = 0
+        exceeded = False
+        replacement_sent = False
+
+        async def limited_receive() -> Any:
+            nonlocal received, exceeded
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > limit:
+                    exceeded = True
+                    # Starlette closes all partially spooled files on this
+                    # exception. A generic exception would bypass that cleanup.
+                    raise MultiPartException(detail)
+            return message
+
+        async def too_large_response() -> None:
+            nonlocal replacement_sent
+            if not replacement_sent:
+                replacement_sent = True
+                await JSONResponse(status_code=413, content={"detail": detail})(scope, receive, send)
+
+        async def limited_send(message: Any) -> None:
+            if exceeded:
+                # Request.form() converts multipart errors to HTTP 400. Preserve
+                # the parser's cleanup while returning the correct upload status.
+                await too_large_response()
+            else:
+                await send(message)
+
+        try:
+            await self.app(scope, limited_receive, limited_send)
+        except Exception:
+            if not exceeded:
+                raise
+            await too_large_response()
+
+
 app = FastAPI(title="VoiceType API", version="0.2.0", lifespan=lifespan)
+app.add_middleware(RequestBodyLimitMiddleware)
 apple_jwks = PyJWKClient(APPLE_JWKS_URL)
 pg_pool: Optional[Any] = None
 
@@ -277,7 +354,7 @@ def privacy_policy_html() -> str:
 <body>
 <main>
   <h1>VoiceType Privacy Policy</h1>
-  <p><em>Last updated: 2026-06-13</em></p>
+  <p><em>Last updated: 2026-09-13</em></p>
 
   <p>VoiceType turns your speech into text. This policy explains what we collect,
   why, who processes it, and how you can delete it.</p>
@@ -286,7 +363,7 @@ def privacy_policy_html() -> str:
   <ul>
     <li>We do not track you across other apps or websites.</li>
     <li>We do not sell your data or share it with data brokers or advertisers.</li>
-    <li>You can delete your account and all associated data from inside the app at any time.</li>
+    <li>You can delete your account from inside the app at any time. A minimal welcome-credit abuse-prevention marker remains as described below.</li>
   </ul>
 
   <h2>What we collect and why</h2>
@@ -297,9 +374,10 @@ def privacy_policy_html() -> str:
     <tbody>
       <tr><td>Apple account identifier and email</td><td>Create and sign in to your account</td><td>Yes</td><td>Until you delete your account</td></tr>
       <tr><td>Name, only if shared at sign-in</td><td>Personalize your account</td><td>Yes</td><td>Until you delete your account</td></tr>
-      <tr><td>Audio you record</td><td>Sent to our transcription provider to produce text</td><td>Yes, in transit</td><td>Streamed for processing; not retained as audio files by default</td></tr>
+      <tr><td>Audio you record</td><td>Sent to our transcription provider to produce text</td><td>Yes, in transit</td><td>Processed transiently on our server; the latest unfinished or failed recording is saved privately on your device for retry</td></tr>
       <tr><td>Transcribed text</td><td>Returned to you and shown in your history</td><td>Yes</td><td>Until you delete your account</td></tr>
       <tr><td>Purchase records</td><td>Verify credit purchases and prevent duplicate grants</td><td>Yes</td><td>Until you delete your account</td></tr>
+      <tr><td>Keyed hash of Apple account identifier and first welcome-credit grant time</td><td>Prevent repeated welcome-credit claims after account deletion</td><td>Pseudonymous</td><td>Retained after account deletion while the welcome-credit program operates</td></tr>
     </tbody>
   </table>
 
@@ -310,10 +388,18 @@ def privacy_policy_html() -> str:
   <p>When you record, the app keeps an audio session active so the VoiceType
   keyboard can mark the speech to transcribe. Audio is sent over an encrypted
   connection to our backend, which forwards it to OpenAI solely to generate the
-  transcript. Audio is processed transiently and is not stored as files by
-  default. The resulting transcript is stored in your account so you can reuse it
+  transcript. Our server processes audio transiently without retaining audio files.
+  While keyboard mic is on, the app continuously records temporary audio on your
+  device. Only the clip between Speak and Stop is submitted. Idle audio files are
+  periodically replaced and are not uploaded. The resulting transcript is stored in your account so you can reuse it
   and is cached in a shared container on your device so the keyboard can insert
   it into the current text field.</p>
+
+  <p>The latest unfinished or failed recording is saved in private device storage
+  for retry after a connection failure or app restart. It is excluded from device
+  backups and removed after success, Discard recording, explicit sign-out, or
+  account deletion. An expired login preserves it for the same account to recover
+  after signing in again. Signing in to a different account removes it.</p>
 
   <h2>Third parties</h2>
   <ul>
@@ -324,19 +410,31 @@ def privacy_policy_html() -> str:
 
   <h2>Microphone and Full Access</h2>
   <ul>
-    <li>Microphone: used only to capture the speech you choose to transcribe.</li>
+    <li>Microphone: after you turn on keyboard mic, recording continues in other
+    apps until you turn it off or the selected session duration ends. Only clips
+    marked with Speak and Stop are sent for transcription.</li>
     <li>Keyboard Full Access: used so the VoiceType keyboard can read the latest
     transcript and recording state from the app's shared container. The keyboard
     does not transmit your keystrokes to us.</li>
   </ul>
 
   <h2>Data retention and deletion</h2>
-  <p>Your account data is kept until you delete it. To delete everything, open
+  <p>Your account data is kept until you delete it. To delete your account, open
   VoiceType, go to Settings, choose Delete account, and confirm. This permanently
   removes your user record, remaining credit, transcription history, and stored
   purchase records, and revokes the app's Sign in with Apple token grant.
   Deletion cannot be undone. Purchases already consumed are not refundable
   through deletion; refunds are handled by Apple.</p>
+  <p>To prevent repeated welcome-credit claims, we retain only a keyed hash of
+  your Apple account identifier and the original grant time after deletion.
+  This marker contains no raw Apple identifier, email, name, or VoiceType account
+  identifier. It cannot restore your deleted account or content and is not used
+  for advertising or tracking. It remains while the welcome-credit program
+  operates so the same Apple identity cannot claim the first-use offer again.</p>
+  <p>When Apple refunds a credit pack, its credits are removed. If some were
+  already used, your balance may be negative and you need sufficient credit
+  before transcribing again. We never charge a payment method automatically.
+  If Apple reverses the refund, the removed credits are restored.</p>
 
   <h2>Children</h2>
   <p>VoiceType is not directed to children under 13 and does not knowingly collect
@@ -414,6 +512,12 @@ def support_page_html() -> str:
     can be replayed.</li>
   </ul>
 
+  <h2>Credit-pack refunds</h2>
+  <p>Apple handles refund requests. A refunded pack's credits are removed, so
+  your balance may be negative if you already used them. Add sufficient credit
+  before transcribing again. We never charge you automatically. If Apple
+  reverses the refund, the removed credits are restored.</p>
+
   <h2>Privacy</h2>
   <p>Read the <a href="/privacy">VoiceType Privacy Policy</a>.</p>
 </main>
@@ -423,6 +527,16 @@ def support_page_html() -> str:
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next: Any) -> Any:
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            request_size = int(content_length)
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length."})
+        if request_size < 0:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length."})
+        if request_size > request_body_limit(request.url.path):
+            return JSONResponse(status_code=413, content={"detail": request_size_error(request.url.path)})
     rate_limit = rate_limit_for_path(request.url.path)
     if RATE_LIMIT_ENABLED and rate_limit:
         allowed, retry_after = check_rate_limit(request, limit=rate_limit, window_seconds=RATE_LIMIT_WINDOW_SECONDS)
@@ -454,10 +568,10 @@ async def rate_limit_middleware(request: Request, call_next: Any) -> Any:
 
 
 class AppleAuthRequest(BaseModel):
-    identity_token: str = Field(min_length=4)
-    authorization_code: Optional[str] = None
-    email: Optional[str] = None
-    full_name: Optional[str] = None
+    identity_token: str = Field(min_length=4, max_length=16384)
+    authorization_code: Optional[str] = Field(default=None, max_length=4096)
+    email: Optional[str] = Field(default=None, max_length=320)
+    full_name: Optional[str] = Field(default=None, max_length=256)
 
 
 class AuthUser(BaseModel):
@@ -486,7 +600,11 @@ class CreditProduct(BaseModel):
 
 
 class StoreKitTransactionRequest(BaseModel):
-    signed_transaction: str = Field(min_length=16)
+    signed_transaction: str = Field(min_length=16, max_length=65536)
+
+
+class StoreKitNotificationRequest(BaseModel):
+    signedPayload: str = Field(min_length=16, max_length=131072)
 
 
 class PurchaseCreditResponse(BaseModel):
@@ -603,10 +721,15 @@ def rate_limit_for_path(path: str) -> Optional[int]:
 
 
 def rate_limit_identity(request: Request) -> str:
+    # Sign-in is always limited by IP. Unverified or freshly rotated bearer
+    # strings must not create a new bucket for each request.
     authorization = request.headers.get("authorization", "")
-    if authorization.startswith("Bearer "):
-        digest = hashlib.sha256(authorization.encode("utf-8")).hexdigest()[:20]
-        return f"token:{digest}"
+    if request.url.path != "/v1/auth/apple" and authorization.startswith("Bearer ") and JWT_SECRET:
+        try:
+            payload = decode_session_token(authorization.removeprefix("Bearer ").strip())
+            return f"user:{payload['sub']}"
+        except jwt.PyJWTError:
+            pass
     return f"ip:{client_ip_for_rate_limit(request)}"
 
 
@@ -724,6 +847,64 @@ def ensure_schema_migrations(conn: Any) -> None:
     add_column_if_missing(conn, "transcriptions", "input_tokens", "BIGINT")
     add_column_if_missing(conn, "transcriptions", "output_tokens", "BIGINT")
     add_column_if_missing(conn, "transcriptions", "pricing_basis", "TEXT NOT NULL DEFAULT 'duration_estimate'")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS transcription_requests (
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            request_key TEXT NOT NULL,
+            fingerprint TEXT NOT NULL,
+            attempt_id TEXT NOT NULL,
+            transcription_id TEXT REFERENCES transcriptions(id) ON DELETE CASCADE,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, request_key)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS signup_grant_claims (
+            identity_hash TEXT PRIMARY KEY,
+            granted_at TEXT NOT NULL
+        )
+        """
+    )
+    add_column_if_missing(conn, "transcription_requests", "fingerprint_version", "INTEGER NOT NULL DEFAULT 1")
+    add_column_if_missing(conn, "transcription_requests", "selected_model", "TEXT")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS storekit_refund_states (
+            transaction_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            product_id TEXT NOT NULL,
+            is_refunded INTEGER NOT NULL,
+            signed_date BIGINT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS storekit_notification_events (
+            notification_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            transaction_id TEXT NOT NULL,
+            notification_type TEXT NOT NULL,
+            signed_date BIGINT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    # Backfill before deletion can remove the old ledger. Only the keyed hash
+    # and grant time survive deletion; this table has no account foreign key.
+    if SIGNUP_GRANT_HMAC_SECRET or APPLE_AUTH_DEV_BYPASS:
+        rows = execute(conn, "SELECT u.apple_sub, MIN(l.created_at) AS granted_at "
+                       "FROM users u JOIN credit_ledger l ON l.user_id = u.id "
+                       "WHERE l.kind = 'signup_grant' GROUP BY u.apple_sub").fetchall()
+        for row in rows:
+            item = row_to_dict(row)
+            execute(conn, "INSERT INTO signup_grant_claims (identity_hash, granted_at) VALUES (?, ?) "
+                    "ON CONFLICT (identity_hash) DO NOTHING",
+                    (signup_grant_identity_hash(item["apple_sub"]), item["granted_at"]))
 
     conn.execute("CREATE INDEX IF NOT EXISTS credit_ledger_user_created_idx ON credit_ledger(user_id, created_at DESC)")
     conn.execute("CREATE INDEX IF NOT EXISTS credit_reservations_user_created_idx ON credit_reservations(user_id, created_at)")
@@ -942,7 +1123,7 @@ def current_user(authorization: Annotated[Optional[str], Header()] = None) -> di
         raise HTTPException(status_code=401, detail="Missing bearer token.")
     token = authorization.removeprefix("Bearer ").strip()
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"], issuer=JWT_ISSUER)
+        payload = decode_session_token(token)
     except jwt.PyJWTError as exc:
         raise HTTPException(status_code=401, detail="Invalid bearer token.") from exc
     user_id = payload.get("sub")
@@ -955,9 +1136,21 @@ def current_user(authorization: Annotated[Optional[str], Header()] = None) -> di
     return row_to_dict(row)
 
 
+def decode_session_token(token: str) -> dict[str, Any]:
+    return jwt.decode(
+        token,
+        JWT_SECRET,
+        algorithms=["HS256"],
+        issuer=JWT_ISSUER,
+        options={"require": ["sub", "iss", "iat", "exp"]},
+    )
+
+
 def lock_user(conn: Any, user_id: str) -> None:
-    if is_postgres():
-        execute(conn, "SELECT id FROM users WHERE id = ? FOR UPDATE", (user_id,)).fetchone()
+    suffix = " FOR UPDATE" if is_postgres() else ""
+    row = execute(conn, f"SELECT id FROM users WHERE id = ?{suffix}", (user_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=401, detail="User no longer exists.")
 
 
 def clear_expired_credit_reservations(conn: Any) -> None:
@@ -1079,10 +1272,10 @@ def generate_apple_client_secret() -> str:
     )
 
 
-def exchange_apple_authorization_code(authorization_code: str) -> Optional[str]:
+def exchange_apple_authorization_code(authorization_code: str, *, expected_sub: str) -> Optional[str]:
     # Trades the one-time auth code from Sign in with Apple for a refresh token
-    # so the account can later be revoked on deletion. Best-effort: returns None
-    # if credentials are not configured or Apple rejects the exchange.
+    # so the account can later be revoked on deletion. A configured production
+    # server must retain a revocable session before accepting the sign-in.
     if not authorization_code or not apple_signin_configured():
         return None
     try:
@@ -1099,14 +1292,24 @@ def exchange_apple_authorization_code(authorization_code: str) -> Optional[str]:
         )
     except httpx.HTTPError as exc:
         logger.warning("apple_code_exchange_failed", extra={"error": str(exc)})
-        return None
+        raise HTTPException(status_code=503, detail="Apple sign-in is temporarily unavailable. Try again shortly.") from exc
     if response.status_code != 200:
         logger.warning(
             "apple_code_exchange_rejected",
             extra={"status_code": response.status_code, "body": response.text[:500]},
         )
-        return None
-    return response.json().get("refresh_token")
+        raise HTTPException(status_code=503, detail="Could not complete Apple sign-in. Try signing in again.")
+    try:
+        payload = response.json()
+        token_payload = verify_apple_identity_token(payload.get("id_token", ""))
+        refresh_token = payload.get("refresh_token")
+    except (ValueError, AttributeError, HTTPException) as exc:
+        raise HTTPException(status_code=502, detail="Could not validate Apple sign-in. Try signing in again.") from exc
+    if token_payload.get("sub") != expected_sub:
+        raise HTTPException(status_code=401, detail="Apple authorization code belongs to another account.")
+    if not isinstance(refresh_token, str) or not refresh_token:
+        raise HTTPException(status_code=502, detail="Apple did not return a revocable session. Try signing in again.")
+    return refresh_token
 
 
 def revoke_apple_token(refresh_token: str) -> bool:
@@ -1138,7 +1341,8 @@ def revoke_apple_token(refresh_token: str) -> bool:
 
 
 def grant_signup_credit_if_needed(user_id: str) -> None:
-    # One-time welcome credit, idempotent via the unique source_id. Applied on
+    # One-time welcome credit, idempotent via a retained keyed identity claim.
+    # The marker and ledger grant are committed in the same transaction. Applied on
     # every sign-in that finds it missing so a grant that failed (or a crash
     # right after account creation) self-heals on the next sign-in. Runs in its
     # own transaction: on Postgres a failed statement aborts the enclosing
@@ -1148,6 +1352,14 @@ def grant_signup_credit_if_needed(user_id: str) -> None:
     source_id = f"signup:{user_id}"
     try:
         with db() as conn:
+            lock_user(conn, user_id)
+            account = row_to_dict(execute(conn, "SELECT apple_sub FROM users WHERE id = ?", (user_id,)).fetchone())
+            marker = execute(conn,
+                "INSERT INTO signup_grant_claims (identity_hash, granted_at) VALUES (?, ?) "
+                "ON CONFLICT (identity_hash) DO NOTHING",
+                (signup_grant_identity_hash(account["apple_sub"]), utc_now()))
+            if marker.rowcount == 0:
+                return
             row = execute(conn, "SELECT 1 FROM credit_ledger WHERE source_id = ?", (source_id,)).fetchone()
             if row:
                 return
@@ -1165,6 +1377,16 @@ def grant_signup_credit_if_needed(user_id: str) -> None:
         logger.exception("signup_grant_failed", extra={"user_id": user_id})
 
 
+def signup_grant_identity_hash(apple_sub: str) -> str:
+    # A dedicated stable key prevents JWT rotation from resetting eligibility.
+    # Only explicit local fake-auth mode may use the development JWT key.
+    key = SIGNUP_GRANT_HMAC_SECRET or (JWT_SECRET if APPLE_AUTH_DEV_BYPASS else "")
+    if not key:
+        raise RuntimeError("A stable SIGNUP_GRANT_HMAC_SECRET is required for welcome credit.")
+    message = f"voicetype:signup:v1:{APPLE_CLIENT_ID}:{apple_sub}".encode()
+    return hmac.new(key.encode(), message, hashlib.sha256).hexdigest()
+
+
 def verify_apple_identity_token(identity_token: str) -> dict[str, Any]:
     if APPLE_AUTH_DEV_BYPASS and identity_token.startswith("dev:"):
         sub = identity_token.removeprefix("dev:") or "local-dev-user"
@@ -1177,6 +1399,7 @@ def verify_apple_identity_token(identity_token: str) -> dict[str, Any]:
             algorithms=["RS256"],
             audience=APPLE_CLIENT_ID,
             issuer=APPLE_ISSUER,
+            options={"require": ["sub", "iss", "aud", "iat", "exp"]},
         )
     except jwt.PyJWTError as exc:
         raise HTTPException(status_code=401, detail="Invalid Apple identity token.") from exc
@@ -1186,17 +1409,29 @@ def upsert_apple_user(
     payload: dict[str, Any],
     request: AppleAuthRequest,
     refresh_token: Optional[str] = None,
+    *,
+    require_revocable_session: bool = False,
 ) -> dict[str, Any]:
     apple_sub = str(payload.get("sub") or "").strip()
     if not apple_sub:
         raise HTTPException(status_code=401, detail="Apple identity token is missing sub.")
-    email = request.email or payload.get("email")
+    email = payload.get("email") or request.email
     full_name = request.full_name
 
     for attempt in (0, 1):
         try:
             with db() as conn:
                 row = execute(conn, "SELECT * FROM users WHERE apple_sub = ?", (apple_sub,)).fetchone()
+                # Check in the same transaction as the upsert: a missing code
+                # must not create a new account without a token we can revoke.
+                # An existing account may reuse its previously exchanged grant.
+                if require_revocable_session and not (
+                    refresh_token or row_to_dict(row).get("apple_refresh_token")
+                ):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Please sign in with Apple again to authorize account management.",
+                    )
                 if row:
                     user = row_to_dict(row)
                     execute(
@@ -1231,7 +1466,10 @@ def decode_unverified_storekit_payload(jws: str) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="StoreKit transaction must be a compact JWS.")
     payload = parts[1] + "=" * (-len(parts[1]) % 4)
     try:
-        return json.loads(base64.urlsafe_b64decode(payload.encode("utf-8")))
+        decoded = json.loads(base64.urlsafe_b64decode(payload.encode("utf-8")))
+        if not isinstance(decoded, dict):
+            raise ValueError("Expected a transaction object.")
+        return decoded
     except (ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail="Invalid StoreKit transaction payload.") from exc
 
@@ -1302,7 +1540,7 @@ def accepted_storekit_environment_keys() -> set[str]:
 def ensure_storekit_environment_allowed(environment: Any) -> None:
     accepted = accepted_storekit_environment_keys()
     current = storekit_environment_key(environment)
-    if accepted and current not in accepted:
+    if not accepted or current not in accepted:
         raise HTTPException(status_code=403, detail="StoreKit transaction environment is not enabled for this server.")
 
 
@@ -1317,13 +1555,21 @@ def candidate_storekit_environments(preferred: Any) -> list[Any]:
     ordered = [preferred, storekit_environment(), Environment.SANDBOX, Environment.PRODUCTION]
     result: list[Any] = []
     for environment in ordered:
-        if environment is not None and environment not in result:
+        # Apple's library intentionally skips signature verification for local
+        # test environments. They must never be candidates in strict mode.
+        if environment in (Environment.PRODUCTION, Environment.SANDBOX) and environment not in result:
             result.append(environment)
     return result
 
 
 def verify_storekit_payload(jws: str) -> dict[str, Any]:
-    if STOREKIT_VERIFICATION_MODE == "strict" and not ALLOW_UNVERIFIED_STOREKIT_JWS:
+    if STOREKIT_VERIFICATION_MODE != "strict" and not (
+        STOREKIT_VERIFICATION_MODE == "development" and ALLOW_UNVERIFIED_STOREKIT_JWS
+    ):
+        raise HTTPException(status_code=500, detail="StoreKit verification is not safely configured.")
+    if STOREKIT_VERIFICATION_MODE == "strict":
+        if ALLOW_UNVERIFIED_STOREKIT_JWS:
+            raise HTTPException(status_code=500, detail="Unsigned transactions cannot be enabled in strict mode.")
         if SignedDataVerifier is None or Environment is None:
             raise HTTPException(status_code=500, detail="App Store Server Library is not installed.")
         certs = load_apple_root_certificates()
@@ -1357,6 +1603,9 @@ def verify_storekit_payload(jws: str) -> dict[str, Any]:
                 "bundle_id": decoded.bundleId,
                 "environment": environment_name,
                 "app_account_token": decoded.appAccountToken,
+                "revocation_date": decoded.revocationDate,
+                "quantity": decoded.quantity,
+                "type": decoded.rawType or getattr(decoded.type, "value", None),
             }
         logger.warning(
             "storekit_signature_rejected",
@@ -1372,7 +1621,44 @@ def verify_storekit_payload(jws: str) -> dict[str, Any]:
         "bundle_id": payload.get("bundleId") or payload.get("bundle_id"),
         "environment": payload.get("environment"),
         "app_account_token": payload.get("appAccountToken") or payload.get("app_account_token"),
+        "revocation_date": payload.get("revocationDate", payload.get("revocation_date")),
+        "quantity": payload.get("quantity"),
+        "type": payload.get("type"),
     }
+
+
+def verify_storekit_notification(jws: str) -> dict[str, Any]:
+    # The public webhook has no development/unsigned path, even when a local
+    # app fixture is configured to accept simulated purchase transactions.
+    if STOREKIT_VERIFICATION_MODE != "strict" or ALLOW_UNVERIFIED_STOREKIT_JWS:
+        raise HTTPException(status_code=503, detail="StoreKit notifications require strict verification.")
+    if SignedDataVerifier is None or Environment is None:
+        raise HTTPException(status_code=503, detail="StoreKit notification verification is unavailable.")
+    certs = load_apple_root_certificates()
+    if not certs:
+        raise HTTPException(status_code=503, detail="StoreKit notification verification is unavailable.")
+    app_apple_id = int(APPLE_APP_APPLE_ID) if APPLE_APP_APPLE_ID else None
+    for environment in candidate_storekit_environments(None):
+        try:
+            verifier = SignedDataVerifier(certs, True, environment, APPLE_BUNDLE_ID, app_apple_id)
+            decoded = verifier.verify_and_decode_notification(jws)
+        except Exception:
+            continue
+        ensure_storekit_environment_allowed(environment.value)
+        if decoded.version != "2.0" or not decoded.notificationUUID:
+            raise HTTPException(status_code=400, detail="Invalid StoreKit notification metadata.")
+        kind = decoded.rawNotificationType or getattr(decoded.notificationType, "value", None)
+        if isinstance(decoded.signedDate, bool) or not isinstance(decoded.signedDate, int) or decoded.signedDate <= 0:
+            raise HTTPException(status_code=400, detail="Invalid StoreKit notification timestamp.")
+        data = decoded.data
+        return {
+            "notification_id": decoded.notificationUUID,
+            "notification_type": kind,
+            "signed_date": decoded.signedDate,
+            "signed_transaction": data.signedTransactionInfo if data else None,
+            "environment": environment.value,
+        }
+    raise HTTPException(status_code=401, detail="Invalid StoreKit notification signature.")
 
 
 def resolve_model(model: Optional[str]) -> str:
@@ -1383,10 +1669,22 @@ def resolve_model(model: Optional[str]) -> str:
 
 
 def extract_usage(payload: dict[str, Any]) -> tuple[Optional[int], Optional[int]]:
-    usage = payload.get("usage") or {}
-    input_tokens = usage.get("input_tokens") or usage.get("audio_tokens") or usage.get("prompt_tokens")
-    output_tokens = usage.get("output_tokens") or usage.get("completion_tokens")
-    return (int(input_tokens) if input_tokens else None, int(output_tokens) if output_tokens else None)
+    usage = payload.get("usage")
+    usage = {} if usage is None else usage
+    if not isinstance(usage, dict):
+        raise HTTPException(status_code=502, detail="Transcription provider returned invalid usage.")
+    def first_present(*keys: str) -> Any:
+        return next((usage[key] for key in keys if usage.get(key) is not None), None)
+    input_tokens = first_present("input_tokens", "audio_tokens", "prompt_tokens")
+    output_tokens = first_present("output_tokens", "completion_tokens")
+    def token_count(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise HTTPException(status_code=502, detail="Transcription provider returned invalid usage.")
+        return value
+
+    return token_count(input_tokens), token_count(output_tokens)
 
 
 def estimate_text_tokens(text: str) -> int:
@@ -1413,13 +1711,13 @@ def calculate_cost(
         cost = apply_cost_markup(math.ceil(minutes * pricing["per_minute_usd_micros"]))
         return max(cost, 1), "duration", math.ceil(minutes * 60), 0
 
-    charged_input = input_tokens or math.ceil(max(audio_seconds, 1.0) * FALLBACK_AUDIO_TOKENS_PER_SECOND)
-    charged_output = output_tokens or estimate_text_tokens(transcript)
+    charged_input = input_tokens if input_tokens is not None else math.ceil(max(audio_seconds, 1.0) * FALLBACK_AUDIO_TOKENS_PER_SECOND)
+    charged_output = output_tokens if output_tokens is not None else estimate_text_tokens(transcript)
     input_cost = charged_input * pricing["input_per_million_usd_micros"] / 1_000_000
     output_cost = charged_output * pricing["output_per_million_usd_micros"] / 1_000_000
     cost = apply_cost_markup(math.ceil(input_cost + output_cost))
-    basis = "reported_usage" if input_tokens or output_tokens else "duration_estimate"
-    return max(cost, 1), basis, charged_input, charged_output
+    basis = "reported_usage" if input_tokens is not None and output_tokens is not None else "duration_estimate"
+    return max(cost, 0), basis, charged_input, charged_output
 
 
 def estimate_preflight_cost(model: str, audio_seconds: float) -> int:
@@ -1433,16 +1731,72 @@ def estimate_preflight_cost(model: str, audio_seconds: float) -> int:
     return max(cost, 1)
 
 
-def estimate_reservation_cost(model: str, audio_seconds: float, audio_bytes: int) -> int:
-    inferred_seconds = max(audio_seconds, audio_bytes / AUDIO_BYTES_PER_SECOND_FLOOR)
-    estimated = estimate_preflight_cost(model, inferred_seconds)
+def estimate_reservation_cost(model: str, audio_seconds: float) -> int:
+    # Duration is decoded from the actual media before reaching this function;
+    # codec bitrate and client metadata are not reliable measures of duration.
+    estimated = estimate_preflight_cost(model, audio_seconds)
     return max(estimated, MIN_TRANSCRIPTION_RESERVATION_USD_MICROS)
+
+
+async def measure_audio_duration(audio: bytes) -> float:
+    """Decode bounded audio locally so forged duration metadata cannot buy cheap work."""
+    decoder = shutil.which("ffmpeg")
+    if not decoder:
+        raise HTTPException(status_code=503, detail="Audio validation is temporarily unavailable.")
+    # The only input path is our private temporary file. Playlist/remote
+    # demuxers are excluded; audio is deleted on success, error or cancellation.
+    with tempfile.NamedTemporaryFile(prefix="voicetype-audio-", suffix=".audio") as source:
+        source.write(audio)
+        source.flush()
+        command = [
+            decoder, "-nostdin", "-v", "quiet", "-max_alloc", "33554432",
+            "-threads", "1", "-filter_threads", "1", "-protocol_whitelist", "file,pipe",
+            "-format_whitelist", "aac,flac,matroska,webm,mov,mp4,m4a,3gp,3g2,mj2,mp3,ogg,wav",
+            "-probesize", "1048576", "-analyzeduration", "10000000", "-i", source.name,
+            "-map", "0:a:0", "-t", str(MAX_AUDIO_SECONDS + 1), "-vn",
+            "-ac", "1", "-ar", "16000", "-threads", "1", "-f", "s16le", "pipe:1",
+        ]
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            )
+        except OSError as exc:
+            raise HTTPException(status_code=503, detail="Audio validation is temporarily unavailable.") from exc
+        try:
+            output, _ = await asyncio.wait_for(process.communicate(), timeout=AUDIO_DECODE_TIMEOUT_SECONDS)
+        except BaseException as exc:
+            if process.returncode is None:
+                process.kill()
+            await process.communicate()
+            if isinstance(exc, asyncio.TimeoutError):
+                raise HTTPException(status_code=400, detail="Audio file could not be validated within the time limit.") from exc
+            raise
+        if process.returncode != 0 or not output:
+            raise HTTPException(status_code=400, detail="Audio file is invalid or contains no readable audio.")
+        seconds = len(output) / 32000  # 16 kHz, mono, signed 16-bit PCM.
+        if seconds > MAX_AUDIO_SECONDS + 0.05:
+            raise HTTPException(status_code=400, detail=f"A recording must be at most {MAX_AUDIO_SECONDS // 60} minutes.")
+        return seconds
+
+
+def provider_audio_duration(payload: dict[str, Any], measured_seconds: float) -> float:
+    usage = payload.get("usage")
+    value = usage.get("seconds") if isinstance(usage, dict) and usage.get("type") == "duration" else payload.get("duration")
+    if value is None:
+        return measured_seconds
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+        raise HTTPException(status_code=502, detail="Transcription provider returned invalid audio duration.")
+    return max(measured_seconds, float(value))
 
 
 async def transcribe_audio(audio: bytes, filename: str, content_type: Optional[str], model: str, language: Optional[str]) -> dict[str, Any]:
     require_openai_key()
     headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
     data: dict[str, str] = {"model": model, "response_format": "json"}
+    if model == "whisper-1":
+        data["response_format"] = "verbose_json"
+    if model == "gpt-4o-transcribe-diarize":
+        data["chunking_strategy"] = "auto"
     if language:
         data["language"] = language
     files = {"file": (filename, audio, content_type or "audio/m4a")}
@@ -1456,11 +1810,37 @@ async def transcribe_audio(audio: bytes, filename: str, content_type: Optional[s
             extra={"status_code": response.status_code, "body": response.text[:500]},
         )
         raise HTTPException(status_code=502, detail="Transcription provider request failed.")
-    payload = response.json()
-    transcript = (payload.get("text") or "").strip()
-    if not transcript:
-        raise HTTPException(status_code=502, detail="Transcription returned empty text.")
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="Transcription provider returned invalid data.") from exc
+    validated_transcript(payload)
     return payload
+
+
+def validated_transcript(payload: Any) -> str:
+    transcript = payload.get("text") if isinstance(payload, dict) else None
+    if not isinstance(transcript, str) or not transcript.strip():
+        raise HTTPException(status_code=502, detail="Transcription provider returned no usable text.")
+    return transcript.strip()
+
+
+def transcription_response(transcription: dict[str, Any], balance: int) -> JSONResponse:
+    cost = transcription["cost_usd_micros"]
+    return JSONResponse(
+        TranscriptionResponse(
+            id=transcription["id"],
+            transcript=transcription["transcript"],
+            model=transcription["model"],
+            charge=ChargePayload(
+                cost_usd_micros=cost,
+                cost_credit_units=credit_units_from_usd_micros(cost),
+                formatted=format_credits(cost),
+                pricing_basis=transcription["pricing_basis"],
+            ),
+            balance=balance_payload(balance),
+        ).model_dump()
+    )
 
 
 @app.get("/health")
@@ -1494,6 +1874,8 @@ def support_page() -> HTMLResponse:
 def readiness() -> JSONResponse:
     checks: dict[str, Any] = {
         "jwt_secret": bool(JWT_SECRET),
+        "signup_grant_stable_secret": not SIGNUP_GRANT_ENABLED or bool(SIGNUP_GRANT_HMAC_SECRET),
+        "audio_decoder": bool(shutil.which("ffmpeg")),
         "openai_api_key": bool(OPENAI_API_KEY),
         "database": False,
         "storekit_strict": STOREKIT_VERIFICATION_MODE == "strict" and not ALLOW_UNVERIFIED_STOREKIT_JWS,
@@ -1502,6 +1884,9 @@ def readiness() -> JSONResponse:
         "apple_root_certificates": bool(APPLE_ROOT_CERTIFICATE_PATHS or APPLE_ROOT_CERTIFICATE_PEMS_B64),
         "apple_signin_revoke_credentials": apple_signin_configured(),
         "dev_credit_disabled": not ALLOW_DEV_CREDIT,
+        "apple_auth_dev_bypass_disabled": not APPLE_AUTH_DEV_BYPASS,
+        "storekit_real_environments_only": bool(accepted_storekit_environment_keys())
+        and accepted_storekit_environment_keys() <= {"SANDBOX", "PRODUCTION"},
     }
     try:
         with db() as conn:
@@ -1525,8 +1910,15 @@ def readiness() -> JSONResponse:
 @app.post("/v1/auth/apple", response_model=AuthResponse)
 def auth_apple(request: AppleAuthRequest) -> AuthResponse:
     apple_payload = verify_apple_identity_token(request.identity_token)
-    refresh_token = exchange_apple_authorization_code(request.authorization_code) if request.authorization_code else None
-    user = upsert_apple_user(apple_payload, request, refresh_token=refresh_token)
+    refresh_token = exchange_apple_authorization_code(
+        request.authorization_code, expected_sub=str(apple_payload.get("sub") or "")
+    ) if request.authorization_code else None
+    user = upsert_apple_user(
+        apple_payload,
+        request,
+        refresh_token=refresh_token,
+        require_revocable_session=apple_signin_configured(),
+    )
     grant_signup_credit_if_needed(user["id"])
     with db() as conn:
         balance = balance_for_user(conn, user["id"])
@@ -1543,11 +1935,16 @@ def me(user: Annotated[dict[str, Any], Depends(current_user)]) -> dict[str, Any]
 @app.delete("/v1/account")
 def delete_account(user: Annotated[dict[str, Any], Depends(current_user)]) -> dict[str, Any]:
     # App Store Guideline 5.1.1(v): account deletion from inside the app.
-    # Revokes the Apple token grant (best-effort) then removes the user row.
+    # Revokes the Apple token grant before removing the user row. A failed
+    # revocation preserves the token so deletion can be retried.
     # Ledger, reservations, StoreKit transactions, and transcriptions are
     # removed by ON DELETE CASCADE.
     refresh_token = user.get("apple_refresh_token")
     revoked = revoke_apple_token(refresh_token) if refresh_token else False
+    if refresh_token and not revoked:
+        # Preserve the account and revocation token so the user can retry after
+        # an Apple outage instead of permanently losing the means to revoke it.
+        raise HTTPException(status_code=503, detail="Could not revoke Apple sign-in. Please try deleting your account again shortly.")
     with db() as conn:
         execute(conn, "DELETE FROM users WHERE id = ?", (user["id"],))
     logger.info("account_deleted", extra={"user_id": user["id"], "apple_token_revoked": revoked})
@@ -1597,12 +1994,19 @@ def storekit_transaction(
         raise HTTPException(status_code=400, detail="StoreKit transaction is missing appAccountToken.")
     if app_account_token and str(app_account_token).lower() != str(user["id"]).lower():
         raise HTTPException(status_code=403, detail="StoreKit transaction belongs to another app account.")
+    if payload.get("revocation_date") is not None:
+        raise HTTPException(status_code=400, detail="This App Store transaction has been refunded or revoked.")
+    if payload.get("quantity") not in (None, 1) or payload.get("type") not in (None, "Consumable"):
+        raise HTTPException(status_code=400, detail="Unsupported App Store credit-pack transaction.")
 
     product = product_by_id(product_id)
     credit = int(product["credit_usd_micros"])
 
     with db() as conn:
         lock_user(conn, user["id"])
+        refund = row_to_dict(execute(conn, "SELECT is_refunded FROM storekit_refund_states WHERE transaction_id = ?", (transaction_id,)).fetchone())
+        if refund.get("is_refunded"):
+            raise HTTPException(status_code=400, detail="This App Store transaction has been refunded.")
         existing = execute(conn, "SELECT user_id FROM storekit_transactions WHERE transaction_id = ?", (transaction_id,)).fetchone()
         if existing:
             existing_user_id = row_to_dict(existing)["user_id"]
@@ -1656,6 +2060,75 @@ def storekit_transaction(
     )
 
 
+@app.post("/v1/billing/storekit/notifications")
+def storekit_notification(request: StoreKitNotificationRequest) -> dict[str, Any]:
+    event = verify_storekit_notification(request.signedPayload)
+    kind = event["notification_type"]
+    if kind not in {"REFUND", "REFUND_REVERSED"}:
+        return {"ok": True, "ignored": True}
+    if not event.get("signed_transaction"):
+        raise HTTPException(status_code=400, detail="Refund notification is missing its transaction.")
+    transaction = verify_storekit_payload(event["signed_transaction"])
+    if storekit_environment_key(transaction.get("environment")) != storekit_environment_key(event["environment"]):
+        raise HTTPException(status_code=400, detail="StoreKit notification environment mismatch.")
+    transaction_id, product_id = transaction.get("transaction_id"), transaction.get("product_id")
+    if not transaction_id or not product_id:
+        raise HTTPException(status_code=400, detail="Invalid refund transaction.")
+    if kind == "REFUND" and transaction.get("revocation_date") is None:
+        raise HTTPException(status_code=400, detail="Refund transaction is missing its revocation date.")
+    account_token = str(transaction.get("app_account_token") or "").lower()
+    with db() as conn:
+        original = row_to_dict(execute(conn, "SELECT user_id, product_id, environment FROM storekit_transactions WHERE transaction_id = ?", (transaction_id,)).fetchone())
+        user_id = original.get("user_id") or account_token
+        if not user_id:
+            return {"ok": True, "ignored": True}
+        suffix = " FOR UPDATE" if is_postgres() else ""
+        if not execute(conn, f"SELECT id FROM users WHERE id = ?{suffix}", (user_id,)).fetchone():
+            return {"ok": True, "ignored": True}
+        if account_token and account_token != user_id.lower():
+            raise HTTPException(status_code=400, detail="Refund transaction account mismatch.")
+        if original and original["product_id"] != product_id:
+            raise HTTPException(status_code=400, detail="Refund transaction product mismatch.")
+        if original.get("environment") and storekit_environment_key(original["environment"]) != storekit_environment_key(event["environment"]):
+            raise HTTPException(status_code=400, detail="Refund transaction environment mismatch.")
+        if not original and not any(p["id"] == product_id for p in product_catalog()):
+            return {"ok": True, "ignored": True}
+        duplicate = execute(conn, "SELECT 1 FROM storekit_notification_events WHERE notification_id = ?", (event["notification_id"],)).fetchone()
+        if duplicate:
+            return {"ok": True, "already_processed": True}
+        previous = row_to_dict(execute(conn, "SELECT * FROM storekit_refund_states WHERE transaction_id = ?", (transaction_id,)).fetchone())
+        if previous and previous["user_id"] != user_id:
+            raise HTTPException(status_code=400, detail="Refund state account mismatch.")
+        # Apple's signedDate is immutable across retries. Only the most recent
+        # snapshot may change state; a late REFUND must not undo a reversal.
+        if previous and previous["signed_date"] >= event["signed_date"]:
+            return {"ok": True, "ignored": True}
+        refunded = kind == "REFUND"
+        previously_refunded = bool(previous.get("is_refunded"))
+        original_grant = row_to_dict(execute(conn,
+            "SELECT amount_usd_micros FROM credit_ledger WHERE user_id = ? AND source_id = ?",
+            (user_id, f"storekit:{transaction_id}")).fetchone()).get("amount_usd_micros", 0)
+        if original_grant > 0 and refunded != previously_refunded:
+            # Credits may become negative after a consumed pack is refunded.
+            # This blocks new spend; it never charges a payment method.
+            insert_ledger(conn, user_id=user_id,
+                amount_usd_micros=-original_grant if refunded else original_grant,
+                kind="storekit_refund" if refunded else "storekit_refund_reversed",
+                description="App Store credit-pack refund" if refunded else "App Store refund reversed",
+                source_id=f"storekit-notification:{event['notification_id']}")
+        execute(conn,
+            "INSERT INTO storekit_refund_states (transaction_id, user_id, product_id, is_refunded, signed_date) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT (transaction_id) DO UPDATE SET "
+            "is_refunded = excluded.is_refunded, signed_date = excluded.signed_date",
+            (transaction_id, user_id, product_id, int(refunded), event["signed_date"]))
+        execute(conn,
+            "INSERT INTO storekit_notification_events (notification_id, user_id, transaction_id, notification_type, signed_date, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (event["notification_id"], user_id, transaction_id, kind, event["signed_date"], utc_now()))
+    logger.info("storekit_refund_state_updated", extra={"transaction_id": transaction_id, "notification_type": kind})
+    return {"ok": True}
+
+
 @app.post("/v1/billing/dev-credit", response_model=PurchaseCreditResponse)
 def grant_dev_credit(
     request: DevCreditRequest,
@@ -1693,92 +2166,204 @@ async def create_transcription(
     user: Annotated[dict[str, Any], Depends(current_user)],
     file: Annotated[UploadFile, File()],
     audio_seconds: Annotated[float, Form(ge=0, le=86400, allow_inf_nan=False)] = 0,
-    language: Annotated[Optional[str], Form()] = None,
-    model: Annotated[Optional[str], Form()] = None,
+    language: Annotated[Optional[str], Form(max_length=32)] = None,
+    model: Annotated[Optional[str], Form(max_length=128)] = None,
+    idempotency_key: Annotated[Optional[str], Header(alias="Idempotency-Key", max_length=128)] = None,
+) -> JSONResponse:
+    # Reject excess work before loading/decoding the upload. No waiting queue
+    # retains many 24 MB audio buffers on the small production server.
+    if not _transcription_slots.acquire(blocking=False):
+        raise HTTPException(status_code=503, detail="Transcription service is busy. Please retry shortly.", headers={"Retry-After": "3"})
+    try:
+        return await perform_transcription(user, file, audio_seconds, language, model, idempotency_key)
+    finally:
+        _transcription_slots.release()
+
+
+async def perform_transcription(
+    user: dict[str, Any], file: UploadFile, audio_seconds: float,
+    language: Optional[str], model: Optional[str], idempotency_key: Optional[str],
 ) -> JSONResponse:
     selected_model = resolve_model(model)
-    audio = await file.read()
+    audio = await file.read(MAX_AUDIO_BYTES + 1)
     if not audio:
         raise HTTPException(status_code=400, detail="Audio file is empty.")
     if len(audio) > MAX_AUDIO_BYTES:
         raise HTTPException(status_code=413, detail=f"Audio file exceeds {MAX_AUDIO_BYTES} bytes.")
+    request_key = idempotency_key.strip() if idempotency_key else None
+    if idempotency_key is not None and (not request_key or not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", request_key)):
+        raise HTTPException(status_code=400, detail="Invalid transcription request key.")
+    requested_model = model.strip() if model is not None else None
+    fingerprint = hashlib.sha256(audio + json.dumps(
+        {"model": requested_model, "language": language, "audio_seconds": float(audio_seconds)},
+        separators=(",", ":"),
+    ).encode()).hexdigest()
 
-    reservation_cost = estimate_reservation_cost(selected_model, audio_seconds, len(audio))
+    measured_seconds = await measure_audio_duration(audio)
     transcription_id = str(uuid.uuid4())
     with db() as conn:
+        lock_user(conn, user["id"])
+        if request_key:
+            previous = row_to_dict(execute(
+                conn, "SELECT * FROM transcription_requests WHERE user_id = ? AND request_key = ?",
+                (user["id"], request_key),
+            ).fetchone())
+            if previous:
+                completed = {}
+                if previous["transcription_id"]:
+                    completed = row_to_dict(execute(
+                        conn, "SELECT * FROM transcriptions WHERE id = ? AND user_id = ?",
+                        (previous["transcription_id"], user["id"]),
+                    ).fetchone())
+                if previous["fingerprint_version"] == 1:
+                    # Old fingerprints included the then-current server default.
+                    # Infer a pending legacy model only by an exact full-content
+                    # hash match; completed records supply their original model.
+                    candidates = [requested_model] if requested_model is not None else (
+                        [completed["model"]] if completed else list(MODEL_PRICING)
+                    )
+                    matched = next((candidate for candidate in candidates if hashlib.sha256(
+                        audio + json.dumps([candidate, language, float(audio_seconds)], separators=(",", ":")).encode()
+                    ).hexdigest() == previous["fingerprint"]), None)
+                    if matched is None:
+                        raise HTTPException(status_code=409, detail="This request key was already used for a different recording.")
+                    selected_model = matched
+                elif previous["fingerprint"] != fingerprint:
+                    raise HTTPException(status_code=409, detail="This request key was already used for a different recording.")
+                else:
+                    selected_model = previous["selected_model"] or selected_model
+                if completed:
+                    return transcription_response(completed, balance_for_user(conn, user["id"]))
+                remaining = TRANSCRIPTION_PROCESSING_LEASE_SECONDS - (
+                    datetime.now(timezone.utc) - datetime.fromisoformat(previous["updated_at"])
+                ).total_seconds()
+                if remaining > 0:
+                    retry_after = str(max(1, math.ceil(remaining)))
+                    raise HTTPException(status_code=409,
+                        detail=f"This recording is still being transcribed. Retry in up to {retry_after} seconds.",
+                        headers={"Retry-After": retry_after})
+                # A crashed worker can leave a claim behind. A replacement may
+                # claim an expired attempt; the old worker must verify ownership
+                # again before it can write any debit.
+                release_credit_reservation(conn, reservation_id=previous["attempt_id"], user_id=user["id"])
+        reservation_cost = estimate_reservation_cost(selected_model, measured_seconds)
         reservation_id = reserve_credit(
             conn,
             user_id=user["id"],
             amount_usd_micros=reservation_cost,
             kind="transcription",
         )
+        if request_key:
+            execute(
+                conn,
+                """
+                INSERT INTO transcription_requests
+                    (user_id, request_key, fingerprint, attempt_id, transcription_id, updated_at, fingerprint_version, selected_model)
+                VALUES (?, ?, ?, ?, NULL, ?, 2, ?)
+                ON CONFLICT (user_id, request_key) DO UPDATE SET
+                    attempt_id = excluded.attempt_id, updated_at = excluded.updated_at,
+                    fingerprint = excluded.fingerprint, fingerprint_version = excluded.fingerprint_version,
+                    selected_model = excluded.selected_model
+                """,
+                (user["id"], request_key, fingerprint, reservation_id, utc_now(), selected_model),
+            )
 
     try:
-        payload = await transcribe_audio(audio, file.filename or "recording.m4a", file.content_type, selected_model, language)
-    except Exception:
+        try:
+            payload = await asyncio.wait_for(
+                transcribe_audio(audio, file.filename or "recording.m4a", file.content_type, selected_model, language),
+                timeout=PROVIDER_REQUEST_TIMEOUT_SECONDS,
+            )
+        except (httpx.HTTPError, asyncio.TimeoutError) as exc:
+            raise HTTPException(status_code=502, detail="Transcription service is temporarily unavailable. Try again.") from exc
+        transcript = validated_transcript(payload)
+        input_tokens, output_tokens = extract_usage(payload)
+        billable_seconds = provider_audio_duration(payload, measured_seconds)
+        cost, pricing_basis, charged_input, charged_output = calculate_cost(
+            model=selected_model,
+            audio_seconds=billable_seconds,
+            transcript=transcript,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+
+        charged_cost = cost
+        with db() as conn:
+            lock_user(conn, user["id"])
+            if request_key:
+                claim = row_to_dict(execute(
+                    conn, "SELECT attempt_id FROM transcription_requests WHERE user_id = ? AND request_key = ?",
+                    (user["id"], request_key),
+                ).fetchone())
+                if claim.get("attempt_id") != reservation_id:
+                    raise HTTPException(status_code=409, detail="A newer attempt is handling this recording. Try again shortly.", headers={"Retry-After": "3"})
+            # Release this request's hold before calculating spendable funds. An
+            # expired hold may already have been cleared by another request, so it
+            # cannot safely be added back to the available balance.
+            release_credit_reservation(conn, reservation_id=reservation_id, user_id=user["id"])
+            available_balance = max(0, balance_for_user(conn, user["id"]))
+            if cost > available_balance:
+                charged_cost = available_balance
+                logger.warning(
+                    "transcription_charge_capped_by_available_balance",
+                    extra={
+                        "user_id": user["id"],
+                        "model": selected_model,
+                        "estimated_cost": reservation_cost,
+                        "calculated_cost": cost,
+                        "charged_cost": charged_cost,
+                    },
+                )
+            execute(
+                conn,
+                """
+                INSERT INTO transcriptions
+                    (id, user_id, provider_account_id, model, audio_seconds, transcript, input_tokens,
+                     output_tokens, cost_usd_micros, pricing_basis, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    transcription_id,
+                    user["id"],
+                    OPENAI_PROVIDER_ACCOUNT_ID,
+                    selected_model,
+                    billable_seconds,
+                    transcript,
+                    charged_input,
+                    charged_output,
+                    charged_cost,
+                    pricing_basis,
+                    utc_now(),
+                ),
+            )
+            insert_ledger(
+                conn,
+                user_id=user["id"],
+                amount_usd_micros=-charged_cost,
+                kind="transcription",
+                description=f"{selected_model} transcription",
+                source_id=f"transcription:{transcription_id}",
+            )
+            if request_key:
+                execute(
+                    conn,
+                    "UPDATE transcription_requests SET transcription_id = ?, updated_at = ? "
+                    "WHERE user_id = ? AND request_key = ? AND attempt_id = ?",
+                    (transcription_id, utc_now(), user["id"], request_key, reservation_id),
+                )
+            balance = balance_for_user(conn, user["id"])
+
+    finally:
+        # Covers upstream failures, malformed results, accounting failures and
+        # cancellation as well as success; a failed request must not strand credit.
         with db() as conn:
             release_credit_reservation(conn, reservation_id=reservation_id, user_id=user["id"])
-        logger.exception("transcription_provider_failed", extra={"user_id": user["id"], "model": selected_model})
-        raise
-    transcript = payload["text"].strip()
-    input_tokens, output_tokens = extract_usage(payload)
-    cost, pricing_basis, charged_input, charged_output = calculate_cost(
-        model=selected_model,
-        audio_seconds=audio_seconds,
-        transcript=transcript,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-    )
-
-    charged_cost = cost
-    with db() as conn:
-        lock_user(conn, user["id"])
-        extra_cost = max(0, cost - reservation_cost)
-        available_balance = balance_for_user(conn, user["id"])
-        if extra_cost > available_balance:
-            charged_cost = reservation_cost + max(0, available_balance)
-            logger.warning(
-                "transcription_charge_capped_by_available_balance",
-                extra={
-                    "user_id": user["id"],
-                    "model": selected_model,
-                    "estimated_cost": reservation_cost,
-                    "calculated_cost": cost,
-                    "charged_cost": charged_cost,
-                },
-            )
-        execute(
-            conn,
-            """
-            INSERT INTO transcriptions
-                (id, user_id, provider_account_id, model, audio_seconds, transcript, input_tokens,
-                 output_tokens, cost_usd_micros, pricing_basis, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                transcription_id,
-                user["id"],
-                OPENAI_PROVIDER_ACCOUNT_ID,
-                selected_model,
-                float(audio_seconds),
-                transcript,
-                charged_input,
-                charged_output,
-                charged_cost,
-                pricing_basis,
-                utc_now(),
-            ),
-        )
-        insert_ledger(
-            conn,
-            user_id=user["id"],
-            amount_usd_micros=-charged_cost,
-            kind="transcription",
-            description=f"{selected_model} transcription",
-            source_id=f"transcription:{transcription_id}",
-        )
-        release_credit_reservation(conn, reservation_id=reservation_id, user_id=user["id"])
-        balance = balance_for_user(conn, user["id"])
+            if request_key:
+                execute(
+                    conn, "DELETE FROM transcription_requests WHERE user_id = ? AND request_key = ? "
+                    "AND attempt_id = ? AND transcription_id IS NULL",
+                    (user["id"], request_key, reservation_id),
+                )
 
     logger.info(
         "transcription_completed",
@@ -1789,17 +2374,7 @@ async def create_transcription(
             "pricing_basis": pricing_basis,
         },
     )
-    return JSONResponse(
-        TranscriptionResponse(
-            id=transcription_id,
-            transcript=transcript,
-            model=selected_model,
-            charge=ChargePayload(
-                cost_usd_micros=charged_cost,
-                cost_credit_units=credit_units_from_usd_micros(charged_cost),
-                formatted=format_credits(charged_cost),
-                pricing_basis=pricing_basis,
-            ),
-            balance=balance_payload(balance),
-        ).model_dump()
-    )
+    return transcription_response({
+        "id": transcription_id, "transcript": transcript, "model": selected_model,
+        "cost_usd_micros": charged_cost, "pricing_basis": pricing_basis,
+    }, balance)

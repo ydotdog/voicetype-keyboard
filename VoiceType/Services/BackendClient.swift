@@ -29,24 +29,22 @@ enum BackendClientError: LocalizedError {
         case 400:
             return message.isEmpty ? "The request could not be completed." : message
         case 401:
-            // A 401 on a StoreKit submission is the server failing to verify the
-            // receipt, not an auth problem. The purchase already succeeded with
-            // Apple, so the unfinished transaction replays and credits later;
-            // never tell the buyer their session expired here.
             if context == .storeKitPurchase {
-                return "Your purchase went through, but the server couldn't confirm it yet. Your credit will be added automatically — reopen VoiceType or tap Restore purchases in a moment."
+                return "Your purchase is awaiting verification. Check that you are signed in to the account used to buy it, then tap Check purchases. You do not need to buy it again."
             }
             return "Your session expired. Sign in again."
         case 402:
             return "Add credit before transcribing. Your credit never expires."
+        case 409:
+            return message.isEmpty ? "This request conflicts with an earlier request. Please try again." : message
         case 413:
             return "That recording is too large. Try a shorter clip."
         case 429:
             return "The transcription service is busy. Try again in a moment."
         case 500:
-            return "VoiceType is not fully configured on the server yet."
+            return "VoiceType couldn't complete this request. Please try again."
         case 502, 503, 504:
-            return "Transcription is temporarily unavailable. Try again in a moment."
+            return "The service is temporarily unavailable. Please try again in a moment."
         default:
             return message.isEmpty ? "Backend error \(status)." : message
         }
@@ -55,10 +53,15 @@ enum BackendClientError: LocalizedError {
 
 enum BackendClient {
     private static var baseURL: URL? {
-        if let string = Bundle.main.object(forInfoDictionaryKey: "VoiceTypeBackendURL") as? String {
-            return URL(string: string)
-        }
-        return URL(string: "http://127.0.0.1:8000")
+        guard let string = Bundle.main.object(forInfoDictionaryKey: "VoiceTypeBackendURL") as? String,
+              let url = URL(string: string),
+              url.host != nil else { return nil }
+        #if DEBUG
+        guard url.scheme == "https" || (url.scheme == "http" && ["127.0.0.1", "localhost", "::1"].contains(url.host ?? "")) else { return nil }
+        #else
+        guard url.scheme == "https" else { return nil }
+        #endif
+        return url
     }
 
     static func signInWithApple(
@@ -127,7 +130,7 @@ enum BackendClient {
     }
     #endif
 
-    static func transcribe(fileURL: URL, duration: TimeInterval, token: String) async throws -> TranscriptionResponse {
+    static func transcribe(fileURL: URL, duration: TimeInterval, token: String, requestID: UUID = UUID()) async throws -> TranscriptionResponse {
         guard let baseURL else { throw BackendClientError.missingBackendURL }
         guard let audioData = try? Data(contentsOf: fileURL) else { throw BackendClientError.missingFile }
 
@@ -136,10 +139,11 @@ enum BackendClient {
         request.httpMethod = "POST"
         request.timeoutInterval = min(max(duration + 90, 120), 600)
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue(requestID.uuidString, forHTTPHeaderField: "Idempotency-Key")
         applyUserAuth(token, to: &request)
 
         var body = Data()
-        body.appendMultipartField(name: "audio_seconds", value: String(format: "%.2f", duration), boundary: boundary)
+        body.appendMultipartField(name: "audio_seconds", value: String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), duration), boundary: boundary)
         body.appendMultipartFile(
             name: "file",
             filename: fileURL.lastPathComponent,

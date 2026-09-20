@@ -1,6 +1,71 @@
 # Deployment Status
 
-Last updated: 2026-06-16
+## Current iOS installation — build 24, 2026-09-14
+
+Version 1.0.0 (24) is installed on iPhone10 and verified by device inventory. It
+adds keyboard-origin automatic microphone activation with the saved session length.
+105 iOS tests, 6 packaging/shared-state checks and strict Release archive/signatures
+passed. It was subsequently reinstalled and successfully launched on the user's
+request. The same archive was uploaded at 05:32 EDT, processed as VALID, and is now
+IN_BETA_TESTING for Internal Testers. Test instructions were saved. The newly invited
+developer user must first accept the Apple account invitation before being added to
+the group. Physical verification remains with the user. Backend unchanged; no formal
+App Store submission was made. See [DEVICE_FIX_24.zh-CN.md](DEVICE_FIX_24.zh-CN.md).
+
+## Earlier iOS installation — build 23, 2026-09-14
+
+Build 23 is installed on iPhone10 and confirmed by the device inventory. Launch is
+pending unlock. Archive/signatures and 81 iOS plus 6 packaging/shared-state checks
+passed; physical verification remains pending. Backend deployment is unchanged.
+No Apple upload or submission. See [DEVICE_FIX_23.zh-CN.md](DEVICE_FIX_23.zh-CN.md).
+
+
+Last updated: 2026-09-13
+
+## Earlier device repair — build 22
+
+Build 22 is installed and launched on iPhone10 after the user's build 21 dictation/music failures. It restores direct app opening via native SwiftUI Link, adds audio mixing, and avoids unnecessary background recorder rearming. 68 iOS tests, 6 packaging/shared-state checks and archive signatures passed. Physical end-to-end results remain pending. Archive: `build/VoiceType-1.0.0-22.xcarchive`. No Apple upload or submission. See [DEVICE_FIX_22.zh-CN.md](DEVICE_FIX_22.zh-CN.md).
+
+## Earlier verified status — 2026-09-13
+
+- App Review remains paused. Current candidate **1.0.0 (21)** adds Home/keyboard simplification and measured microphone waveform feedback. The full suite passed 66 iOS checks and 6 packaging/shared-state checks; the subsequent compact layout (160 pt, logo top-left, waveform without visible Stop title) passed all 17 keyboard checks and final Release archive/signature/version checks. Archive: `build/VoiceType-1.0.0-21-compact.xcarchive`. Build 21 was installed over USB and launched on 2026-09-14 03:53 EDT; device inventory confirmed 1.0.0 (21). Physical sound/dictation verification remains pending. No build 21 upload or submission has occurred. See [UI_REVIEW_21.md](UI_REVIEW_21.md).
+- Earlier candidate **1.0.0 (20)** passed **57 Swift
+  tests** (44 application + 13 keyboard), Release archive creation, and strict
+  code-signature verification. The archive is
+  `/private/tmp/VoiceTypeBuild20-readiness-20260913.xcarchive`.
+- Physical installation succeeded over USB on 2026-09-13 at 19:51 America/New_York.
+  Device inventory confirmed version 1.0.0 (20), and the app launch command
+  succeeded. Notes/keyboard/session validation remains pending. Build 20 has not
+  been uploaded to Apple.
+- Production backend `/app/main.py` now matches SHA-256
+  `eecaf9d9a1999d085ced15ae37cc2e33e70e6023db1f26c0a25f709a7d7c6dca`.
+  Final image `sha256:5cbc491c61c448e570c4f28af38c1700a0021ce808c183fa5197f4cd1c939155`
+  passed isolated PostgreSQL/media/streaming checks and was deployed without
+  recreating PostgreSQL or Caddy. Public readiness reports all **13 checks true**.
+- Subsequent log-rotation maintenance recreated all three services with the same
+  images, private environment files, data mounts and ports. Each now retains at
+  most 3 × 10 MiB JSON log files. Public readiness again passed all 13 checks.
+  Evidence: `/private/tmp/voicetype-log-bounds20-verified.log`.
+- Private verified backups of the previous image/source/environment/database are
+  under `/opt/voicetype/backups/build20-20260913T222748Z-bf4a08a2b883`. The dedicated
+  welcome-credit identity key was provisioned once and backed up with mode 600.
+  Preserve it across deployments and recovery. See
+  [LAUNCH_READINESS.md](LAUNCH_READINESS.md) for evidence and rollback limitations.
+- The actual pinned deployment dump was successfully restored and fully compared
+  in a temporary network-isolated PostgreSQL 16 container. Temporary data were
+  removed; the restoration drill itself did not restart live services.
+- App Store Connect now has the V2 server notification URL set and read back for
+  both Production and Sandbox. Apple TEST delivery and actual refund/reversal
+  settlement remain unverified; App Review remains paused.
+- Build 19 was uploaded on 2026-09-13 at 16:45 America/New_York, but was not linked
+  or submitted for review. It predates the physical-keyboard crash fix and must
+  not be submitted. Its [historical evidence](RELEASE_2026-09-13.md) is retained.
+
+## Historical record — 2026-06-16
+
+The entries below retain the earlier deployment/build history. Their build
+numbers, App Review states, and outstanding tasks are not the current release
+status; use the dated section above.
 
 ## GCP
 
@@ -111,8 +176,9 @@ Latest upload:
 - Credit grants are still gated by `STOREKIT_ACCEPTED_ENVIRONMENTS`. For App
   Review and the next public release candidate, the VM currently uses
   `STOREKIT_ACCEPTED_ENVIRONMENTS=SANDBOX,PRODUCTION` so App Review sandbox
-  purchases and public production purchases both grant credit. After the public
-  launch is stable, tighten it to `PRODUCTION` and restart the backend. The
+  purchases and public production purchases both grant credit. The old advice
+  to remove Sandbox after launch is superseded: keep both environments while
+  supporting TestFlight and App Review. The
   backend was redeployed from this code on 2026-06-16; already-paid stuck
   transactions grant retroactively via the client's unfinished-transaction
   replay (reopen the app or tap Restore purchases).
@@ -293,7 +359,7 @@ To rotate it later:
 gcloud compute ssh voicetype-api --zone us-central1-a --project voicetype-y-dog-20260604 --command '
 sudo sed -i "s/^OPENAI_API_KEY=.*/OPENAI_API_KEY=YOUR_KEY_HERE/" /opt/voicetype/env/backend.env
 cd /opt/voicetype/app
-sudo docker compose -f deploy/gcp-vm/docker-compose.yml restart backend
+sudo docker compose -f deploy/gcp-vm/docker-compose.yml up -d --no-deps --force-recreate backend
 '
 ```
 
@@ -302,5 +368,6 @@ Still required for App Store release:
 - Monitor App Review and respond to any reviewer messages or rejections.
 - Validate build `12` keyboard-mic stale-recorder recovery on device and replace
   build `9` before public release.
-- After public launch is stable, set `STOREKIT_ACCEPTED_ENVIRONMENTS=PRODUCTION`
-  on the VM and restart the backend.
+- Superseded environment advice: retain `SANDBOX,PRODUCTION` while supporting
+  TestFlight and App Review, including after public launch. Recreate the backend
+  to load an environment-file change; a container restart does not reload it.
