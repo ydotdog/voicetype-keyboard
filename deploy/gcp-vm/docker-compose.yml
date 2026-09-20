@@ -2,6 +2,11 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     env_file:
       - /opt/voicetype/env/db.env
     volumes:
@@ -16,6 +21,11 @@ services:
     build:
       context: ../../backend
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       TRUSTED_PROXY_CIDRS: 127.0.0.1/32,::1/128,172.16.0.0/12
     env_file:
@@ -34,6 +44,11 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
       backend:
         condition: service_healthy

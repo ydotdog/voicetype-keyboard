@@ -94,20 +94,65 @@ struct VoiceTypeMark: View {
 }
 
 struct LiveWaveform: View {
+    let sessionID: String
     var color = AppTheme.coral
     var dense = false
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var levels = Array(repeating: 0.0, count: 18)
+    @State private var currentLevel = 0.0
 
-    private let bars: [CGFloat] = [18, 34, 48, 26, 58, 68, 34, 50, 72, 40, 24, 52, 62, 28, 44, 56, 22, 48]
+    private var samplingMode: Int {
+        scenePhase == .active ? (reduceMotion ? 1 : 2) : 0
+    }
 
     var body: some View {
-        HStack(alignment: .center, spacing: dense ? 3 : 5) {
-            ForEach(Array(bars.enumerated()), id: \.offset) { index, height in
-                Capsule(style: .continuous)
-                    .fill(color.opacity(index.isMultiple(of: 3) ? 0.72 : 1))
-                    .frame(width: dense ? 3 : 4, height: dense ? height * 0.54 : height)
+        Group {
+            if reduceMotion {
+                ProgressView(value: currentLevel)
+                    .progressViewStyle(.linear)
+                    .tint(color)
+                    .frame(maxWidth: 180)
+            } else {
+                HStack(alignment: .center, spacing: dense ? 3 : 5) {
+                    ForEach(Array(levels.enumerated()), id: \.offset) { _, level in
+                        Capsule(style: .continuous)
+                            .fill(color)
+                            .frame(width: dense ? 3 : 4, height: 3 + CGFloat(level) * (dense ? 29 : 69))
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Microphone input level")
+        .accessibilityValue("\(Int(currentLevel * 100)) percent")
+        .transaction { $0.animation = nil }
+        .task(id: "\(sessionID)-\(samplingMode)") {
+            levels = Array(repeating: 0, count: 18)
+            currentLevel = 0
+            guard samplingMode != 0, !sessionID.isEmpty else { return }
+            var lastSampleAt: TimeInterval?
+            while !Task.isCancelled {
+                if let sample = RecordingAudioLevelStore.latest(for: sessionID) {
+                    currentLevel = sample.level
+                    if sample.sampledAt != lastSampleAt {
+                        levels.removeFirst()
+                        levels.append(sample.level)
+                        lastSampleAt = sample.sampledAt
+                    }
+                } else {
+                    currentLevel = 0
+                    levels = Array(repeating: 0, count: 18)
+                    lastSampleAt = nil
+                }
+                do {
+                    try await Task.sleep(for: .milliseconds(reduceMotion ? 200 : 50))
+                } catch {
+                    return
+                }
+            }
+        }
     }
 }
 
@@ -165,11 +210,20 @@ struct PlainHapticButtonStyle: ButtonStyle {
 private struct HapticPressModifier: ViewModifier {
     let isPressed: Bool
     let style: UIImpactFeedbackGenerator.FeedbackStyle
+    @State private var feedback: UIImpactFeedbackGenerator?
 
     func body(content: Content) -> some View {
-        content.onChange(of: isPressed) { _, newValue in
-            guard newValue else { return }
-            UIImpactFeedbackGenerator(style: style).impactOccurred(intensity: 0.85)
-        }
+        content
+            .onAppear {
+                let generator = UIImpactFeedbackGenerator(style: style)
+                feedback = generator
+                generator.prepare()
+            }
+            .onChange(of: isPressed) { _, newValue in
+                guard newValue else { return }
+                feedback?.impactOccurred(intensity: 0.85)
+                feedback?.prepare()
+            }
+            .onDisappear { feedback = nil }
     }
 }

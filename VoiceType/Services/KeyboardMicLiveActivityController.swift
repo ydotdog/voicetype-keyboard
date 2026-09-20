@@ -33,6 +33,7 @@ final class KeyboardMicLiveActivityController {
         startedAt: Date?,
         durationLimit: RecordingDurationLimit,
         epoch: UInt64,
+        expiresAt: Date? = nil,
         force: Bool = false
     ) async {
         await serialize(epoch: epoch) { [weak self] in
@@ -41,6 +42,7 @@ final class KeyboardMicLiveActivityController {
                 mode: mode,
                 startedAt: startedAt,
                 durationLimit: durationLimit,
+                expiresAt: expiresAt,
                 force: force
             )
         }
@@ -73,6 +75,7 @@ final class KeyboardMicLiveActivityController {
         mode: RecordingBridgeMode,
         startedAt: Date?,
         durationLimit: RecordingDurationLimit,
+        expiresAt: Date?,
         force: Bool
     ) async {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
@@ -87,13 +90,14 @@ final class KeyboardMicLiveActivityController {
             updatedAt: Date(),
             durationLimit: durationLimit
         )
-        if !force, shouldSkipUpdate(state) {
+        if !force, activity?.attributes.sessionID == sessionID, shouldSkipUpdate(state) {
             return
         }
 
         do {
-            let activity = try await currentActivity(sessionID: sessionID, state: state)
-            await activity.update(ActivityContent(state: state, staleDate: nil))
+            let staleDate = RecordingSessionPolicy.statusStaleDate(now: Date(), expiresAt: expiresAt, mode: mode)
+            let activity = try await currentActivity(sessionID: sessionID, state: state, staleDate: staleDate)
+            await activity.update(ActivityContent(state: state, staleDate: staleDate))
             self.activity = activity
             lastPublishedState = state
             lastPublishedAt = Date()
@@ -123,7 +127,8 @@ final class KeyboardMicLiveActivityController {
 
     private func currentActivity(
         sessionID: String,
-        state: VoiceTypeKeyboardActivityAttributes.ContentState
+        state: VoiceTypeKeyboardActivityAttributes.ContentState,
+        staleDate: Date
     ) async throws -> Activity<VoiceTypeKeyboardActivityAttributes> {
         if let activity, activity.attributes.sessionID == sessionID {
             return activity
@@ -142,7 +147,7 @@ final class KeyboardMicLiveActivityController {
 
         return try Activity.request(
             attributes: VoiceTypeKeyboardActivityAttributes(sessionID: sessionID),
-            content: ActivityContent(state: state, staleDate: nil),
+            content: ActivityContent(state: state, staleDate: staleDate),
             pushType: nil
         )
     }
@@ -154,7 +159,8 @@ final class KeyboardMicLiveActivityController {
         else {
             return false
         }
-        if lastPublishedState.mode != state.mode || lastPublishedState.durationLimit != state.durationLimit {
+        if lastPublishedState.mode != state.mode || lastPublishedState.durationLimit != state.durationLimit
+            || lastPublishedState.startedAt != state.startedAt {
             return false
         }
         return Date().timeIntervalSince(lastPublishedAt) < 15

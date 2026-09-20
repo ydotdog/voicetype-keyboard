@@ -1,155 +1,139 @@
-# Release Checklist
+# Release checklist
 
-## Apple Developer
+## Current iOS candidate 24
 
-- Create or confirm App ID `com.kyleqi.voicetype`.
-- Create or confirm App Extension ID `com.kyleqi.voicetype.keyboard`.
-- Enable Sign in with Apple on the containing app.
-- Sign in with Apple key is created and deployed to the backend so account
-  deletion revokes the Apple token grant (Guideline 5.1.1(v)).
-- Enable App Groups on both targets.
-- Add App Group `group.com.kyleqi.voicetype` to both targets.
-- Confirm the keyboard extension is embedded in the containing app.
-- Keep `RequestsOpenAccess=true` for the keyboard extension.
+- [x] Native keyboard Link automatically enables the microphone after opening VoiceType; user returns manually.
+- [x] Default 5 minutes or latest saved duration; duplicate activation preserves the current window.
+- [x] Integration coverage for foreground/sign-in/permission and fresh activation after expiry; ordinary links cannot start capture.
+- [x] 105 iOS checks, 6 packaging/shared-state checks, Release archive and strict signatures passed.
+- [x] Version 24 installed and confirmed by iPhone inventory.
+- [x] Reinstall and launch version 24; upload the same archive to TestFlight, verify VALID / IN_BETA_TESTING for Internal Testers, and save test instructions.
+- [ ] Newly invited developer user accepts the Apple account invitation, then joins Internal Testers.
+- [ ] User verifies keyboard → automatic activation → manual return → dictation and insertion.
+- [ ] Complete remaining physical audio/session and real payment checks before submission.
 
-## App Store Connect
+See [DEVICE_FIX_24.zh-CN.md](DEVICE_FIX_24.zh-CN.md). App Review remains paused.
 
-- Create the app record for bundle id `com.kyleqi.voicetype`.
-- Consumable IAP products are created and submitted with version `1.0`
-  (`WAITING_FOR_REVIEW`):
-  - `com.kyleqi.voicetype.credits.small`, reference name `990,000 Credits`, USD 0.99.
-  - `com.kyleqi.voicetype.credits.medium`, reference name `4,990,000 Credits`, USD 4.99.
-  - `com.kyleqi.voicetype.credits.large`, reference name `19,990,000 Credits`, USD 19.99.
-- The repo includes `scripts/configure_app_store_iaps.py` to create or update
-  the products through the App Store Connect API. It auto-discovers
-  `~/.appstoreconnect/private_keys/AuthKey_*.p8` when there is exactly one local
-  key. Dry-run first with `ASC_ISSUER_ID=<issuer-id> python3
-  scripts/configure_app_store_iaps.py`, then apply with `--apply`.
-- Match product display names and credit pack sizes with backend `CREDIT_PRODUCTS_JSON` if changed.
-- Confirm the Paid Apps Agreement, bank account, U.S. tax form, and Digital
-  Services Act compliance are `Active` in App Store Connect Business.
-- App Store version `1.0` is linked to uploaded build `1.0.0 (9)`.
-- App Store version `1.0` has the three consumable credit products selected in
-  `In-App Purchases and Subscriptions`.
-- English description, keywords, support URL, marketing URL, privacy policy URL,
-  subtitle, and promotional text are set.
-- iPhone 6.7-inch and iPad Pro 12.9-inch screenshots are uploaded and processed.
-- Age rating declaration is set.
-- Primary category is set to Productivity.
-- App Privacy nutrition label is published and matches the privacy manifest:
-  Name (if shared at sign-in), Email Address, User ID, Audio Data, Other User
-  Content (transcripts), and Purchase History — all linked to the user, used for
-  App Functionality, not used for tracking.
-- App Review contact phone number is set, and `docs/APP_REVIEW_NOTES.md` has
-  been pasted into App Review Information.
-- Confirm account deletion is reachable in-app (Settings → Delete account) for
-  Guideline 5.1.1(v).
-- StoreKit sandbox/TestFlight validation passed for build `9`.
-- Version `1.0` was submitted for App Review on 2026-06-16. After a
-  keyboard-mic stale recorder bug was reproduced in build `9`, release was
-  changed back to manual so build `9` cannot automatically go live if approved.
+## Earlier iOS candidate 23
 
-## Backend
+- [x] Icon-only keyboard microphone and actual, responsive sound levels.
+- [x] Recording-session haptics enabled; one prepared feedback event per press.
+- [x] Independent, owner-bound failed recordings in History; no new-capture gating.
+- [x] Regression coverage for actual keyboard upload failure followed by another clip, concurrent History retry, late callbacks, migration and storage failure.
+- [x] 81 iOS checks and 6 packaging/shared-state checks; 43 native screenshots captured and representative states reviewed.
+- [x] Archive/signatures/version 23 verified; installed device inventory confirmed.
+- [ ] Unlock device and verify real sound, vibration, music coexistence and complete dictation.
+- [ ] Complete remaining real account/payment and long-session checks below before any App Review submission.
 
-- Deploy the backend from `backend/Dockerfile`.
-- Use Postgres through `DATABASE_URL`.
-- Configure `JWT_SECRET` with a long random value.
-- Configure `OPENAI_API_KEY` only on the backend.
-- Configure `OPENAI_TRANSCRIBE_MODEL`, default `gpt-4o-mini-transcribe`.
-- Configure `COST_MARKUP_BPS=7143` for standard App Store commission plus 20% profit.
-- Configure `APPLE_CLIENT_ID=com.kyleqi.voicetype`.
-- Configure `APPLE_BUNDLE_ID=com.kyleqi.voicetype`.
-- Configure `APPLE_APP_APPLE_ID` from App Store Connect.
-- Sign in with Apple server credentials are configured so account deletion
-  revokes the Apple token grant: `APPLE_SIGNIN_TEAM_ID`, `APPLE_SIGNIN_KEY_ID`,
-  and the `.p8` via `APPLE_SIGNIN_PRIVATE_KEY` / `_B64` / `_PATH`.
-- Decide the welcome-credit policy: `SIGNUP_GRANT_ENABLED` (default true) and
-  `SIGNUP_GRANT_USD_MICROS` (default 100000 = ~US$0.10). Keep it enabled so App
-  Review can test transcription without a purchase.
-- Provide Apple root certificates through `APPLE_ROOT_CERTIFICATE_PATHS` or `APPLE_ROOT_CERTIFICATE_PEMS_B64`.
-- Keep production StoreKit flags:
-  - `STOREKIT_VERIFICATION_MODE=strict`
-  - `ALLOW_UNVERIFIED_STOREKIT_JWS=false`
-  - `REQUIRE_STOREKIT_APP_ACCOUNT_TOKEN=true`
-  - `ALLOW_DEV_CREDIT=false`
-- StoreKit verification accepts the transaction's own environment first, then the
-  configured environment, then Sandbox and Production, while keeping strict
-  signature verification and `appAccountToken` matching enabled.
-- During App Review and the next public release candidate, keep
-  `STOREKIT_ACCEPTED_ENVIRONMENTS=SANDBOX,PRODUCTION` so reviewer sandbox
-  transactions and public production transactions both grant credit. After the
-  public launch is stable, switch it to `PRODUCTION` and restart the backend.
-- Put the backend behind HTTPS.
-- Set request body limits to at least `MAX_AUDIO_BYTES`.
-- Enable database backups.
+See [DEVICE_FIX_23.zh-CN.md](DEVICE_FIX_23.zh-CN.md). Earlier candidate results below are historical.
 
-## iOS Build
 
-- Replace Release `VOICETYPE_BACKEND_URL` in `project.yml` with the production HTTPS host.
-- Run `xcodegen generate`.
-- Archived and uploaded `1.0.0 (9)` on 2026-06-16 through `xcodebuild
-  -exportArchive` with App Store Connect upload destination. This build includes
-  always-visible Add Credit purchase buttons, stronger keyboard app-open
-  dispatch, no extra keyboard globe key, a system keyboard material background
-  to remove the top and bottom color mismatch, stronger haptic/audio feedback, and
-  immediate keyboard `Transcribing` state after tapping Stop. Build `9` also
-  fixes TestFlight StoreKit receipt verification, purchase 401 messaging, keyboard
-  button proportions, keyboard-mic ready-state recovery after Stop, and the
-  switcher language subtitle. Apple accepted the package, App Store Connect
-  reports build `9` as `VALID`, version `1.0` is linked to build `9`, and the
-  Internal Testers group has access to all builds. Version `1.0` is submitted
-  for App Review and configured for manual release after approval.
-- Build `10` contains the stale keyboard-mic recorder recovery fix and was
-  uploaded on 2026-06-16. App Store Connect reports build `10` as `VALID`.
-  Validate it on device, then replace build `9` before public release.
-- Build `11` adds the Live Activity / Dynamic Island keyboard microphone status
-  surface and a stronger in-memory transcription state machine. It was uploaded
-  on 2026-06-16 and is waiting for App Store Connect processing before TestFlight
-  availability.
-- Build `12` redesigns the Live Activity as a smaller Liquid Glass-style pill
-  with a code-rendered VoiceType waveform mark, then uploads it for TestFlight
-  processing on 2026-06-16.
-- Build `13` improves that Live Activity pass with higher-contrast lock-screen
-  text, a stronger readability scrim, a shorter Dynamic Island status chip, and a
-  stable-width timer pill. It was uploaded for App Store Connect processing on
-  2026-06-16.
-- Build `14` fixes the lock-screen/Home Screen Live Activity foreground rendering
-  by separating the Liquid Glass background from all text/logo/timer content and
-  adding the background through `containerBackground(for: .widget)`. It was
-  uploaded for App Store Connect processing on 2026-06-16.
-- Build `15` fixes the session-length keyboard mic teardown: the length setting
-  now caps only one Speak clip, idle keyboard-ready mode stays armed, picker
-  changes re-check the real recorder before republishing ready state, and broken
-  Stop commands recover ready instead of silently returning. It was uploaded for
-  App Store Connect processing on 2026-06-16.
-- Build `16` adds the Live Activity epoch/serialization fix from commit `f21cdab`
-  so stale recording updates cannot reopen the activity after the mic ends, and
-  switches compact Dynamic Island back to a short status dot instead of a running
-  timer. It was uploaded for App Store Connect processing on 2026-06-16.
-- Build `17` restores `Session length` to the intended keyboard mic lifetime
-  measured from Turn on keyboard mic, adds a separate 10-minute Speak clip cap,
-  removes elapsed timers from Live Activity/Dynamic Island, and aligns expanded
-  Dynamic Island as logo left plus mic status right.
-- Build `18` fixes the keyboard Stop handoff so a failed continuous-recorder
-  restart cannot drop the bridge to `Open VoiceType` or lose the current clip
-  before transcription.
-- Test on device:
-  - Sign in with Apple succeeds.
-  - First sign-in grants the welcome credit (balance is non-zero without a purchase).
-  - Settings → Delete account removes the account; signing in again creates a fresh
-    account and the protected endpoints reject the old session token.
-  - StoreKit sandbox purchase grants credit.
-  - Interrupted or unfinished StoreKit purchases are granted after relaunch/sign-in.
-  - Zero-credit transcription returns an insufficient-credit message.
-  - Recording with credit creates a transcript and debits balance.
-  - Failed transcription provider calls do not debit balance.
-  - Latest transcript appears in the keyboard after Full Access is enabled.
+App Review is paused. Use [LAUNCH_READINESS.md](LAUNCH_READINESS.md) as the current
+Passed / Failed / Untested evidence matrix. The reported physical-iPhone keyboard
+failure remains blocking. Earlier build history is in
+[DEPLOYMENT_STATUS.md](DEPLOYMENT_STATUS.md) and [RELEASE_2026-09-13.md](RELEASE_2026-09-13.md);
+historical uploads and tests do not establish current launch readiness.
 
-## Launch Monitoring
+## Earlier iOS candidate 21
 
-- Alert on backend 5xx rate.
-- Alert on StoreKit verification failures.
-- Track purchase grant count and total granted credits.
-- Track transcription cost by model and provider account.
-- Track insufficient-credit responses.
-- Track OpenAI latency and error rate.
+Superseded by installed build 22 after the user's Starting/session-close and music-interruption reports. Current fixes and unresolved physical checks are in [DEVICE_FIX_22.zh-CN.md](DEVICE_FIX_22.zh-CN.md). Build 22 passed 68 iOS tests and 6 packaging/shared-state checks; real dictation remains unconfirmed.
+
+- [x] Remove standalone recording and duplicate Home entries; center and simplify keyboard controls.
+- [x] Replace fixed bars with measured microphone-level animation and silence/stale/access/Stop resets.
+- [x] Pass 66 iOS checks and 6 packaging/shared-state checks; the final compact layout and capture changes also passed all 17 keyboard tests.
+- [x] Archive and verify signatures/version 1.0.0 (21) for the app and both extensions: `build/VoiceType-1.0.0-21-compact.xcarchive`.
+- [x] Install and launch build 21 over USB (2026-09-14 03:53 EDT); verify device inventory as 1.0.0 (21).
+- [ ] Validate real sound feedback and the complete third-party dictation flow on build 21.
+
+## Backend and earlier candidate 20 evidence
+
+- [x] Freeze final backend `eecaf9d9a199` and app 1.0.0 (20); full pins are in the readiness matrix.
+- [x] Final automated suites: 115 Python-driven checks (109 backend + 5 packaging +
+  1 executed Swift bridge), and 57 Swift application/keyboard tests passed.
+- [x] Build the new ffmpeg image and verify real AAC/WAV decode, invalid media,
+  two near-limit concurrent uploads, third-job rejection and streamed body limits
+  on the target Linux VM at 1 CPU / 512 MiB. Local tests cover overlong rejection
+  and decoder cancellation/timeout. Final tag: `gcp-vm-backend:readiness20-uploadlimit`.
+- [x] Run `scripts/verify_postgres_release.py` against an isolated PostgreSQL 16
+  database whose name begins `voicetype_release_qa_`. Verify additive migrations,
+  grant markers, refund ordering, per-user locks and durable idempotency.
+
+## Physical iPhone verification
+
+- [x] Install and verify version 1.0.0 (20) on the physical iPhone; app launch
+  command succeeded on 2026-09-13 at 19:51 America/New_York.
+- [ ] Fix and reproduce successful keyboard availability, selection, microphone
+  activation and final text insertion in a third-party app.
+- [ ] Verify permission denial/recovery, Full Access disabled, secure text fields,
+  and host apps that do not allow custom keyboards; show actionable guidance.
+- [ ] Verify the selected Session length controls microphone-session lifetime
+  from activation. Check the independent 10-minute clip cap and Forever behavior.
+- [ ] Verify lock/background transitions, interruptions, Bluetooth/audio changes,
+  rapid start/stop, end-session during transcription and extension/app relaunch.
+- [ ] Verify retained recording retry across connection loss and expired login:
+  same audio/duration/request UUID, same-owner recovery, no duplicate debit,
+  explicit discard, explicit sign-out and account-switch cleanup.
+- [ ] Verify real Apple sign-in and account deletion/revocation. Signing in again
+  must not reclaim welcome credit; the deleted session must be rejected.
+- [ ] Verify all three sandbox credit packs, cancellation/pending/unverified
+  purchases, delivery retry, app relaunch and concurrent balance refresh.
+- [ ] Verify refund/reversal and negative-credit messaging without any automatic
+  monetary charge. Match the observed balance to the server ledger.
+
+## Production configuration and rollout
+
+- [x] Preserve and checksum the Postgres dump, private configuration, source and
+  prior image; record the rollback
+  boundary. The previous `4bc9c68ecdba` image lacks version-2 request-fingerprint,
+  refund and grant-marker enforcement; older releases also lack durable
+  idempotency. Additive schema compatibility does not make these safe automatic
+  behavioral rollbacks. Never overwrite newer ledger writes with an old dump.
+- [x] Provide a dedicated stable random `SIGNUP_GRANT_HMAC_SECRET`. Preserve it
+  across JWT rotations, releases and restores; do not use the QA key. Welcome
+  grants fail closed without it in production.
+- [x] Keep `STOREKIT_VERIFICATION_MODE=strict`,
+  `ALLOW_UNVERIFIED_STOREKIT_JWS=false`, `REQUIRE_STOREKIT_APP_ACCOUNT_TOKEN=true`,
+  `APPLE_AUTH_DEV_BYPASS=false` and `ALLOW_DEV_CREDIT=false`.
+- [x] Keep `STOREKIT_ACCEPTED_ENVIRONMENTS=SANDBOX,PRODUCTION` while this service
+  supports TestFlight/App Review and public purchases. Do not disable Sandbox
+  merely because the public app has launched.
+- [x] Confirm backend-only provider credentials, Apple identity/revocation
+  credentials, app ID and trusted Apple root certificates; deploy the matching
+  privacy and support text.
+- [x] Verify `MAX_CONCURRENT_TRANSCRIPTIONS=2`, one worker and
+  `TRANSCRIPTION_PROCESSING_LEASE_SECONDS=300` on the live container. The lease
+  covers the 120-second provider deadline with recovery slack.
+- [x] Configure App Store Server Notifications **V2**, for Sandbox and Production,
+  to `https://voicetype.y.dog/v1/billing/storekit/notifications`. All four URL/version
+  fields were read back and verified through the official ASC API on 2026-09-13.
+- [ ] Request an Apple TEST notification and verify delivery; then test an actual
+  sandbox refund and reversal. A suitable App Store Server API In-App Purchase
+  key is not currently available in the known project credential locations.
+  The existing App Store Connect key is a different credential type.
+- [x] Verify final source/image hash, all 13 readiness checks, HTTPS pages and
+  rejection of an invalid signed notification. Upload limits passed on the exact
+  deployed image in isolated QA.
+- [x] Restore the actual pinned deployment backup in an ephemeral, network-isolated
+  PostgreSQL 16 container. All table-data fingerprints and sequence states match;
+  restored constraints/indexes are valid. Temporary data removed, live containers
+  unchanged. Evidence: `/private/tmp/voicetype-backup-restore20.log`.
+- [x] Bound each service's Docker logs to 10 MiB per file and 3 files. All three
+  services were recreated with unchanged images, private environment files, data
+  mounts and ports; post-maintenance readiness passed all 13 checks.
+- [ ] Verify provider latency/error and refund-delivery failure monitoring.
+  Readiness does not prove payment settlement.
+
+## App Review — resume only after functional sign-off
+
+- [x] Create the final build 20 archive with all verified fixes; strict signing
+  verification passed. Durable archive: `build/VoiceType-1.0.0-20.xcarchive`.
+- [ ] After functional sign-off, upload the final archive, confirm processing and
+  link that build to the app version. Build 20 has not been uploaded.
+- [ ] Refresh actual version/build/IAP states in ASC; do not infer them from old
+  screenshots or historical localization states.
+- [ ] Include Small, Medium and Large consumable IAPs with the app in the same
+  first-submission draft through the ASC UI. The old unresolved app-only
+  submission cannot simply accept new items.
+- [ ] Upload the revised review notes and a working physical-device demonstration
+  made only with the user's iPhone-native recording. Neither has been uploaded.
+- [ ] Review the concrete final submission, then submit. Keep manual release.

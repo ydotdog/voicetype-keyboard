@@ -14,6 +14,10 @@ struct RecordingBridgeState: Codable, Equatable {
     let updatedAt: Date?
     let durationLimit: RecordingDurationLimit
     let mode: RecordingBridgeMode
+    let expiresAt: Date?
+    /// Normalized measured microphone power for the active keyboard clip.
+    /// No audio samples or speech content are shared with the keyboard.
+    let audioLevel: Double
 
     init(
         sessionID: String,
@@ -21,7 +25,9 @@ struct RecordingBridgeState: Codable, Equatable {
         startedAt: Date?,
         updatedAt: Date? = nil,
         durationLimit: RecordingDurationLimit,
-        mode: RecordingBridgeMode
+        mode: RecordingBridgeMode,
+        expiresAt: Date? = nil,
+        audioLevel: Double = 0
     ) {
         self.sessionID = sessionID
         self.isRecording = isRecording
@@ -29,6 +35,8 @@ struct RecordingBridgeState: Codable, Equatable {
         self.updatedAt = updatedAt
         self.durationLimit = durationLimit
         self.mode = mode
+        self.expiresAt = expiresAt
+        self.audioLevel = mode == .keyboardRecording && isRecording ? Self.clampedAudioLevel(audioLevel) : 0
     }
 
     enum CodingKeys: String, CodingKey {
@@ -38,6 +46,8 @@ struct RecordingBridgeState: Codable, Equatable {
         case updatedAt
         case durationLimit
         case mode
+        case expiresAt
+        case audioLevel
     }
 
     init(from decoder: Decoder) throws {
@@ -48,6 +58,13 @@ struct RecordingBridgeState: Codable, Equatable {
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
         durationLimit = try container.decode(RecordingDurationLimit.self, forKey: .durationLimit)
         mode = try container.decodeIfPresent(RecordingBridgeMode.self, forKey: .mode) ?? .standard
+        expiresAt = try container.decodeIfPresent(Date.self, forKey: .expiresAt)
+        let decodedLevel = (try? container.decode(Double.self, forKey: .audioLevel)) ?? 0
+        audioLevel = mode == .keyboardRecording && isRecording ? Self.clampedAudioLevel(decodedLevel) : 0
+    }
+
+    private static func clampedAudioLevel(_ value: Double) -> Double {
+        value.isFinite ? min(1, max(0, value)) : 0
     }
 
     static let inactive = RecordingBridgeState(
@@ -66,6 +83,21 @@ struct RecordingBridgeState: Codable, Equatable {
     var isKeyboardRecording: Bool {
         mode == .keyboardRecording
     }
+
+    func validated(at now: Date) -> RecordingBridgeState {
+        guard isRecording || isKeyboardReady else { return .inactive }
+        let heartbeatAge = now.timeIntervalSince(updatedAt ?? startedAt ?? .distantPast)
+        guard heartbeatAge >= -2, heartbeatAge <= 10 else { return .inactive }
+        // An upload may finish after capture expires. It remains transcribing,
+        // while fresh keyboard-ready/recording snapshots must honor the deadline.
+        if mode != .transcribing {
+            let legacyDeadline = durationLimit.maximumDuration.flatMap { limit in
+                startedAt?.addingTimeInterval(limit)
+            }
+            if let deadline = expiresAt ?? legacyDeadline, now >= deadline { return .inactive }
+        }
+        return self
+    }
 }
 
 struct RecordingBridgeCommand: Codable, Equatable {
@@ -78,6 +110,14 @@ struct RecordingBridgeCommand: Codable, Equatable {
     let id: String
     let action: Action
     let createdAt: Date
+    let sessionID: String?
+
+    init(id: String, action: Action, createdAt: Date, sessionID: String? = nil) {
+        self.id = id
+        self.action = action
+        self.createdAt = createdAt
+        self.sessionID = sessionID
+    }
 }
 
 enum RecordingBridgeStore {
@@ -85,17 +125,30 @@ enum RecordingBridgeStore {
 
     private static let stateKey = "recordingBridgeState"
     private static let commandKey = "recordingBridgeCommand"
-    private static let staleKeyboardStateInterval: TimeInterval = 10
 
     private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            try container.encode(formatter.string(from: date))
+        }
         return encoder
     }()
 
     private static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let value = try container.decode(String.self)
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = formatter.date(from: value) { return date }
+            formatter.formatOptions = [.withInternetDateTime]
+            if let date = formatter.date(from: value) { return date }
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid recording timestamp")
+        }
         return decoder
     }()
 
@@ -108,15 +161,9 @@ enum RecordingBridgeStore {
             else {
                 return .inactive
             }
-            if state.isKeyboardReady {
-                let heartbeat = state.updatedAt ?? state.startedAt ?? .distantPast
-                if Date().timeIntervalSince(heartbeat) > staleKeyboardStateInterval {
-                    defaults.removeObject(forKey: stateKey)
-                    defaults.synchronize()
-                    return .inactive
-                }
-            }
-            return state
+            // Readers never delete snapshots: another process may already have
+            // published a newer heartbeat while this snapshot was being decoded.
+            return state.validated(at: Date())
         }
         set {
             guard let defaults = UserDefaults(suiteName: AppConstants.appGroup) else { return }
@@ -153,7 +200,9 @@ enum RecordingBridgeStore {
 
     private static func writeCommand(_ action: RecordingBridgeCommand.Action) {
         guard let defaults = UserDefaults(suiteName: AppConstants.appGroup) else { return }
-        let command = RecordingBridgeCommand(id: UUID().uuidString, action: action, createdAt: Date())
+        let command = RecordingBridgeCommand(
+            id: UUID().uuidString, action: action, createdAt: Date(), sessionID: state.sessionID
+        )
         guard let data = try? encoder.encode(command) else { return }
         defaults.set(data, forKey: commandKey)
         defaults.synchronize()

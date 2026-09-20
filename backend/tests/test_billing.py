@@ -22,7 +22,7 @@ def fake_jws(payload: dict) -> str:
     return f"{b64url({'alg': 'none'})}.{b64url(payload)}.sig"
 
 
-def load_main(tmp_path, monkeypatch):
+def load_main(tmp_path, monkeypatch, *, validate_audio=False):
     monkeypatch.setenv("JWT_SECRET", "test-secret")
     monkeypatch.setenv("APPLE_AUTH_DEV_BYPASS", "true")
     monkeypatch.setenv("ALLOW_DEV_CREDIT", "true")
@@ -31,13 +31,21 @@ def load_main(tmp_path, monkeypatch):
     # Disable the welcome credit so balance assertions below stay exact; the
     # signup grant has its own dedicated tests.
     monkeypatch.setenv("SIGNUP_GRANT_ENABLED", "false")
+    monkeypatch.setenv("SIGNUP_GRANT_HMAC_SECRET", "test-stable-welcome-key")
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "voicetype.sqlite3"))
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("COST_MARKUP_BPS", raising=False)
 
     if "main" in sys.modules:
         del sys.modules["main"]
-    return importlib.import_module("main")
+    main = importlib.import_module("main")
+    if not validate_audio:
+        # Ledger/lifecycle tests use opaque fake clips; real decoder fixtures
+        # and bounds are exercised separately with validate_audio=True.
+        async def fake_audio_duration(audio):
+            return 1.0
+        monkeypatch.setattr(main, "measure_audio_duration", fake_audio_duration)
+    return main
 
 
 def load_production_main(tmp_path, monkeypatch, *, apple_signin_credentials=True):

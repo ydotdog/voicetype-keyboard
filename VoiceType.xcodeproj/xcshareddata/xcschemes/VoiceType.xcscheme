@@ -67,7 +67,31 @@
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "9BA2AC2D3858C2AF6716262E"
+               BuildableName = "VoiceTypeTests.xctest"
+               BlueprintName = "VoiceTypeTests"
+               ReferencedContainer = "container:VoiceType.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "35A82721452AAF14FCD4B222"
+               BuildableName = "VoiceTypeKeyboardTests.xctest"
+               BlueprintName = "VoiceTypeKeyboardTests"
+               ReferencedContainer = "container:VoiceType.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"

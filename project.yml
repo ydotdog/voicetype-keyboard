@@ -7,7 +7,7 @@ settings:
   base:
     SWIFT_VERSION: 6.0
     MARKETING_VERSION: 1.0.0
-    CURRENT_PROJECT_VERSION: 18
+    CURRENT_PROJECT_VERSION: 24
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     VOICETYPE_APP_GROUP: group.com.kyleqi.voicetype
     VOICETYPE_DEV_CREDIT_KEY: ""
@@ -86,7 +86,7 @@ targets:
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
           NSExtensionAttributes:
             PrimaryLanguage: mul
-            IsASCIICapable: true
+            IsASCIICapable: false
             PrefersRightToLeft: false
             RequestsOpenAccess: true
     settings:
@@ -97,6 +97,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: WC3PWB5R2J
         APPLICATION_EXTENSION_API_ONLY: true
+        SWIFT_OBJC_BRIDGING_HEADER: VoiceTypeKeyboard/VoiceTypeKeyboard-Bridging-Header.h
   VoiceTypeLiveActivity:
     type: app-extension
     platform: iOS
@@ -121,6 +122,39 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: WC3PWB5R2J
         APPLICATION_EXTENSION_API_ONLY: true
+  VoiceTypeTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: VoiceTypeTests
+    dependencies:
+      - target: VoiceType
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kyleqi.voicetype.tests
+        GENERATE_INFOPLIST_FILE: true
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: WC3PWB5R2J
+  VoiceTypeKeyboardTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: VoiceTypeKeyboardTests
+      - path: VoiceTypeKeyboard/KeyboardViewController.swift
+      - path: VoiceTypeKeyboard/KeyboardDocumentContext.h
+      - path: VoiceTypeKeyboard/KeyboardDocumentContext.m
+      - path: Shared
+    dependencies:
+      - target: VoiceType
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kyleqi.voicetype.keyboardtests
+        GENERATE_INFOPLIST_FILE: true
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: WC3PWB5R2J
+        SWIFT_OBJC_BRIDGING_HEADER: VoiceTypeKeyboardTests/VoiceTypeKeyboardTests-Bridging-Header.h
 schemes:
   VoiceType:
     build:
@@ -130,3 +164,7 @@ schemes:
         VoiceTypeLiveActivity: all
     run:
       config: Debug
+    test:
+      targets:
+        - VoiceTypeTests
+        - VoiceTypeKeyboardTests

@@ -1,71 +1,98 @@
 # App Review Notes
 
-Paste the relevant parts into App Store Connect → App Review Information → Notes.
-These notes explain the permissions reviewers commonly question and how to test
-the keyboard transcription flow end to end.
+The draft below reflects the current source UI. Complete the internal evidence
+checks before copying the reviewer-facing section into App Store Connect.
 
-## How to test (no purchase required)
+## Reviewer-facing draft
 
-1. Launch VoiceType and tap **Sign in with Apple**.
-2. On first sign-in the account is granted a **one-time welcome credit** (about
-   100,000 credits, ~US$0.10), which is enough to transcribe several short clips.
-   No in-app purchase is required to evaluate the core feature.
-3. On the Home tab, tap the record control and speak; the transcript appears and
-   the balance is debited.
+### Guideline 2.5.4 — background dictation
 
-To test the **keyboard** (this is the main feature and is not obvious):
+The background audio feature is voice dictation through the VoiceType keyboard
+while another app is in the foreground. Tapping the outlined microphone icon in
+the keyboard opens VoiceType and automatically enables the background microphone.
+The user then manually returns to the original app. **Home → Turn on keyboard mic**
+is also available. Home explains the microphone behavior. Setup instructions are available
+before signing in through **How to set up
+and use the keyboard**, and after signing in through **Settings → VoiceType
+keyboard**.
 
-1. In VoiceType, turn on **keyboard mic** and complete **keyboard setup**
-   (Settings → VoiceType keyboard) — add the VoiceType keyboard in iOS Settings
-   and enable **Allow Full Access**.
-2. Leave VoiceType running and switch to any app with a text field (e.g. Notes).
-3. Switch to the **VoiceType keyboard** and tap it once to start capturing a clip,
-   then tap again to stop.
-4. The transcript is produced by VoiceType and inserted into the text field.
+### Test on iPhone or iPad
 
-## Why the keyboard needs Full Access
+1. Launch VoiceType and use **Sign in with Apple**. An Apple Account signed in on
+   the device and an internet connection are required. Confirm the **Credit** balance
+   has credit for a short transcription.
+2. In the device's **Settings → General → Keyboard → Keyboards → Add New
+   Keyboard**, select **VoiceType**. Open its entry in the Keyboards list and
+   enable **Allow Full Access**.
+3. Open Apple Notes, focus an editable note and use the system globe/input mode
+   control to select **VoiceType**. Tap the outlined **microphone icon**. VoiceType
+   opens and enables its microphone automatically. Allow microphone access when
+   prompted; activation continues after permission is granted. Home displays
+   **Keyboard mic on**. If permission was previously denied, enable
+   VoiceType's microphone permission in the device's Settings and try again.
+4. Manually return to Apple Notes and the same text field. Notes remains in the
+   foreground while VoiceType is in the background. The keyboard microphone icon
+   is now filled, indicating readiness.
+5. Tap the **microphone icon**, say a short sentence, and tap the **waveform** to finish. The keyboard displays
+   **Transcribing**. Keep that same text field open until the text is inserted.
+6. Return to VoiceType. The result is also in **History**. On Home, tap
+   **Turn off keyboard mic**. During an active clip, this control
+   reads **Finish clip & turn off mic** and finishes the clip before ending the
+   session.
 
-iOS custom keyboards cannot use the microphone directly. VoiceType captures audio
-in the **containing app** and shares the resulting transcript with the keyboard
-through an App Group container. The keyboard requests **Full Access** only to read
-that shared transcript (and the shared recording state) so it can insert text. The
-keyboard does not send keystrokes or typing data to our servers.
+Full Access is required for this path. If the selected session ends, tap the
+outlined microphone icon again to open VoiceType and enable a new session.
+Secure fields
+and apps that disallow third-party keyboards use the system keyboard; an ordinary
+note in Apple Notes is suitable for this test.
 
-## Why the app declares the audio background mode (Guideline 2.5.4)
+### Purpose and control of background audio
 
-The transcription feature spans two processes: the keyboard marks what to
-transcribe while the user is in another app, and the containing app must keep its
-audio session alive to capture that speech. The app therefore uses the `audio`
-background mode. Recording is user-initiated: the user explicitly turns on
-keyboard mic, and can choose a session length of 5 minutes, 12 hours, or until
-manually stopped. Audio is used only for transcription and is streamed to the
-backend, not stored as audio files by default.
+The user explicitly enables the microphone in the containing app because custom
+keyboards cannot access it directly. The microphone stays active between clips
+for the selected session. Only segments started with the **microphone icon** are submitted for
+transcription; temporary idle audio is rotated and discarded locally.
 
-## Sign in with Apple
+**Session length** offers **5 min**, **12 hr**, and **Forever**, with **5 min** as
+the default. A previously saved selection is used when activation comes from the
+keyboard. These limit the keyboard microphone session from its original start;
+repeated activation and individual clips do not restart its timer. Individual
+clips are limited to 10 minutes.
+**Forever** means no app-defined session timer, not a guarantee against system
+interruptions. Calls or audio interruptions can end a session; the user can enable
+the microphone again from Home.
 
-Authentication is **Sign in with Apple** only. The app sends Apple's identity
-token (and, when available, the authorization code) to the backend, which verifies
-it and issues a session token.
+**Allow Full Access** enables the keyboard to exchange recording commands, state,
+and transcripts with the containing app through their shared container. The
+keyboard does not upload text typed in the host app.
 
-## Account deletion (Guideline 5.1.1(v))
+### Other review paths
 
-Account deletion is available in-app at **Settings → Delete account** with a
-confirmation prompt. It permanently deletes the user's account, remaining credit,
-transcription history, and stored purchase records, and revokes the app's Sign in
-with Apple token grant on the server.
+- Failed transcription: **History** retains each failed recording with **Retry**
+  and **Delete**. A failed recording does not block enabling the microphone or a new
+  recording. Retry results remain in History for explicit copying.
+- Credits: **Credit** contains consumable App Store packs. **Settings → Check
+  purchases** checks unfinished purchases and refreshes the balance.
+- Account deletion: **Settings → Delete account → Delete**. This requests permanent
+  account deletion and revocation of the stored Apple sign-in authorization.
+  Temporary revocation failures are shown so deletion can be retried.
 
-## Data and privacy
+### Physical-device demonstration
 
-- No third-party advertising or analytics SDKs are integrated.
-- The app does not track users across other apps or websites.
-- Speech-to-text processing is performed by OpenAI on audio the user submits.
-- Privacy manifests are included for the app and the keyboard extension; the only
-  required-reason API used is `UserDefaults` (App Group container access, reason
-  CA92.1; the app also accesses its own defaults, reason 1C8F.1).
+**PENDING — record and attach a demonstration of steps 1–6 on a physical device
+using the submitted build. No demonstration recording or URL is available yet.**
 
-## In-app purchases
+## Internal release evidence — do not paste
 
-Credits are **consumable** StoreKit products. The backend verifies each StoreKit
-transaction (strict signature verification) and binds it to the signed-in account
-via `appAccountToken`. Unfinished or interrupted purchases are reconciled on
-relaunch/sign-in.
+- [ ] Replace the pending demonstration section with a verified attachment or
+  accessible recording link. Record the actual device model, OS version, app
+  version, and build number. Show microphone activation, Notes in the foreground,
+  microphone icon → waveform → inserted text, and ending the microphone session.
+- [ ] Verify fresh-account welcome credit on the deployed backend. Its source
+  default is 100,000 credits, but production may override or disable it. Do not
+  promise a value or purchase-free review until confirmed. Ensure the reviewer
+  can test a short clip without purchasing.
+- [ ] Test the exact submitted build using these steps, including the iPad flow
+  involved in the previous rejection. Keep results separate from this draft.
+- [ ] Confirm the deployed backend and App Store credit packs are available for
+  the review build. Attach only evidence actually obtained.
