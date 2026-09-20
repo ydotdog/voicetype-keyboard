@@ -22,7 +22,7 @@
 
 - iOS 全量 112 项通过；另补充“录音期间通过 Live Activity Intent 关闭并保留片段”的测试，相关 10 项通过。合计 113 个不同测试。
 - 浅色/深色、320 点窄屏设置页与纠错页已渲染并检查。
-- 后端的 Linux 发布镜像使用隔离 SQLite、禁网、模拟供应商运行测试；本机同时执行打包和共享状态检查。最终计数见部署记录。
+- 后端的 Linux 发布镜像使用隔离 SQLite、禁网、模拟供应商运行测试；本机同时执行打包和共享状态检查。最终 Linux 后端 128 项通过；本机后端加打包/共享状态共 134 项通过。
 - 使用人工合成语音实际调用当前 `gpt-4o-mini-transcribe`：短句“你好”；“明天和龚玥在衢州见面，下午三点半。”的简体/繁体；英文 Siobhan / Schenectady。四项接口均正常完成，短句、简繁体、标点、英文词汇符合预期。中文同音人名在重复测试中仍有波动：同语言提示的一组连续三次正确，但最后一轮简体姓名输出了“工月”，繁体输出“龔玥”正确（该轮精确词汇命中 3/4）。这是当前轻量转写模型的质量限制；词库是识别提示，不是强制替换，仍需用户用自己的常用词实测。
 - Release 归档及严格签名检查通过；App、键盘和 Live Activity 扩展均为 1.0.0 (25)，不包含测试包。
 
@@ -33,3 +33,10 @@
 - [Apple：Live Activity 生命周期与 dismissed 事件](https://developer.apple.com/videos/play/wwdc2023/10184/)
 - [Apple：灵动岛的收起手势](https://support.apple.com/guide/iphone/iph28f50d10d/ios)
 - [OpenAI：转写语言与 prompt 参数](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create)
+
+## 发布结果
+
+2026-09-20，GitHub PR #1 保存旧版代码，PR #2 合并本次开发。后端已上线，
+13 项健康检查通过。**TestFlight 1.0.0 (25)** 已完成 Apple 处理，状态
+**VALID / IN_BETA_TESTING**，已进入 **Internal Testers**，中英文测试说明已保存。
+正式 App Store 审核状态未变。此轮没有进行真机录音和系统手势验证。

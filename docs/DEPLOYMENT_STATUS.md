@@ -1,6 +1,40 @@
 # Deployment Status
 
-## Current iOS installation — build 24, 2026-09-14
+## Current TestFlight — build 25, 2026-09-20
+
+Version **1.0.0 (25)** is processed as **VALID**, **IN_BETA_TESTING**, and is
+available in **Internal Testers**. English and Simplified Chinese testing notes
+were saved and read back. Build ID: `9bc5476f-820e-4bcb-a868-e77c3c6a44cf`.
+The formal App Store version remains `REJECTED` / `MANUAL`; no review submission
+was created.
+
+The build adds Live Activity dismissal microphone shutdown and an explicit stop
+action, language/script preferences, Chinese punctuation normalization, and
+account-scoped vocabulary with reviewed History correction learning. iOS system
+collapse gestures do not report dismissal. Rare homophone name recognition still
+varies despite hints; physical gesture/audio/keyboard testing remains pending.
+See [DICTATION_25.zh-CN.md](DICTATION_25.zh-CN.md).
+
+Validation: **113 distinct iOS tests** (112 full-suite + one new stop-intent test
+in a passing 10-test activation run), **134 local backend/shared checks**, and
+**128 backend tests in the Linux image**. Narrow/light/dark screens were rendered
+and inspected. The signed Release archive is
+`build/VoiceType-1.0.0-25-final.xcarchive`; all three bundles are `1.0.0 (25)`.
+Evidence and TestFlight readback are in `build/release25/`.
+
+The backend was deployed with all 13 readiness checks true. PostgreSQL, Caddy,
+and every other running container retained its container ID. No database schema
+or account data migration was required. Rollback source and image identifiers
+are recorded under `/opt/voicetype/backups/dictation25-20260920T202214Z`; the previous
+image is retained as `voicetype-backend:before-dictation25`.
+
+- Running image: `sha256:be5c4e290a559b0adc2af0aede2bfbf8548f656353d0831cc52b2ff680fbf8f6`.
+- `main.py`: `9e7a6b327227affdc5d3da752c2be8358a2e4aebe1bf136059cfe672cb97149d`.
+- `dictation.py`: `72766c6e52832fe57b6d6ce5bbe55f02792ceb5bb89c4f787a3dfd91ee9ce552`.
+- GitHub: baseline preserved in PR #1; feature development/self-review merged in PR #2.
+
+
+## Earlier iOS installation — build 24, 2026-09-14
 
 Version 1.0.0 (24) is installed on iPhone10 and verified by device inventory. It
 adds keyboard-origin automatic microphone activation with the saved session length.

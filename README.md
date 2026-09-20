@@ -81,6 +81,25 @@ Build settings:
 
 The keyboard extension requests Full Access because it needs to read the latest transcript, account balance, and recording bridge state from the shared App Group container. iOS custom keyboard extensions cannot access the microphone directly, so the containing app owns the audio session. Users turn on the keyboard mic in VoiceType first; while the app keeps the audio session alive under the audio background mode, the keyboard sends start/stop clip commands through the shared bridge. Users can choose a recording session length of 5 minutes, 12 hours, or Forever.
 
+## Personalized Dictation
+
+In **Settings → Languages & vocabulary**, choose up to three spoken languages or
+leave selection empty for automatic detection. Choose simplified or traditional
+Chinese explicitly to control writing style. Chinese punctuation is normalized
+without changing protected URLs, email addresses, numbers, filenames, or code.
+
+Add names and places to your personal vocabulary, or use **Edit & teach** in
+History to review and save a corrected spelling. Vocabulary is stored per account
+on the device; the most recent 50 terms accompany transcription requests. Failed
+recordings retain their original hints for idempotent retries. Recognition hints
+improve context but cannot guarantee every homophone or rare name.
+
+Removing the Live Activity stops the keyboard microphone. The Lock Screen and
+expanded Dynamic Island also provide **Turn off mic**. iOS can collapse Dynamic
+Island without dismissing an activity; that gesture does not emit a dismissal
+callback. See [build 25 notes](docs/DICTATION_25.zh-CN.md) for validation and device
+checks.
+
 ## App Store Products
 
 Create consumable In-App Purchase products matching:
