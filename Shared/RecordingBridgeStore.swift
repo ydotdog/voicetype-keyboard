@@ -103,6 +103,7 @@ struct RecordingBridgeState: Codable, Equatable {
 struct RecordingBridgeCommand: Codable, Equatable {
     enum Action: String, Codable {
         case stop
+        case dismissKeyboardSession
         case startClip
         case stopClip
     }
@@ -198,10 +199,15 @@ enum RecordingBridgeStore {
         writeCommand(.stopClip)
     }
 
-    private static func writeCommand(_ action: RecordingBridgeCommand.Action) {
+    static func requestImmediateStop(sessionID: String) {
+        guard !sessionID.isEmpty, state.sessionID == sessionID else { return }
+        writeCommand(.dismissKeyboardSession, sessionID: sessionID)
+    }
+
+    private static func writeCommand(_ action: RecordingBridgeCommand.Action, sessionID: String? = nil) {
         guard let defaults = UserDefaults(suiteName: AppConstants.appGroup) else { return }
         let command = RecordingBridgeCommand(
-            id: UUID().uuidString, action: action, createdAt: Date(), sessionID: state.sessionID
+            id: UUID().uuidString, action: action, createdAt: Date(), sessionID: sessionID ?? state.sessionID
         )
         guard let data = try? encoder.encode(command) else { return }
         defaults.set(data, forKey: commandKey)

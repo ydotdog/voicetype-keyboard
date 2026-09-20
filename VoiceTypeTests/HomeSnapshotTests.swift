@@ -68,9 +68,29 @@ final class HomeSnapshotTests: XCTestCase {
         try await capture(errorContent, tab: .history, name: "history-error-narrow", width: 320, height: 700, scheme: .light)
     }
 
-    private func capture<Content: View>(_ content: Content, tab: VoiceTypeTab, name: String, width: CGFloat, height: CGFloat, scheme: ColorScheme) async throws {
+    func testCaptureDictationSettingsAndCorrection() async throws {
+        let userID = "snapshot-dictation-\(UUID().uuidString)"
+        var preferences = DictationPreferences()
+        preferences.toggle(.simplifiedChinese)
+        preferences.toggle(.english)
+        preferences.remember("龚玥", learned: true)
+        preferences.remember("VoiceType")
+        DictationPreferencesStore.save(preferences, userID: userID)
+        defer { DictationPreferencesStore.clear(userID: userID) }
+        for (suffix, width, scheme) in [("narrow", CGFloat(320), ColorScheme.light), ("dark", CGFloat(430), ColorScheme.dark)] {
+            try await capture(DictationSettingsView(userID: userID), tab: .settings,
+                name: "dictation-\(suffix)", width: width, height: 880, scheme: scheme, standalone: true)
+            try await capture(TranscriptCorrectionView(snapshot: TranscriptSnapshot(id: "preview", text: "明天和龚玥在衢州见面。", createdAt: Date(), chargeText: nil), userID: userID, onSave: {}), tab: .history,
+                name: "correction-\(suffix)", width: width, height: 880, scheme: scheme, standalone: true)
+        }
+    }
+
+    private func capture<Content: View>(_ content: Content, tab: VoiceTypeTab, name: String, width: CGFloat, height: CGFloat, scheme: ColorScheme, standalone: Bool = false) async throws {
         let screen = ZStack {
             AppTheme.background.ignoresSafeArea()
+            if standalone {
+                content
+            } else {
             ScrollView {
                 content
                     .padding(.horizontal, 24)
@@ -81,6 +101,7 @@ final class HomeSnapshotTests: XCTestCase {
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VoiceTypeTabBar(selection: .constant(tab))
+            }
             }
         }
         .environment(\.colorScheme, scheme)

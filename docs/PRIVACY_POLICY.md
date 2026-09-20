@@ -1,6 +1,6 @@
 # VoiceType Privacy Policy
 
-_Last updated: 2026-09-13_
+_Last updated: 2026-09-20_
 
 VoiceType ("the app", "we") turns your speech into text. This policy explains what
 we collect, why, who processes it, and how you can delete it.
@@ -47,6 +47,19 @@ successful transcription, when you delete it from History, when you explicitly
 sign out, or after account deletion. An expired login preserves these recordings
 for the same account to recover after signing in again; signing in to a different
 account removes them. New recordings do not replace older failed recordings.
+
+## Language preferences and personal vocabulary
+
+Language choices and vocabulary are saved per account on this device. You can add
+names and phrases, or review and save a spelling suggested when you correct a
+transcript in History. We do not learn from text typed in other apps. Up to 50
+recent words and your language choices accompany each recording sent to our
+backend and OpenAI. These hints are processed transiently, not stored as a
+server-side vocabulary profile. A failed recording retains its original hints
+until it is transcribed or deleted. You can disable learning and remove individual
+words or clear the vocabulary in Settings. Signing out keeps this device's
+preferences for the same account; deleting the account removes them here.
+History corrections are local edits and do not update the server transcript.
 
 ## Third parties
 

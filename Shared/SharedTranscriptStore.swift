@@ -1,6 +1,6 @@
 import Foundation
 
-struct TranscriptSnapshot: Codable, Equatable {
+struct TranscriptSnapshot: Codable, Equatable, Identifiable {
     let id: String
     let text: String
     let createdAt: Date

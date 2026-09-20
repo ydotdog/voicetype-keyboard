@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import XCTest
+import UIKit
 @testable import VoiceType
 
 /// Exercises the real activation coordinator and recording lifecycle together.
@@ -8,6 +9,52 @@ import XCTest
 /// storage and shared preferences touched by a case are restored on exit.
 @MainActor
 final class KeyboardMicActivationTests: XCTestCase {
+    func testLiveActivityRemovalStopsCurrentSessionAndCannotStopNextSession() async throws {
+        let fixture = try ActivationFixture()
+        defer { fixture.cleanUp() }
+        fixture.signIn()
+        fixture.appState.presentKeyboardMic(autoStart: true)
+        _ = await fixture.activate()
+        let session = RecordingBridgeStore.state.sessionID
+        XCTAssertFalse(session.isEmpty)
+        fixture.controller.liveActivityWasDismissed(sessionID: "stale-session")
+        XCTAssertTrue(fixture.controller.isKeyboardSessionActive)
+        fixture.controller.liveActivityWasDismissed(sessionID: session)
+        XCTAssertFalse(fixture.controller.isKeyboardSessionActive)
+        XCTAssertFalse(fixture.recorders.last?.isRecording ?? true)
+        XCTAssertEqual(RecordingBridgeStore.state, .inactive)
+        fixture.appState.presentKeyboardMic(autoStart: true)
+        _ = await fixture.activate()
+        XCTAssertNotEqual(RecordingBridgeStore.state.sessionID, session)
+        fixture.controller.liveActivityWasDismissed(sessionID: session)
+        XCTAssertTrue(fixture.controller.isKeyboardSessionActive)
+    }
+
+    func testStopIntentPreservesCapturedClipAndIgnoresOldActivity() async throws {
+        let fixture = try ActivationFixture()
+        defer { fixture.cleanUp() }
+        fixture.signIn()
+        fixture.appState.presentKeyboardMic(autoStart: true)
+        _ = await fixture.activate()
+        let session = RecordingBridgeStore.state.sessionID
+        _ = try await StopKeyboardMicIntent(sessionID: "old-session").perform()
+        await fixture.flushCommands()
+        XCTAssertTrue(fixture.controller.isKeyboardReady)
+        RecordingBridgeStore.requestStartClip()
+        await fixture.flushCommands()
+        XCTAssertTrue(fixture.controller.isKeyboardRecording)
+        fixture.recorders.last?.simulatedTime = 3
+        _ = try await StopKeyboardMicIntent(sessionID: session).perform()
+        await fixture.flushCommands()
+        XCTAssertFalse(fixture.controller.isKeyboardSessionActive)
+        XCTAssertFalse(fixture.recorders.last?.isRecording ?? true)
+        XCTAssertEqual(fixture.controller.failedTranscriptions.count, 1)
+        XCTAssertEqual(fixture.controller.failedTranscriptions.first?.duration, 3)
+        XCTAssertEqual(fixture.transcriptionRequests, 0)
+        await fixture.flushCommands()
+        XCTAssertFalse(fixture.controller.isKeyboardSessionActive)
+    }
+
     func testInactiveRequestWaitsForForeground() async throws {
         let fixture = try ActivationFixture()
         defer { fixture.cleanUp() }
@@ -307,6 +354,11 @@ private final class ActivationFixture {
         )
     }
 
+    func flushCommands() async {
+        NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        try? await Task.sleep(for: .milliseconds(50))
+    }
+
     func assertStandbyOnly(file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(controller.isKeyboardReady, file: file, line: line)
         XCTAssertFalse(controller.isRecording, file: file, line: line)
@@ -366,7 +418,8 @@ private final class ActivationTestRecorder: AVAudioRecorder, @unchecked Sendable
     private var capturing = false
     var scheduledDuration: TimeInterval?
     var recordCalls = 0
-    override var currentTime: TimeInterval { 0 }
+    var simulatedTime: TimeInterval = 0
+    override var currentTime: TimeInterval { simulatedTime }
     override var isRecording: Bool { capturing }
     override func record() -> Bool { recordCalls += 1; capturing = true; return true }
     override func record(forDuration duration: TimeInterval) -> Bool { scheduledDuration = duration; return record() }

@@ -59,6 +59,13 @@ final class UserDefaults {
         RecordingBridgeStore.clearCommand(id: secondCommand.id)
         assert(RecordingBridgeStore.latestCommand == nil)
 
+        RecordingBridgeStore.requestImmediateStop(sessionID: "old-session")
+        assert(RecordingBridgeStore.latestCommand == nil)
+        RecordingBridgeStore.requestImmediateStop(sessionID: "session-a")
+        assert(RecordingBridgeStore.latestCommand?.action == .dismissKeyboardSession)
+        assert(RecordingBridgeStore.latestCommand?.sessionID == "session-a")
+        RecordingBridgeStore.clearCommand(id: RecordingBridgeStore.latestCommand!.id)
+
         for mode in [RecordingBridgeMode.keyboardReady, .keyboardRecording, .transcribing, .standard] {
             RecordingBridgeStore.state = RecordingBridgeState(
                 sessionID: "expired", isRecording: mode == .standard || mode == .keyboardRecording,
