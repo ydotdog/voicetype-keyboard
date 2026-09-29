@@ -39,8 +39,10 @@ struct DashboardView: View {
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .sheet(isPresented: $recorder.needsCloudConsent) {
-                CloudTranscriptionConsentView(userID: account.userID)
+            .sheet(isPresented: $recorder.needsCloudConsent, onDismiss: { recorder.dismissCloudConsent() }) {
+                CloudTranscriptionConsentView(userID: account.userID) {
+                    recorder.continueAfterCloudConsent(account: account)
+                }
             }
             .task {
                 await initialLoad()
@@ -1339,7 +1341,7 @@ private struct KeyboardSetupScreen: View {
                     Divider().background(AppTheme.borderSoft)
                     SetupStep(index: "03", title: "Allow Full Access", detail: "Tap VoiceType, then enable Allow Full Access so your keyboard can receive transcripts and control recording.")
                     Divider().background(AppTheme.borderSoft)
-                    SetupStep(index: "04", title: "Turn on the background microphone", detail: "Return to VoiceType, sign in, and on Home tap Turn on keyboard mic. Review the cloud transcription disclosure and allow it, then tap Turn on keyboard mic again. Allow microphone access when asked. You need credit to transcribe a clip.")
+                    SetupStep(index: "04", title: "Turn on the background microphone", detail: "Return to VoiceType, sign in, and on Home tap Turn on keyboard mic. Review the cloud transcription disclosure and allow it; microphone setup continues automatically. Allow microphone access when asked. You need credit to transcribe a clip.")
                     Divider().background(AppTheme.borderSoft)
                     SetupStep(index: "05", title: "Dictate in another app", detail: "Open a text field and use the globe key to select VoiceType. Tap the microphone icon to start, then the waveform to finish. Keep that field open until your text appears. You can also copy your transcript from History.")
                 }

@@ -9,6 +9,39 @@ import UIKit
 /// storage and shared preferences touched by a case are restored on exit.
 @MainActor
 final class KeyboardMicActivationTests: XCTestCase {
+    func testKeyboardLinkContinuesAutomaticallyAfterCloudConsentUsingSavedDuration() async throws {
+        let fixture = try ActivationFixture()
+        defer { fixture.cleanUp() }
+        fixture.signIn()
+        fixture.cloudAllowed = false
+        RecordingPreferencesStore.durationLimit = .twelveHours
+        fixture.appState.presentKeyboardMic(autoStart: true)
+        _ = await fixture.activate()
+        XCTAssertTrue(fixture.controller.needsCloudConsent)
+        XCTAssertEqual(fixture.permissionRequests, 0)
+        fixture.cloudAllowed = true
+        let resumed = fixture.controller.continueAfterCloudConsent(account: fixture.account)
+        await resumed?.value
+        XCTAssertTrue(fixture.controller.isKeyboardReady)
+        XCTAssertEqual(fixture.controller.durationLimit, .twelveHours)
+        XCTAssertEqual(fixture.permissionRequests, 1)
+        XCTAssertNil(fixture.controller.continueAfterCloudConsent(account: fixture.account))
+        XCTAssertEqual(fixture.transcriptionRequests, 0)
+    }
+
+    func testDismissedCloudConsentCannotStartMicrophoneLater() async throws {
+        let fixture = try ActivationFixture()
+        defer { fixture.cleanUp() }
+        fixture.signIn()
+        fixture.cloudAllowed = false
+        await fixture.controller.startKeyboardReady(account: fixture.account)
+        fixture.controller.dismissCloudConsent()
+        fixture.cloudAllowed = true
+        XCTAssertNil(fixture.controller.continueAfterCloudConsent(account: fixture.account))
+        XCTAssertEqual(fixture.permissionRequests, 0)
+        XCTAssertFalse(fixture.controller.isKeyboardSessionActive)
+    }
+
     func testMissingCloudConsentBlocksMicrophoneBeforeSystemPrompt() async throws {
         let fixture = try ActivationFixture()
         defer { fixture.cleanUp() }

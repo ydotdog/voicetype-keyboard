@@ -28,6 +28,10 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
     private var waveSessionID: String?
     private var waveUpdatedAt: Date?
     private let helperLabel = UILabel()
+    private var openAppController: UIHostingController<KeyboardOpenAppLink>?
+    private(set) var keyboardActivationURL: URL?
+    private var activationPreparedAt: TimeInterval?
+    private var issuedActivationURLs: [URL] = []
     private let typingToggle = UIButton(type: .system)
     private let typingRows = UIStackView()
     private var typingRequested = false
@@ -88,6 +92,8 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         super.viewDidAppear(animated)
         isKeyboardVisible = true
         // Returning after a previous launch gets a fresh single-use capability.
+        keyboardActivationURL = nil
+        activationPreparedAt = nil
         refreshKeyboardState()
         prepareHaptics()
         startRefreshing()
@@ -168,6 +174,7 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
 
         setupTopRow()
         setupActionArea()
+        setupOpenAppLink()
         setupBottomRow()
         setupTypingKeys()
         applyPalette()
@@ -396,6 +403,55 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
             deleteButton.widthAnchor.constraint(equalToConstant: 44),
             deleteButton.heightAnchor.constraint(equalToConstant: 44)
         ])
+    }
+
+    private func setupOpenAppLink() {
+        // A real user-tapped SwiftUI Link uses the system URL action. Keep it
+        // beside the UIKit control, whose hitTest intentionally captures taps.
+        let controller = UIHostingController(rootView: makeOpenAppLink())
+        openAppController = controller
+        addChild(controller)
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        controller.view.backgroundColor = .clear
+        controller.view.accessibilityIdentifier = "keyboard.openApp"
+        contentView.addSubview(controller.view)
+        NSLayoutConstraint.activate([
+            controller.view.leadingAnchor.constraint(equalTo: actionControl.leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: actionControl.trailingAnchor),
+            controller.view.topAnchor.constraint(equalTo: actionControl.topAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: actionControl.bottomAnchor)
+        ])
+        controller.didMove(toParent: self)
+    }
+
+    private func makeOpenAppLink() -> KeyboardOpenAppLink {
+        KeyboardOpenAppLink(destination: keyboardActivationURL ?? URL(string: "voicetype://keyboard")!) { [weak self] in
+            self?.playActionFeedback()
+        }
+    }
+
+    private func refreshOpenAppActivation() {
+        guard hasFullAccess, !viewModel.isKeyboardReady, !viewModel.isKeyboardRecording,
+              !viewModel.isTranscribing, pendingAction == nil else {
+            issuedActivationURLs.forEach { KeyboardMicActivationStore.shared.revoke($0) }
+            issuedActivationURLs.removeAll()
+            keyboardActivationURL = nil
+            activationPreparedAt = nil
+            return
+        }
+        guard isKeyboardVisible, viewIfLoaded?.window != nil else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if let activationPreparedAt, now - activationPreparedAt >= 0,
+           now - activationPreparedAt < 30 { return }
+        activationPreparedAt = now
+        keyboardActivationURL = KeyboardMicActivationStore.shared.makeURL(uptime: now)
+        if let keyboardActivationURL { issuedActivationURLs.append(keyboardActivationURL) }
+        // Retain the previous URL briefly: rotating the Link while a finger or
+        // VoiceOver is on it must not invalidate an in-flight system open.
+        while issuedActivationURLs.count > 4 {
+            KeyboardMicActivationStore.shared.revoke(issuedActivationURLs.removeFirst())
+        }
+        openAppController?.rootView = makeOpenAppLink()
     }
 
     private var showsTyping: Bool { typingRequested || !hasFullAccess }
@@ -729,6 +785,7 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
 
     private func updateUI(force: Bool = false) {
         updateWaveform()
+        refreshOpenAppActivation()
         if isKeyboardVisible { startRefreshing() }
         let uiState = KeyboardUIState(
             pendingAction: pendingAction,
@@ -751,10 +808,11 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         let canUseBridge = viewModel.isKeyboardReady && hasFullAccess
         let microphoneOff = hasFullAccess && !viewModel.isKeyboardReady
             && !viewModel.isKeyboardRecording && !viewModel.isTranscribing && pendingAction == nil
-        actionControl.isHidden = false
+        openAppController?.view.isHidden = !microphoneOff
+        actionControl.isHidden = microphoneOff
         let needsDocument = hasFullAccess && (viewModel.isKeyboardReady || viewModel.isKeyboardRecording)
         actionControl.isEnabled = pendingAction == nil && (!viewModel.isTranscribing || !hasFullAccess)
-            && (!needsDocument || hasDocumentContext)
+            && (!needsDocument || hasDocumentContext) && !microphoneOff
         returnButton.isEnabled = hasDocumentContext
         deleteButton.isEnabled = hasDocumentContext
         let helperText = actionNotice ?? defaultHelperText(canUseBridge: canUseBridge, pendingAction: pendingAction)
@@ -773,8 +831,6 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         actionControl.accessibilityHint = helperText
         if !hasFullAccess {
             setStatusAction(systemName: "gearshape", title: "Enable Access", accessibilityLabel: "Show Full Access instructions", tintColor: palette.inkSoft)
-        } else if microphoneOff {
-            setStatusAction(systemName: "mic", title: "Turn on mic in VoiceType", accessibilityLabel: "Show microphone instructions", tintColor: palette.inkSoft)
         } else if pendingAction == .startingClip {
             setStatusAction(systemName: "mic.fill", title: "Starting", accessibilityLabel: "Starting recording", tintColor: palette.live)
         } else if pendingAction == .stoppingClip {
@@ -885,7 +941,6 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
             RecordingBridgeStore.requestStartClip()
         } else {
             setPendingAction(nil)
-            actionNotice = "Open VoiceType from your Home Screen, tap Turn on keyboard mic, then return here."
         }
         viewModel.refresh()
         clearResolvedPendingAction()
@@ -989,6 +1044,39 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
             clearAutoInsert()
             actionNotice = pendingAction.timeoutMessage
         }
+    }
+}
+
+private struct KeyboardOpenAppLink: View {
+    private let palette = KeyboardPalette()
+    let destination: URL
+    let onPress: @MainActor () -> Void
+
+    var body: some View {
+        Link(destination: destination) {
+            Image(systemName: "mic")
+                .font(.system(size: 24, weight: .regular))
+                .foregroundStyle(Color(uiColor: palette.keySurface))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(uiColor: palette.ink), in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(KeyboardLinkButtonStyle(onPress: onPress))
+        .accessibilityLabel("Turn on keyboard microphone")
+        .accessibilityHint("Opens VoiceType and enables the background microphone. Return here to dictate.")
+        .accessibilityIdentifier("keyboard.openAppLink")
+    }
+}
+
+private struct KeyboardLinkButtonStyle: ButtonStyle {
+    let onPress: @MainActor () -> Void
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.82 : 1)
+            .onChange(of: configuration.isPressed) { _, pressed in
+                if pressed { onPress() }
+            }
     }
 }
 

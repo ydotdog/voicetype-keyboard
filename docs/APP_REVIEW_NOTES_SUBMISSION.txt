@@ -1,13 +1,13 @@
 BACKGROUND DICTATION — GUIDELINE 2.5.4
 
-VoiceType records speech through its containing app while the user dictates from the VoiceType keyboard in another foreground app. The keyboard cannot access the microphone directly. It does not launch VoiceType; open the app manually to start a microphone session.
+VoiceType records speech through its containing app while the user dictates from the VoiceType keyboard in another foreground app. The keyboard cannot access the microphone directly. When the microphone is off, the user-tapped keyboard microphone link opens VoiceType and starts the microphone session. Home > Turn on keyboard mic is also available.
 
 TEST ON IPHONE OR IPAD
 
 1. Launch VoiceType and use Sign in with Apple. Check the Credit tab for enough credit for a short clip.
 2. In device Settings > General > Keyboard > Keyboards > Add New Keyboard, add VoiceType. Open its entry and enable Allow Full Access.
-3. Open VoiceType manually. On Home, tap Turn on keyboard mic. Read the disclosure and choose Allow cloud transcription. Tap Turn on keyboard mic again, then allow the system microphone prompt. Home displays Keyboard mic on.
-4. Navigate to the Home Screen, then open Apple Notes. Focus a normal editable note and select VoiceType using the globe/input-mode control. Notes remains in the foreground while VoiceType records in the background.
+3. In an editable Apple Note, select the VoiceType keyboard and tap its outlined microphone. VoiceType opens and enables keyboard mic automatically. On first use, read the disclosure and choose Allow cloud transcription; activation continues automatically. Allow the system microphone prompt if shown. Home displays Keyboard mic on.
+4. Navigate to the Home Screen, then return manually to the same Apple Note and VoiceType keyboard. Notes remains in the foreground while VoiceType records in the background.
 5. Tap the keyboard microphone icon, speak a short sentence, then tap the waveform to finish. Keep the same field open while Transcribing is shown and the text is inserted.
 6. Return to VoiceType. The transcript is also available in History. Tap Turn off keyboard mic on Home. During a clip, Finish clip & turn off mic finishes that clip before ending the session. The Live Activity also has a stop control.
 
@@ -15,7 +15,7 @@ PERSISTENT AUDIO AND USER CONTROL
 
 The user explicitly turns on keyboard mic. Its audio session stays active between clips for the selected duration: 5 min (default), 12 hr, or Forever. Forever means no app timer; system interruptions can still stop it. Individual clips have a 10-minute limit. Temporary idle audio is rotated and discarded locally. Only clips the user starts and finishes are submitted, rather than continuously uploading the session.
 
-If a session ends, open VoiceType manually to start another. Secure fields and apps that prohibit third-party keyboards use the system keyboard.
+If a session ends, tap the outlined keyboard microphone to open VoiceType and start another. The saved session duration is reused; otherwise the default is 5 minutes. Secure fields and apps that prohibit third-party keyboards use the system keyboard.
 
 FULL ACCESS, PRIVACY AND OFFLINE INPUT
 

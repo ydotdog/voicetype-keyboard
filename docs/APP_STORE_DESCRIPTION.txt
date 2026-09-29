@@ -1,6 +1,6 @@
 Turn speech into text in the apps you use every day.
 
-VoiceType is a pay-as-you-go dictation keyboard for iPhone and iPad. Open VoiceType, turn on keyboard mic, then return to an editable text field in another app. Start and finish a clip from the VoiceType keyboard, and keep the field open while your words are transcribed and inserted.
+VoiceType is a pay-as-you-go dictation keyboard for iPhone and iPad. Tap the keyboard microphone to open VoiceType and turn on keyboard mic, then return manually to the text field in your original app. Start and finish a clip from the VoiceType keyboard, and keep the field open while your words are transcribed and inserted.
 
 YOUR WORDS, YOUR WORKFLOW
 Choose your languages and add names or phrases to your personal vocabulary. Review transcripts in History, make corrections, or copy text when you need it. Failed recordings are kept privately on your device so you can retry or delete them.

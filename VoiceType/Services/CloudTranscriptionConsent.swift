@@ -32,6 +32,7 @@ final class CloudTranscriptionConsent: ObservableObject {
 
 struct CloudTranscriptionConsentView: View {
     let userID: String
+    var onAllow: () -> Void = {}
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -48,6 +49,7 @@ struct CloudTranscriptionConsentView: View {
                 Section {
                     Button("Allow cloud transcription") {
                         CloudTranscriptionConsent.shared.setGranted(true, userID: userID)
+                        onAllow()
                         dismiss()
                     }
                     .disabled(userID.isEmpty)

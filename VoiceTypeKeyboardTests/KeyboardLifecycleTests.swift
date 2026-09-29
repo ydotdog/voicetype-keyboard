@@ -402,17 +402,77 @@ struct KeyboardLifecycleTests {
         }
     }
 
-    @Test func microphoneOffShowsManualInstructionsWithoutLaunchingAnApp() throws {
+    @Test func microphoneOffOffersAnUnobstructedSystemAppLink() throws {
         try withCleanStores {
             let controller = FixtureKeyboardController()
             controller.proxy.testDocumentIdentifier = UUID()
             try withVisibleController(controller) {
                 let action = try control("keyboard.primaryAction", in: controller)
-                #expect(!action.isHidden && action.isEnabled)
-                #expect(descendant("keyboard.openApp", in: controller.view) == nil)
+                #expect(action.isHidden)
+                #expect(!action.isEnabled)
+                let link = try #require(descendant("keyboard.openApp", in: controller.view))
+                #expect(!link.isHidden)
+                let activationURL = try #require(controller.keyboardActivationURL)
+                #expect(activationURL.scheme == "voicetype")
+                #expect(activationURL.host == "keyboard")
+                controller.view.layoutIfNeeded()
+                let point = link.convert(CGPoint(x: link.bounds.midX, y: link.bounds.midY), to: controller.view)
+                let hit = try #require(controller.view.hitTest(point, with: nil))
+                #expect(hit === link || hit.isDescendant(of: link))
+                #expect(!hit.isDescendant(of: action))
                 action.sendActions(for: .touchUpInside)
-                #expect(action.accessibilityHint?.contains("Home Screen") == true)
+                let notice = try #require(descendant("keyboard.helper", in: controller.view))
+                #expect(notice.isHidden)
                 #expect(RecordingBridgeStore.latestCommand == nil)
+                setBridge(.keyboardReady)
+                controller.textDidChange(nil)
+                #expect(link.isHidden)
+                #expect(!action.isHidden && action.isEnabled)
+                #expect(controller.keyboardActivationURL == nil)
+                #expect(!KeyboardMicActivationStore.shared.consume(activationURL))
+            }
+        }
+    }
+
+    @Test func appLaunchDisappearancePreservesTheLinkUntilItIsConsumed() throws {
+        try withCleanStores {
+            let controller = FixtureKeyboardController()
+            controller.proxy.testDocumentIdentifier = UUID()
+            controller.loadViewIfNeeded()
+            #expect(controller.keyboardActivationURL == nil)
+            try withVisibleController(controller) {
+                let url = try #require(controller.keyboardActivationURL)
+                setVisible(false, controller: controller)
+                // A normal Link launch hides the keyboard before onOpenURL may
+                // reach the containing app. The request must survive that gap.
+                #expect(KeyboardMicActivationStore.shared.consume(url))
+                #expect(!KeyboardMicActivationStore.shared.consume(url))
+                setVisible(true, controller: controller)
+                let replacement = try #require(controller.keyboardActivationURL)
+                #expect(replacement != url)
+                #expect(KeyboardMicActivationStore.shared.consume(replacement))
+            }
+        }
+    }
+
+    @Test func missingOrRevokedFullAccessCannotIssueAnActivationLink() throws {
+        try withCleanStores {
+            let controller = FixtureKeyboardController()
+            controller.fullAccess = false
+            controller.proxy.testDocumentIdentifier = UUID()
+            try withVisibleController(controller) {
+                let link = try #require(descendant("keyboard.openApp", in: controller.view))
+                #expect(link.isHidden)
+                #expect(controller.keyboardActivationURL == nil)
+                controller.fullAccess = true
+                controller.textDidChange(nil)
+                let url = try #require(controller.keyboardActivationURL)
+                #expect(!link.isHidden)
+                controller.fullAccess = false
+                controller.textDidChange(nil)
+                #expect(link.isHidden)
+                #expect(controller.keyboardActivationURL == nil)
+                #expect(!KeyboardMicActivationStore.shared.consume(url))
             }
         }
     }

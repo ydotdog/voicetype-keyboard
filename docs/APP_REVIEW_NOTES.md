@@ -8,10 +8,10 @@ checks before copying the reviewer-facing section into App Store Connect.
 ### Guideline 2.5.4 — background dictation
 
 The background audio feature is voice dictation through the VoiceType keyboard
-while another app is in the foreground. Open VoiceType manually from the Home
-Screen, then use **Home → Turn on keyboard mic**. The keyboard extension does not
-launch the containing app. The user manually returns to the original app.
-Home explains the microphone behavior. Setup instructions are available
+while another app is in the foreground. Tapping the outlined microphone icon in
+the keyboard opens VoiceType and automatically enables the background microphone.
+The user then manually returns to the original app. **Home → Turn on keyboard mic**
+is also available. Home explains the microphone behavior. Setup instructions are available
 before signing in through **How to set up
 and use the keyboard**, and after signing in through **Settings → VoiceType
 keyboard**.
@@ -24,13 +24,14 @@ keyboard**.
 2. In the device's **Settings → General → Keyboard → Keyboards → Add New
    Keyboard**, select **VoiceType**. Open its entry in the Keyboards list and
    enable **Allow Full Access**.
-3. Open VoiceType manually and tap **Turn on keyboard mic**. Read the cloud
-   transcription disclosure and choose **Allow cloud transcription**. Tap
-   **Turn on keyboard mic** again, then allow the system microphone prompt.
-   Home displays **Keyboard mic on**. If permission was previously denied,
-   enable VoiceType's microphone permission in device Settings and try again.
-4. Open Apple Notes, focus an editable note and select VoiceType using the
-   globe/input mode control. Notes remains in the
+3. Open Apple Notes, focus an editable note and use the system globe/input mode
+   control to select **VoiceType**. Tap the outlined **microphone icon**. VoiceType
+   opens and enables its microphone automatically. On first use, read the cloud transcription disclosure and choose **Allow cloud
+   transcription**; the requested activation continues automatically. Allow the
+   microphone prompt if shown; activation continues after permission is granted. Home displays
+   **Keyboard mic on**. If permission was previously denied, enable
+   VoiceType's microphone permission in the device's Settings and try again.
+4. Manually return to Apple Notes and the same text field. Notes remains in the
    foreground while VoiceType is in the background. The keyboard microphone icon
    is now filled, indicating readiness.
 5. Tap the **microphone icon**, say a short sentence, and tap the **waveform** to finish. The keyboard displays
@@ -40,8 +41,8 @@ keyboard**.
    reads **Finish clip & turn off mic** and finishes the clip before ending the
    session.
 
-Full Access is required for this path. If the selected session ends, open VoiceType manually
-and enable a new session. The keyboard explains these steps.
+Full Access is required for this path. If the selected session ends, tap the
+outlined microphone icon again to open VoiceType and enable a new session.
 Secure fields
 and apps that disallow third-party keyboards use the system keyboard; an ordinary
 note in Apple Notes is suitable for this test.
@@ -54,7 +55,8 @@ for the selected session. Only segments started with the **microphone icon** are
 transcription; temporary idle audio is rotated and discarded locally.
 
 **Session length** offers **5 min**, **12 hr**, and **Forever**, with **5 min** as
-the default. A previously saved selection is used when starting the microphone. These limit the keyboard microphone session from its original start;
+the default. A previously saved selection is used when activation comes from the
+keyboard. These limit the keyboard microphone session from its original start;
 repeated activation and individual clips do not restart its timer. Individual
 clips are limited to 10 minutes.
 **Forever** means no app-defined session timer, not a guarantee against system
@@ -65,16 +67,15 @@ the microphone again from Home.
 and transcripts with the containing app through their shared container. The
 keyboard does not upload text typed in the host app.
 
-Basic letters, numbers, spaces, punctuation, delete and return work without Full
-Access, network access or cloud transcription consent. Tap **ABC** to show these
-keys; they are shown automatically when Full Access is disabled. The system globe
-or the keyboard's next-keyboard control switches input methods.
+Basic letters, numbers, space, punctuation, delete and return remain available
+without Full Access, a network connection or cloud transcription consent. Tap
+**ABC** to show typing keys; they appear automatically when Full Access is off.
 
 ### Other review paths
 
-- Privacy: **Settings → Cloud transcription** withdraws consent, stops an active
-  microphone session, and prevents new uploads and retries. Privacy and support
-  links are available before sign-in and in Settings.
+- Privacy: **Settings → Cloud transcription** withdraws consent and stops the
+  active microphone, new uploads and retries. Privacy and support links appear
+  before sign-in and in Settings.
 - Failed transcription: **History** retains each failed recording with **Retry**
   and **Delete**. A failed recording does not block enabling the microphone or a new
   recording. Retry results remain in History for explicit copying.
