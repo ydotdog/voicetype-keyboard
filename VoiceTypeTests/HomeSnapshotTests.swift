@@ -85,12 +85,50 @@ final class HomeSnapshotTests: XCTestCase {
         }
     }
 
-    private func capture<Content: View>(_ content: Content, tab: VoiceTypeTab, name: String, width: CGFloat, height: CGFloat, scheme: ColorScheme, standalone: Bool = false) async throws {
+    func testCaptureNativeSettings() async throws {
+        let account = AccountStore(backend: SnapshotAccountBackend())
+        let store = StoreKitService()
+        for (suffix, width, scheme, typeSize) in [
+            ("phone", CGFloat(390), ColorScheme.light, DynamicTypeSize.large),
+            ("narrow", CGFloat(320), ColorScheme.light, DynamicTypeSize.large),
+            ("dark", CGFloat(390), ColorScheme.dark, DynamicTypeSize.large),
+            ("accessibility", CGFloat(390), ColorScheme.light, DynamicTypeSize.accessibility3),
+        ] {
+            let tabs = VoiceTypeTabs(selection: .constant(.settings)) { _ in
+                SettingsScreen(account: account, store: store, openKeyboardSetup: {})
+            }
+            try await capture(tabs, tab: .settings, name: "settings-\(suffix)", width: width,
+                              height: 844, scheme: scheme, standalone: true, typeSize: typeSize)
+        }
+    }
+
+    func testCaptureMicStatesAndAdaptiveLayout() async throws {
+        for (suffix, width, height, scheme, typeSize) in [
+            ("phone", CGFloat(390), CGFloat(844), ColorScheme.light, DynamicTypeSize.large),
+            ("narrow", CGFloat(320), CGFloat(700), ColorScheme.light, DynamicTypeSize.large),
+            ("wide", CGFloat(760), CGFloat(800), ColorScheme.light, DynamicTypeSize.large),
+            ("landscape", CGFloat(844), CGFloat(390), ColorScheme.light, DynamicTypeSize.large),
+            ("accessibility", CGFloat(390), CGFloat(1000), ColorScheme.light, DynamicTypeSize.accessibility3),
+            ("dark", CGFloat(390), CGFloat(844), ColorScheme.dark, DynamicTypeSize.large),
+        ] {
+            for state in HomeMicState.allCases {
+                let content = HomeContent(micState: state, elapsedSeconds: 65,
+                                          durationLimit: .constant(.fiveMinutes),
+                                          isBusy: state == .starting || state == .transcribing,
+                                          hasNegativeBalance: false, errorMessage: nil, toggleMic: {})
+                try await capture(content, tab: .home, name: "mic-\(state)-\(suffix)",
+                                  width: width, height: height, scheme: scheme, typeSize: typeSize)
+            }
+        }
+    }
+
+    private func capture<Content: View>(_ content: Content, tab: VoiceTypeTab, name: String, width: CGFloat, height: CGFloat, scheme: ColorScheme, standalone: Bool = false, typeSize: DynamicTypeSize = .large) async throws {
         let screen = ZStack {
             AppTheme.background.ignoresSafeArea()
             if standalone {
                 content
             } else {
+            VoiceTypeTabs(selection: .constant(tab)) { _ in
             ScrollView {
                 content
                     .padding(.horizontal, 24)
@@ -99,13 +137,11 @@ final class HomeSnapshotTests: XCTestCase {
                     .frame(maxWidth: 720)
                     .frame(maxWidth: .infinity)
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                VoiceTypeTabBar(selection: .constant(tab))
             }
             }
         }
         .environment(\.colorScheme, scheme)
-        .environment(\.dynamicTypeSize, .large)
+        .environment(\.dynamicTypeSize, typeSize)
         .frame(width: width, height: height)
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)

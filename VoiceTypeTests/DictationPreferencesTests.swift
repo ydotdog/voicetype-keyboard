@@ -34,10 +34,21 @@ final class DictationPreferencesTests: XCTestCase {
     func testCorrectionsLearnWordRatherThanChangedLetterOrWholeTranscript() {
         XCTAssertEqual(DictationPreferences.correctedTerm(original: "Meet Jon tomorrow", edited: "Meet John tomorrow"), "John")
         XCTAssertEqual(DictationPreferences.correctedTerm(original: "明天去北京", edited: "明天去衢州"), "衢州")
-        XCTAssertEqual(DictationPreferences.correctedTerm(original: "明天和张伟去衢州", edited: "明天和张炜去衢州"), "张炜")
+        // Model downloads vary across fresh devices. Test the extraction contract
+        // with a known system result, and the unavailable-resource path separately.
+        XCTAssertEqual(DictationPreferences.correctedTerm(original: "明天和张伟去衢州", edited: "明天和张炜去衢州", nameLookup: { text, range in
+            XCTAssertEqual(String(text[range]), "炜")
+            return "张炜"
+        }), "张炜")
         XCTAssertNil(DictationPreferences.correctedTerm(original: "你好, 世界", edited: "你好，世界"))
         XCTAssertNil(DictationPreferences.correctedTerm(original: "same", edited: "same"))
         XCTAssertNil(DictationPreferences.correctedTerm(original: "hi", edited: String(repeating: "new words ", count: 20)))
+    }
+
+    func testUnavailableNameRecognitionKeepsConservativeManualFallback() {
+        XCTAssertNil(DictationPreferences.correctedTerm(original: "明天和张伟去衢州", edited: "明天和张炜去衢州", nameLookup: { _, _ in nil }))
+        XCTAssertEqual(DictationPreferences.correctedTerm(original: "Meet Jon tomorrow", edited: "Meet John tomorrow", nameLookup: { _, _ in nil }), "John")
+        XCTAssertEqual(DictationPreferences.correctedTerm(original: "明天去北京", edited: "明天去衢州", nameLookup: { _, _ in nil }), "衢州")
     }
 
     func testAccountIsolationAndDeletion() throws {

@@ -16,7 +16,7 @@ struct DashboardView: View {
     @State private var toastDismissID = UUID()
 
     var body: some View {
-        NavigationStack {
+        Group {
             ZStack(alignment: .bottom) {
                 AppTheme.background.ignoresSafeArea()
 
@@ -39,7 +39,6 @@ struct DashboardView: View {
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .toolbar(.hidden, for: .navigationBar)
             .task {
                 await initialLoad()
             }
@@ -89,49 +88,46 @@ struct DashboardView: View {
         }
     }
 
-    @ViewBuilder
     private var signedInContent: some View {
-            ScrollView {
-                Group {
-                    switch selectedTab {
-                    case .home:
-                        HomeScreen(
-                            account: account,
-                            recorder: recorder
-                        )
-                    case .history:
-                        HistoryScreen(recorder: recorder, account: account, history: transcriptHistory, copy: copyTranscript, refresh: refreshHistory)
-                    case .credit:
-                        CreditScreen(store: store, account: account)
-                            .task {
-                                guard store.products.isEmpty, !store.isLoading else { return }
-                                await store.loadProducts()
+        VoiceTypeTabs(selection: $selectedTab) { tab in
+            Group {
+                if tab == .settings {
+                    SettingsScreen(account: account, store: store) {
+                        isKeyboardSetupPresented = true
+                    }
+                } else {
+                    ScrollView {
+                        Group {
+                            switch tab {
+                            case .home:
+                                HomeScreen(account: account, recorder: recorder)
+                            case .history:
+                                HistoryScreen(recorder: recorder, account: account, history: transcriptHistory,
+                                              copy: copyTranscript, refresh: refreshHistory)
+                            case .credit:
+                                CreditScreen(store: store, account: account)
+                                    .task {
+                                        guard store.products.isEmpty, !store.isLoading else { return }
+                                        await store.loadProducts()
+                                    }
+                            case .settings:
+                                EmptyView()
                             }
-                    case .settings:
-                        SettingsScreen(
-                            account: account,
-                            store: store,
-                            openKeyboardSetup: {
-                                withAnimation(.snappy) {
-                                    isKeyboardSetupPresented = true
-                                }
-                            }
-                        )
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.top, 18)
+                        .padding(.bottom, 24)
+                        .frame(maxWidth: 720)
+                        .frame(maxWidth: .infinity)
                     }
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, 18)
-                .padding(.bottom, 24)
-                .frame(maxWidth: 720)
-                .frame(maxWidth: .infinity)
             }
+            .background(AppTheme.background)
             .refreshable {
                 await account.refresh()
                 refreshHistory()
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                VoiceTypeTabBar(selection: $selectedTab)
-            }
+        }
     }
 
     private func initialLoad() async {
@@ -249,39 +245,25 @@ enum VoiceTypeTab: String, CaseIterable, Identifiable {
     }
 }
 
-struct VoiceTypeTabBar: View {
+/// System navigation owns safe areas, accessibility and Liquid Glass appearance.
+struct VoiceTypeTabs<Content: View>: View {
     @Binding var selection: VoiceTypeTab
+    @ViewBuilder var content: (VoiceTypeTab) -> Content
 
     var body: some View {
-        HStack(spacing: 0) {
+        TabView(selection: $selection) {
             ForEach(VoiceTypeTab.allCases) { tab in
-                Button {
-                    withAnimation(.snappy) {
-                        selection = tab
-                    }
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 21, weight: .medium))
-                            .symbolVariant(selection == tab ? .fill : .none)
-                        Text(tab.title)
-                            .font(.system(size: 10.5, weight: .semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .foregroundStyle(selection == tab ? AppTheme.accentDeep : AppTheme.secondary)
+                NavigationStack {
+                    content(tab)
+                        .navigationTitle(tab.title)
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar(tab == .home ? .hidden : .visible, for: .navigationBar)
                 }
-                .buttonStyle(PlainHapticButtonStyle())
+                    .tabItem { Label(tab.title, systemImage: tab.icon) }
+                    .tag(tab)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 9)
-        .padding(.bottom, 8)
-        .background(.ultraThinMaterial, ignoresSafeAreaEdges: .bottom)
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(AppTheme.borderSoft)
-                .frame(height: 1)
-        }
+        .tint(AppTheme.accentDeep)
     }
 }
 
@@ -501,76 +483,150 @@ struct HomeScreen: View {
     @ObservedObject var recorder: RecordingController
 
     var body: some View {
+        HomeContent(
+            micState: recorder.isStarting ? .starting : recorder.isKeyboardRecording ? .recording
+                : recorder.isKeyboardTranscribing ? .transcribing : recorder.isKeyboardSessionActive ? .ready : .off,
+            elapsedSeconds: recorder.elapsedSeconds,
+            durationLimit: $recorder.durationLimit,
+            isBusy: recorder.isStarting || recorder.isProcessing || recorder.isRecording,
+            hasNegativeBalance: account.balanceUSDMicros < 0,
+            errorMessage: recorder.errorMessage ?? account.errorMessage
+        ) {
+            Task {
+                if recorder.isKeyboardSessionActive {
+                    await recorder.finishKeyboardSession()
+                } else {
+                    await recorder.startKeyboardReady(account: account)
+                }
+            }
+        }
+    }
+}
+
+enum HomeMicState: CaseIterable {
+    case off, starting, ready, recording, transcribing
+
+    var isOn: Bool { self == .ready || self == .recording || self == .transcribing }
+    var title: String {
+        switch self {
+        case .off: "Microphone off"
+        case .starting: "Turning on microphone…"
+        case .ready: "Ready for the keyboard"
+        case .recording: "Recording clip"
+        case .transcribing: "Transcribing clip"
+        }
+    }
+    var detail: String {
+        switch self {
+        case .off: "Turn on the mic, then return to the app where you want to type."
+        case .starting: "Allow microphone access if asked. Keep VoiceType open while it starts."
+        case .ready: "In another app, select VoiceType with the globe key. Tap the keyboard mic to start a clip."
+        case .recording: "Tap the keyboard waveform to finish. Turning off the mic here also finishes and transcribes this clip."
+        case .transcribing: "Your clip is being transcribed. Turning off the mic still lets this clip finish."
+        }
+    }
+}
+
+/// The primary control precedes every changing status/error view. Its label
+/// reserves both titles so switching on/off cannot change its frame, even at AX sizes.
+struct HomeContent: View {
+    let micState: HomeMicState
+    let elapsedSeconds: TimeInterval
+    @Binding var durationLimit: RecordingDurationLimit
+    let isBusy: Bool
+    let hasNegativeBalance: Bool
+    let errorMessage: String?
+    let toggleMic: () -> Void
+    var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             VoiceTypeLogo()
                 .frame(height: 44, alignment: .leading)
 
-            if account.balanceUSDMicros < 0 {
-                BalanceAdjustmentNotice()
-            }
-
-            VStack(spacing: 12) {
-                if recorder.isKeyboardSessionActive {
-                    KeyboardMicStatusCard(recorder: recorder)
-                    Button {
-                        Task { await recorder.finishKeyboardSession() }
-                    } label: {
-                        Label(recorder.isKeyboardRecording ? "Finish clip & turn off mic" : "Turn off keyboard mic", systemImage: "mic.slash.fill")
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 48)
+            Button(action: toggleMic) {
+                HStack(spacing: 12) {
+                    Image(systemName: micState.isOn ? "mic.slash.fill" : "mic.fill")
+                        .frame(width: 24)
+                        .accessibilityHidden(true)
+                    ZStack(alignment: .leading) {
+                        Text("Turn on keyboard mic").hidden()
+                        Text("Turn off keyboard mic").hidden()
+                        Text(micState.isOn ? "Turn off keyboard mic" : "Turn on keyboard mic")
                     }
-                    .buttonStyle(GhostButtonStyle())
-                } else {
-                    Button {
-                        Task { await recorder.startKeyboardReady(account: account) }
-                    } label: {
-                        HStack(spacing: 18) {
-                            CircleIcon(systemName: "mic.fill", foreground: AppTheme.ink, background: AppTheme.accent)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Turn on keyboard mic")
-                                    .font(AppTheme.serif(22, weight: .medium))
-                                Text("Keep VoiceType ready in other apps")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(AppTheme.surface.opacity(0.72))
-                            }
-                            Spacer()
-                        }
-                        .foregroundStyle(AppTheme.surface)
-                        .padding(16)
-                    }
-                    .buttonStyle(InkButtonStyle())
-                    .disabled(recorder.isStarting || recorder.isProcessing || recorder.isRecording)
-                }
-
-                if recorder.isStarting {
-                    ProgressView("Turning on microphone…")
-                        .font(.footnote)
-                }
-
-                Text("While enabled, your microphone stays active in the background. Only clips you record from the keyboard are sent for transcription.")
-                    .font(.footnote)
-                    .foregroundStyle(AppTheme.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-
+                }
+                .font(.headline)
+                .padding(.vertical, 12)
+                .frame(minHeight: 44)
             }
+            .modifier(PrimaryControlStyle())
+            .disabled(!micState.isOn && isBusy)
+            .accessibilityIdentifier("home.keyboardMic")
+            .accessibilityLabel(micState.isOn ? "Turn off keyboard mic" : "Turn on keyboard mic")
+            .accessibilityValue(micState.title)
+            .accessibilityHint(micState == .recording ? "Finishes and transcribes the current clip, then turns off the microphone." : "")
 
-            RecordingLimitPicker(
-                selection: $recorder.durationLimit,
-                isDisabled: recorder.isStarting || recorder.isProcessing
-            )
-
-            if recorder.isProcessing && !recorder.isKeyboardTranscribing {
-                ProcessingRow()
+            VStack(alignment: .leading, spacing: 12) {
+                ViewThatFits(in: .horizontal) {
+                    HStack {
+                        statusLabel
+                        Spacer(minLength: 8)
+                        timer
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        statusLabel
+                        timer
+                    }
+                }
+                if micState == .recording {
+                    LiveWaveform(sessionID: RecordingBridgeStore.state.sessionID, dense: true)
+                        .frame(height: 36)
+                }
+                Text(micState.detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .panelStyle()
 
-            if let error = recorder.errorMessage ?? account.errorMessage {
-                Text(error)
+            RecordingLimitPicker(selection: $durationLimit, isDisabled: isBusy && micState != .recording && micState != .ready)
+
+            Text("While enabled, your microphone stays active in the background. Only clips you record from the keyboard are sent for transcription.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if hasNegativeBalance { BalanceAdjustmentNotice() }
+            if let errorMessage {
+                Text(errorMessage)
                     .font(.footnote)
                     .foregroundStyle(AppTheme.coral)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
 
+    private var statusLabel: some View {
+        HStack(spacing: 8) {
+            if micState == .starting || micState == .transcribing {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: micState.isOn ? "mic.fill" : "mic.slash")
+                    .foregroundStyle(micState == .recording ? AppTheme.coral : AppTheme.accentDeep)
+            }
+            Text(micState.title).font(.headline)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder private var timer: some View {
+        if micState.isOn {
+            Text(RecorderPanel.format(elapsedSeconds))
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Session elapsed time")
+                .accessibilityValue(RecorderPanel.format(elapsedSeconds))
         }
     }
 }
@@ -605,46 +661,6 @@ private struct BalanceAdjustmentNotice: View {
             .foregroundStyle(AppTheme.coral)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct KeyboardMicStatusCard: View {
-    @ObservedObject var recorder: RecordingController
-
-    var body: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(recorder.isKeyboardRecording ? AppTheme.coral : AppTheme.accent)
-                    .frame(width: 8, height: 8)
-                KickerText(
-                    text: recorder.isKeyboardRecording ? "Recording clip" : recorder.isKeyboardTranscribing ? "Transcribing" : "Keyboard mic on",
-                    color: recorder.isKeyboardRecording || recorder.isKeyboardTranscribing ? AppTheme.coral : AppTheme.accentDeep
-                )
-                Spacer()
-                Text(RecorderPanel.format(recorder.elapsedSeconds))
-                    .font(AppTheme.serif(24, weight: .regular))
-                    .foregroundStyle(AppTheme.ink)
-                    .monospacedDigit()
-            }
-
-            if recorder.isKeyboardTranscribing {
-                ProgressView()
-                    .tint(AppTheme.accentDeep)
-                    .frame(maxWidth: .infinity, minHeight: 32)
-                    .accessibilityLabel("Transcribing audio")
-            } else if recorder.isKeyboardRecording {
-                LiveWaveform(sessionID: RecordingBridgeStore.state.sessionID, dense: true)
-                    .frame(height: 36)
-            } else {
-                Text("Open a text field in another app and select VoiceType with the globe key. Tap the microphone icon to start a clip and the waveform to finish. The microphone stays active until this session ends or you turn it off.")
-                    .font(.system(size: 14, weight: .medium))
-                    .lineSpacing(4)
-                    .foregroundStyle(AppTheme.inkSoft)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .panelStyle()
     }
 }
 
@@ -825,7 +841,7 @@ private struct FailedTranscriptionHistoryRow: View {
                     .font(.system(size: 13, weight: .semibold))
                     .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .buttonStyle(GhostButtonStyle())
+                .modifier(SecondaryControlStyle())
                 .disabled(!canRetry)
                 .opacity(canRetry || isRetrying ? 1 : 0.5)
                 .accessibilityLabel(isRetrying ? "Retrying transcription" : "Retry transcription")
@@ -885,7 +901,7 @@ private struct HistoryRow: View {
                 Button(action: edit) {
                     Image(systemName: "square.and.pencil").frame(width: 44, height: 44)
                 }
-                .buttonStyle(GhostButtonStyle())
+                .modifier(SecondaryControlStyle())
                 .accessibilityLabel("Edit transcript and teach a spelling")
             }
             Button(action: copy) {
@@ -894,7 +910,7 @@ private struct HistoryRow: View {
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(GhostButtonStyle())
+            .modifier(SecondaryControlStyle())
             .accessibilityLabel("Copy transcript")
         }
         .padding(.vertical, 14)
@@ -957,7 +973,7 @@ struct CreditScreen: View {
                     .frame(height: 48)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(GhostButtonStyle())
+            .modifier(SecondaryControlStyle())
             .disabled(store.isLoading)
 
             LedgerNoteCard()
@@ -1107,7 +1123,7 @@ private struct LedgerNoteCard: View {
     }
 }
 
-private struct SettingsScreen: View {
+struct SettingsScreen: View {
     @State private var isDictationPresented = false
     @ObservedObject var account: AccountStore
     @ObservedObject var store: StoreKitService
@@ -1116,102 +1132,51 @@ private struct SettingsScreen: View {
     @State private var isConfirmingDelete = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            ScreenTitle(kicker: "Account", title: "Settings")
-
-            AccountSummaryCard(account: account)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("PREFERENCES")
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .tracking(1.2)
-                    .foregroundStyle(AppTheme.secondary)
-
-                VStack(spacing: 0) {
-                    SettingsRow(title: "Languages & vocabulary", detail: "Dictation", systemName: "character.bubble") {
-                        isDictationPresented = true
-                    }
-                    Divider().background(AppTheme.borderSoft)
-                    SettingsRow(title: "VoiceType keyboard", detail: "Set up", systemName: "keyboard", action: openKeyboardSetup)
-                    Divider().background(AppTheme.borderSoft)
-                    SettingsRow(title: "Open iOS Settings", detail: "", systemName: "gearshape") {
-                        if let url = URL(string: UIApplication.openSettingsURLString) {
-                            UIApplication.shared.open(url)
-                        }
-                    }
-                    Divider().background(AppTheme.borderSoft)
-                    SettingsRow(title: "Check purchases", detail: "", systemName: "arrow.clockwise") {
-                        Task { await store.checkPurchases(account: account) }
-                    }
-                    .disabled(store.isLoading || account.isLoading)
-                }
-                .padding(.horizontal, 18)
-                .background(AppTheme.surface)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(AppTheme.border, lineWidth: 1)
-                }
+        Form {
+            Section {
+                AccountSummaryCard(account: account)
+                    .listRowInsets(EdgeInsets())
             }
-
+            Section("Preferences") {
+                Button { isDictationPresented = true } label: {
+                    Label("Languages & vocabulary", systemImage: "character.bubble")
+                }
+                Button(action: openKeyboardSetup) {
+                    Label("Set up VoiceType keyboard", systemImage: "keyboard")
+                }
+                Button {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                } label: {
+                    Label("Open iOS Settings", systemImage: "gearshape")
+                }
+                Button {
+                    Task { await store.checkPurchases(account: account) }
+                } label: {
+                    Label("Check purchases", systemImage: "arrow.clockwise")
+                }
+                .disabled(store.isLoading || account.isLoading)
+            }
             #if DEBUG
             DeveloperToolsSection(account: account)
             #endif
-
-            Button {
-                account.signOut()
-            } label: {
-                Text("Sign out")
-                    .font(.system(size: 15.5, weight: .semibold))
-                    .foregroundStyle(AppTheme.coral)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                    .contentShape(Rectangle())
+            Section {
+                Button("Sign out") { account.signOut() }
+                Button("Delete account", role: .destructive) { isConfirmingDelete = true }
             }
-            .background(AppTheme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(AppTheme.border, lineWidth: 1)
-            }
-            .buttonStyle(PlainHapticButtonStyle())
-            .disabled(account.isLoading || store.isLoading)
-
-            Button(role: .destructive) {
-                isConfirmingDelete = true
-            } label: {
-                Text("Delete account")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(AppTheme.coral)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(PlainHapticButtonStyle())
             .disabled(account.isLoading || store.isLoading)
 
             if let message = store.statusMessage {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(AppTheme.inkSoft)
-                    .fixedSize(horizontal: false, vertical: true)
+                Section { Text(message).font(.footnote).foregroundStyle(.secondary) }
             }
-
             if let error = account.errorMessage ?? store.errorMessage {
-                Text(error)
-                    .font(.footnote)
-                    .foregroundStyle(AppTheme.coral)
-                    .frame(maxWidth: .infinity)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
+                Section { Text(error).font(.footnote).foregroundStyle(AppTheme.coral) }
             }
-
-            Text("VoiceType · v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1")")
-                .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(AppTheme.secondary)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 4)
+            Section {
+                Text("VoiceType · v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1")")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
         }
+        .scrollContentBackground(.hidden)
         .sheet(isPresented: $isDictationPresented) { DictationSettingsView(userID: account.userID) }
         .alert("Delete account?", isPresented: $isConfirmingDelete) {
             Button("Cancel", role: .cancel) {}
@@ -1308,7 +1273,7 @@ private struct DeveloperToolsSection: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: 46)
                 }
-                .buttonStyle(InkButtonStyle())
+                .modifier(PrimaryControlStyle())
                 .disabled(!account.isSignedIn)
             }
             .panelStyle()
@@ -1361,7 +1326,7 @@ private struct KeyboardSetupScreen: View {
                     Label("Open Settings", systemImage: "gearshape")
                         .frame(maxWidth: .infinity, minHeight: 48)
                 }
-                .buttonStyle(InkButtonStyle())
+                .modifier(PrimaryControlStyle())
 
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "info.circle")
@@ -1465,6 +1430,7 @@ private struct SetupStep: View {
 }
 
 private struct RecordingLimitPicker: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Binding var selection: RecordingDurationLimit
     let isDisabled: Bool
 
@@ -1476,31 +1442,15 @@ private struct RecordingLimitPicker: View {
                 .textCase(.uppercase)
                 .foregroundStyle(AppTheme.secondary)
 
-            HStack(spacing: 6) {
-                ForEach(RecordingDurationLimit.allCases) { limit in
-                    Button {
-                        guard !isDisabled else { return }
-                        withAnimation(.snappy) {
-                            selection = limit
-                        }
-                    } label: {
-                        Text(limit.label)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(selection == limit ? AppTheme.surface : AppTheme.inkSoft)
-                            .frame(maxWidth: .infinity)
-                            .frame(minHeight: 44)
-                            .background(selection == limit ? AppTheme.ink : AppTheme.surface.opacity(0.72))
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .stroke(selection == limit ? Color.clear : AppTheme.borderSoft, lineWidth: 1)
-                            }
-                    }
-                    .disabled(isDisabled)
-                    .buttonStyle(PlainHapticButtonStyle())
-                    .accessibilityAddTraits(selection == limit ? .isSelected : [])
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    durationPicker.pickerStyle(.menu)
+                } else {
+                    durationPicker.pickerStyle(.segmented)
                 }
             }
+            .disabled(isDisabled)
+            .frame(minHeight: 44)
 
             Text("Keeps keyboard mic available for repeated clips. Time starts when you turn on the mic; starting or stopping a clip does not reset it. Changes apply to the current session.")
                 .font(.footnote)
@@ -1514,6 +1464,14 @@ private struct RecordingLimitPicker: View {
             }
         }
         .opacity(isDisabled ? 0.62 : 1)
+    }
+
+    private var durationPicker: some View {
+        Picker("Session length", selection: $selection) {
+            ForEach(RecordingDurationLimit.allCases) { limit in
+                Text(limit.label).tag(limit)
+            }
+        }
     }
 }
 

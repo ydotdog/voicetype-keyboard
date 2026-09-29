@@ -90,7 +90,10 @@ struct DictationPreferences: Codable, Equatable {
 
     /// Learn only a small edit explicitly saved by the user, never raw AI output.
     /// Expand Latin edits to full words; Chinese edits use the changed phrase.
-    static func correctedTerm(original: String, edited: String) -> String? {
+    static func correctedTerm(
+        original: String, edited: String,
+        nameLookup: (String, Range<String.Index>) -> String? = recognizedName
+    ) -> String? {
         let old = Array(original), new = Array(edited)
         guard old != new, !old.isEmpty, !new.isEmpty else { return nil }
         var start = 0
@@ -100,18 +103,7 @@ struct DictationPreferences: Codable, Equatable {
         guard end > start, end - start <= 40, oldEnd - start <= 40 else { return nil }
         let changedStart = edited.index(edited.startIndex, offsetBy: start)
         let changedEnd = edited.index(edited.startIndex, offsetBy: end)
-        let tagger = NLTagger(tagSchemes: [.nameType])
-        tagger.string = edited
-        var namedTerm: String?
-        tagger.enumerateTags(in: edited.startIndex..<edited.endIndex, unit: .word, scheme: .nameType,
-                             options: [.joinNames, .omitWhitespace, .omitPunctuation]) { tag, range in
-            guard range.overlaps(changedStart..<changedEnd),
-                  tag == .personalName || tag == .placeName || tag == .organizationName else { return true }
-            let candidate = String(edited[range])
-            if (2...40).contains(candidate.count) { namedTerm = candidate }
-            return false
-        }
-        if let namedTerm { return namedTerm }
+        if let namedTerm = nameLookup(edited, changedStart..<changedEnd) { return namedTerm }
         func isLatinWord(_ c: Character) -> Bool {
             c.unicodeScalars.allSatisfy { $0.value < 0x0250 && (CharacterSet.letters.contains($0) || $0 == "'" || $0 == "-") }
         }
@@ -126,6 +118,24 @@ struct DictationPreferences: Codable, Equatable {
               term.unicodeScalars.contains(where: CharacterSet.letters.contains) else { return nil }
         return term
     }
+
+    /// Named-entity recognition depends on optional system language resources.
+    /// Keep the conservative fallback usable when a name is not recognized.
+    private static func recognizedName(in text: String, overlapping changedRange: Range<String.Index>) -> String? {
+        let tagger = NLTagger(tagSchemes: [.nameType])
+        tagger.string = text
+        var namedTerm: String?
+        tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .nameType,
+                             options: [.joinNames, .omitWhitespace, .omitPunctuation]) { tag, range in
+            guard range.overlaps(changedRange),
+                  tag == .personalName || tag == .placeName || tag == .organizationName else { return true }
+            let candidate = String(text[range])
+            if (2...40).contains(candidate.count) { namedTerm = candidate }
+            return false
+        }
+        return namedTerm
+    }
+
 }
 
 @MainActor
