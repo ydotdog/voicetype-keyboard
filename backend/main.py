@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dictation import parse_context, provider_hints, normalize_transcript
+from provider_admin import ProviderConfigStore, ProviderSettings, active_provider, install_admin
 
 import base64
 import asyncio
@@ -216,6 +217,17 @@ MODEL_PRICING = {
 }
 
 
+provider_store = ProviderConfigStore(
+    os.getenv("PROVIDER_CONFIG_PATH", ""), os.getenv("PROVIDER_CONFIG_ENCRYPTION_KEY", ""),
+    lambda: ProviderSettings(model=OPENAI_TRANSCRIBE_MODEL, account_id=OPENAI_PROVIDER_ACCOUNT_ID,
+                             api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL),
+)
+
+
+def request_provider() -> ProviderSettings:
+    return active_provider.get() or provider_store.current()
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> Any:
     on_startup()
@@ -290,7 +302,8 @@ class RequestBodyLimitMiddleware:
             await too_large_response()
 
 
-app = FastAPI(title="VoiceType API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="VoiceType API", version="0.3.0", lifespan=lifespan)
+install_admin(app, provider_store, MODEL_PRICING, logger)
 app.add_middleware(RequestBodyLimitMiddleware)
 apple_jwks = PyJWKClient(APPLE_JWKS_URL)
 pg_pool: Optional[Any] = None
@@ -375,7 +388,7 @@ def privacy_policy_html() -> str:
     <tbody>
       <tr><td>Apple account identifier and email</td><td>Create and sign in to your account</td><td>Yes</td><td>Until you delete your account</td></tr>
       <tr><td>Name, only if shared at sign-in</td><td>Personalize your account</td><td>Yes</td><td>Until you delete your account</td></tr>
-      <tr><td>Audio you record</td><td>Sent to our transcription provider to produce text</td><td>Yes, in transit</td><td>Processed transiently on our server; the latest unfinished or failed recording is saved privately on your device for retry</td></tr>
+      <tr><td>Audio you record</td><td>Sent to our transcription provider to produce text</td><td>Yes, in transit</td><td>Processed transiently on our server; unfinished or failed recordings are saved privately on your device for retry</td></tr>
       <tr><td>Transcribed text</td><td>Returned to you and shown in your history</td><td>Yes</td><td>Until you delete your account</td></tr>
       <tr><td>Purchase records</td><td>Verify credit purchases and prevent duplicate grants</td><td>Yes</td><td>Until you delete your account</td></tr>
       <tr><td>Keyed hash of Apple account identifier and first welcome-credit grant time</td><td>Prevent repeated welcome-credit claims after account deletion</td><td>Pseudonymous</td><td>Retained after account deletion while the welcome-credit program operates</td></tr>
@@ -401,16 +414,25 @@ def privacy_policy_html() -> str:
   connection to our backend, which forwards it to OpenAI solely to generate the
   transcript. Our server processes audio transiently without retaining audio files.
   While keyboard mic is on, the app continuously records temporary audio on your
-  device. Only the clip between Speak and Stop is submitted. Idle audio files are
+  device. Only clips you start and finish from the keyboard are submitted. Idle audio files are
   periodically replaced and are not uploaded. The resulting transcript is stored in your account so you can reuse it
   and is cached in a shared container on your device so the keyboard can insert
   it into the current text field.</p>
 
-  <p>The latest unfinished or failed recording is saved in private device storage
-  for retry after a connection failure or app restart. It is excluded from device
-  backups and removed after success, Discard recording, explicit sign-out, or
-  account deletion. An expired login preserves it for the same account to recover
-  after signing in again. Signing in to a different account removes it.</p>
+  <p>Unfinished or failed recordings are saved separately in private device storage
+  for retry after a connection failure or app restart. Each is excluded from device
+  backups and removed after successful transcription, deletion from History, explicit
+  sign-out, or account deletion. An expired login preserves them for the same account
+  to recover after signing in again. Signing in to a different account removes them.
+  New recordings do not replace older failed recordings.</p>
+
+  <h2>Your permission</h2>
+  <p>Before using cloud transcription, you choose whether to allow VoiceType and
+  OpenAI to process your audio, language choices and vocabulary hints. You can
+  withdraw this permission in Settings → Cloud transcription. This stops an active
+  microphone session and prevents new uploads and retries. Audio already sent cannot
+  be recalled. Basic keyboard typing remains available without this permission,
+  Full Access, or a network connection.</p>
 
   <h2>Third parties</h2>
   <ul>
@@ -423,7 +445,7 @@ def privacy_policy_html() -> str:
   <ul>
     <li>Microphone: after you turn on keyboard mic, recording continues in other
     apps until you turn it off or the selected session duration ends. Only clips
-    marked with Speak and Stop are sent for transcription.</li>
+    you start and finish are sent for transcription.</li>
     <li>Keyboard Full Access: used so the VoiceType keyboard can read the latest
     transcript and recording state from the app's shared container. The keyboard
     does not transmit your keystrokes to us.</li>
@@ -506,7 +528,7 @@ def support_page_html() -> str:
 <body>
 <main>
   <h1>VoiceType Support</h1>
-  <p>VoiceType is a pay-as-you-go speech-to-text keyboard for iPhone.</p>
+  <p>VoiceType is a pay-as-you-go speech-to-text keyboard for iPhone and iPad.</p>
 
   <h2>Contact</h2>
   <p>For support, account deletion questions, billing questions, or privacy
@@ -1112,7 +1134,7 @@ def require_jwt_secret() -> None:
 
 
 def require_openai_key() -> None:
-    if not OPENAI_API_KEY:
+    if not request_provider().api_key:
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured.")
 
 
@@ -1673,7 +1695,7 @@ def verify_storekit_notification(jws: str) -> dict[str, Any]:
 
 
 def resolve_model(model: Optional[str]) -> str:
-    selected = (model or OPENAI_TRANSCRIBE_MODEL).strip()
+    selected = (model or request_provider().model).strip()
     if selected not in MODEL_PRICING:
         raise HTTPException(status_code=400, detail=f"Unsupported transcription model: {selected}")
     return selected
@@ -1802,7 +1824,8 @@ def provider_audio_duration(payload: dict[str, Any], measured_seconds: float) ->
 
 async def transcribe_audio(audio: bytes, filename: str, content_type: Optional[str], model: str, language: Optional[str], prompt: Optional[str] = None) -> dict[str, Any]:
     require_openai_key()
-    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
+    provider = request_provider()
+    headers = {"Authorization": f"Bearer {provider.api_key}"}
     data: dict[str, str] = {"model": model, "response_format": "json"}
     if model == "whisper-1":
         data["response_format"] = "verbose_json"
@@ -1813,8 +1836,8 @@ async def transcribe_audio(audio: bytes, filename: str, content_type: Optional[s
     if prompt and model != "gpt-4o-transcribe-diarize":
         data["prompt"] = prompt
     files = {"file": (filename, audio, content_type or "audio/m4a")}
-    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
-        response = await client.post(f"{OPENAI_BASE_URL}/v1/audio/transcriptions", headers=headers, data=data, files=files)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0), follow_redirects=False, trust_env=False) as client:
+        response = await client.post(f"{provider.base_url}/v1/audio/transcriptions", headers=headers, data=data, files=files)
     if response.status_code >= 400:
         # Log the provider response server-side only; its body can include
         # account-specific details that must not reach the client.
@@ -1861,7 +1884,7 @@ def health() -> dict[str, Any]:
     return {
         "ok": True,
         "service": "voicetype-api",
-        "model": OPENAI_TRANSCRIBE_MODEL,
+        "model": provider_store.current().model,
         "database": "postgres" if is_postgres() else "sqlite-local",
         "storekit_verification_mode": STOREKIT_VERIFICATION_MODE,
     }
@@ -1885,11 +1908,15 @@ def support_page() -> HTMLResponse:
 
 @app.get("/health/ready")
 def readiness() -> JSONResponse:
+    try:
+        provider = provider_store.current()
+    except (RuntimeError, OSError):
+        provider = None
     checks: dict[str, Any] = {
         "jwt_secret": bool(JWT_SECRET),
         "signup_grant_stable_secret": not SIGNUP_GRANT_ENABLED or bool(SIGNUP_GRANT_HMAC_SECRET),
         "audio_decoder": bool(shutil.which("ffmpeg")),
-        "openai_api_key": bool(OPENAI_API_KEY),
+        "openai_api_key": bool(provider and provider.api_key),
         "database": False,
         "storekit_strict": STOREKIT_VERIFICATION_MODE == "strict" and not ALLOW_UNVERIFIED_STOREKIT_JWS,
         "storekit_app_account_token_required": REQUIRE_STOREKIT_APP_ACCOUNT_TOKEN,
@@ -1914,7 +1941,7 @@ def readiness() -> JSONResponse:
         content={
             "ok": ok,
             "service": "voicetype-api",
-            "model": OPENAI_TRANSCRIBE_MODEL,
+            "model": provider.model if provider else "unavailable",
             "checks": checks,
         },
     )
@@ -2189,10 +2216,13 @@ async def create_transcription(
     # retains many 24 MB audio buffers on the small production server.
     if not _transcription_slots.acquire(blocking=False):
         raise HTTPException(status_code=503, detail="Transcription service is busy. Please retry shortly.", headers={"Retry-After": "3"})
+    provider_token = None
     try:
+        provider_token = active_provider.set(provider_store.current())
         return await perform_transcription(user, file, audio_seconds, language, model, idempotency_key,
                                            parse_context(preferred_languages, vocabulary))
     finally:
+        if provider_token is not None: active_provider.reset(provider_token)
         _transcription_slots.release()
 
 
@@ -2351,7 +2381,7 @@ async def perform_transcription(
                 (
                     transcription_id,
                     user["id"],
-                    OPENAI_PROVIDER_ACCOUNT_ID,
+                    request_provider().account_id,
                     selected_model,
                     billable_seconds,
                     transcript,

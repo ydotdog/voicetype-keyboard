@@ -1,0 +1,32 @@
+BACKGROUND DICTATION — GUIDELINE 2.5.4
+
+VoiceType records speech through its containing app while the user dictates from the VoiceType keyboard in another foreground app. The keyboard cannot access the microphone directly. It does not launch VoiceType; open the app manually to start a microphone session.
+
+TEST ON IPHONE OR IPAD
+
+1. Launch VoiceType and use Sign in with Apple. Check the Credit tab for enough credit for a short clip.
+2. In device Settings > General > Keyboard > Keyboards > Add New Keyboard, add VoiceType. Open its entry and enable Allow Full Access.
+3. Open VoiceType manually. On Home, tap Turn on keyboard mic. Read the disclosure and choose Allow cloud transcription. Tap Turn on keyboard mic again, then allow the system microphone prompt. Home displays Keyboard mic on.
+4. Navigate to the Home Screen, then open Apple Notes. Focus a normal editable note and select VoiceType using the globe/input-mode control. Notes remains in the foreground while VoiceType records in the background.
+5. Tap the keyboard microphone icon, speak a short sentence, then tap the waveform to finish. Keep the same field open while Transcribing is shown and the text is inserted.
+6. Return to VoiceType. The transcript is also available in History. Tap Turn off keyboard mic on Home. During a clip, Finish clip & turn off mic finishes that clip before ending the session. The Live Activity also has a stop control.
+
+PERSISTENT AUDIO AND USER CONTROL
+
+The user explicitly turns on keyboard mic. Its audio session stays active between clips for the selected duration: 5 min (default), 12 hr, or Forever. Forever means no app timer; system interruptions can still stop it. Individual clips have a 10-minute limit. Temporary idle audio is rotated and discarded locally. Only clips the user starts and finishes are submitted, rather than continuously uploading the session.
+
+If a session ends, open VoiceType manually to start another. Secure fields and apps that prohibit third-party keyboards use the system keyboard.
+
+FULL ACCESS, PRIVACY AND OFFLINE INPUT
+
+Full Access allows the keyboard to exchange recording commands, state and transcripts with VoiceType through a shared container. The keyboard does not upload text typed in other apps. Basic letters, numbers, space, punctuation, delete, return and switching keyboards remain available without Full Access or a network connection. Tap ABC to show typing keys; they appear automatically when Full Access is off.
+
+Before cloud dictation, users expressly allow selected audio, language choices and vocabulary hints to be processed by VoiceType and OpenAI. Settings > Cloud transcription withdraws consent, stops the active microphone and prevents new uploads and retries. Privacy and support links are accessible before sign-in and in Settings.
+
+OTHER REVIEW PATHS
+
+History preserves failed recordings separately with Retry and Delete. Credits are consumable App Store packs; Settings > Check purchases reconciles unfinished purchases. Settings > Delete account permanently removes the account and revokes the stored Apple sign-in grant; temporary revocation failures can be retried.
+
+PHYSICAL-DEVICE RECORDING
+
+The demonstration attachment will be added after final device verification. This draft has not been resubmitted for App Review.

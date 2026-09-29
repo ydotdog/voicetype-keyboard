@@ -1,6 +1,6 @@
 # VoiceType Privacy Policy
 
-_Last updated: 2026-09-20_
+_Last updated: 2026-09-29_
 
 VoiceType ("the app", "we") turns your speech into text. This policy explains what
 we collect, why, who processes it, and how you can delete it.
@@ -60,6 +60,15 @@ until it is transcribed or deleted. You can disable learning and remove individu
 words or clear the vocabulary in Settings. Signing out keeps this device's
 preferences for the same account; deleting the account removes them here.
 History corrections are local edits and do not update the server transcript.
+
+## Your permission
+
+Before using cloud transcription, you choose whether to allow VoiceType and OpenAI
+to process your audio, language choices and vocabulary hints. You can withdraw
+permission in Settings → Cloud transcription. This stops an active microphone
+session and prevents new uploads and retries. Audio already sent cannot be recalled.
+Basic typing remains available without this permission, Full Access, or a network
+connection.
 
 ## Third parties
 

@@ -39,6 +39,9 @@ struct DashboardView: View {
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
+            .sheet(isPresented: $recorder.needsCloudConsent) {
+                CloudTranscriptionConsentView(userID: account.userID)
+            }
             .task {
                 await initialLoad()
             }
@@ -59,6 +62,7 @@ struct DashboardView: View {
                 transcriptHistory = []
                 selectedTab = .home
                 isKeyboardSetupPresented = false
+                recorder.needsCloudConsent = false
                 if account.isSignedIn {
                     Task {
                         await handleKeyboardMicRequest()
@@ -332,6 +336,14 @@ private struct SignInScreen: View {
                         .foregroundStyle(AppTheme.coral)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                HStack {
+                    Link("Privacy policy", destination: CloudTranscriptionConsent.privacyURL)
+                    Text("·")
+                    Link("Support", destination: CloudTranscriptionConsent.supportURL)
+                }
+                .font(.footnote)
+                .frame(maxWidth: .infinity)
 
                 Button("How to set up and use the keyboard", action: openKeyboardSetup)
                     .font(.footnote.weight(.semibold))
@@ -1124,6 +1136,8 @@ private struct LedgerNoteCard: View {
 }
 
 struct SettingsScreen: View {
+    @ObservedObject private var consent = CloudTranscriptionConsent.shared
+    @State private var isConsentPresented = false
     @State private var isDictationPresented = false
     @ObservedObject var account: AccountStore
     @ObservedObject var store: StoreKitService
@@ -1156,6 +1170,17 @@ struct SettingsScreen: View {
                 }
                 .disabled(store.isLoading || account.isLoading)
             }
+            Section("Privacy & support") {
+                Toggle("Cloud transcription", isOn: Binding(
+                    get: { consent.isGranted(userID: account.userID) },
+                    set: { allowed in
+                        if allowed { isConsentPresented = true }
+                        else { consent.setGranted(false, userID: account.userID) }
+                    }
+                ))
+                Link("Privacy policy", destination: CloudTranscriptionConsent.privacyURL)
+                Link("Contact support", destination: CloudTranscriptionConsent.supportURL)
+            }
             #if DEBUG
             DeveloperToolsSection(account: account)
             #endif
@@ -1177,6 +1202,7 @@ struct SettingsScreen: View {
             }
         }
         .scrollContentBackground(.hidden)
+        .sheet(isPresented: $isConsentPresented) { CloudTranscriptionConsentView(userID: account.userID) }
         .sheet(isPresented: $isDictationPresented) { DictationSettingsView(userID: account.userID) }
         .alert("Delete account?", isPresented: $isConfirmingDelete) {
             Button("Cancel", role: .cancel) {}
@@ -1313,7 +1339,7 @@ private struct KeyboardSetupScreen: View {
                     Divider().background(AppTheme.borderSoft)
                     SetupStep(index: "03", title: "Allow Full Access", detail: "Tap VoiceType, then enable Allow Full Access so your keyboard can receive transcripts and control recording.")
                     Divider().background(AppTheme.borderSoft)
-                    SetupStep(index: "04", title: "Turn on the background microphone", detail: "Return to VoiceType, sign in, and on Home tap Turn on keyboard mic. Allow microphone access when asked. You need credit to transcribe a clip.")
+                    SetupStep(index: "04", title: "Turn on the background microphone", detail: "Return to VoiceType, sign in, and on Home tap Turn on keyboard mic. Review the cloud transcription disclosure and allow it, then tap Turn on keyboard mic again. Allow microphone access when asked. You need credit to transcribe a clip.")
                     Divider().background(AppTheme.borderSoft)
                     SetupStep(index: "05", title: "Dictate in another app", detail: "Open a text field and use the globe key to select VoiceType. Tap the microphone icon to start, then the waveform to finish. Keep that field open until your text appears. You can also copy your transcript from History.")
                 }

@@ -28,10 +28,11 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
     private var waveSessionID: String?
     private var waveUpdatedAt: Date?
     private let helperLabel = UILabel()
-    private var openAppController: UIHostingController<KeyboardOpenAppLink>?
-    private(set) var keyboardActivationURL: URL?
-    private var activationPreparedAt: TimeInterval?
-    private var issuedActivationURLs: [URL] = []
+    private let typingToggle = UIButton(type: .system)
+    private let typingRows = UIStackView()
+    private var typingRequested = false
+    private var uppercase = false
+    private var numeric = false
     private let bottomRow = UIStackView()
     private let returnButton = UIButton(type: .system)
     private let deleteButton = UIButton(type: .system)
@@ -87,8 +88,6 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         super.viewDidAppear(animated)
         isKeyboardVisible = true
         // Returning after a previous launch gets a fresh single-use capability.
-        keyboardActivationURL = nil
-        activationPreparedAt = nil
         refreshKeyboardState()
         prepareHaptics()
         startRefreshing()
@@ -169,8 +168,8 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
 
         setupTopRow()
         setupActionArea()
-        setupOpenAppLink()
         setupBottomRow()
+        setupTypingKeys()
         applyPalette()
     }
 
@@ -198,6 +197,7 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         for bar in waveStack.arrangedSubviews {
             bar.backgroundColor = palette.live
         }
+        if !typingRows.arrangedSubviews.isEmpty { rebuildTypingKeys() }
         markView.setNeedsDisplay()
     }
 
@@ -398,53 +398,70 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         ])
     }
 
-    private func setupOpenAppLink() {
-        // A real user-tapped SwiftUI Link uses the system URL action. Keep it
-        // beside the UIKit control, whose hitTest intentionally captures taps.
-        let controller = UIHostingController(rootView: makeOpenAppLink())
-        openAppController = controller
-        addChild(controller)
-        controller.view.translatesAutoresizingMaskIntoConstraints = false
-        controller.view.backgroundColor = .clear
-        controller.view.accessibilityIdentifier = "keyboard.openApp"
-        contentView.addSubview(controller.view)
+    private var showsTyping: Bool { typingRequested || !hasFullAccess }
+
+    private func setupTypingKeys() {
+        configureTextKey(typingToggle, text: "ABC", accessibilityLabel: "Show typing keys")
+        typingToggle.accessibilityIdentifier = "keyboard.typingToggle"
+        typingToggle.addTarget(self, action: #selector(toggleTyping), for: .touchUpInside)
+        contentView.addSubview(typingToggle)
+        typingRows.axis = .vertical
+        typingRows.spacing = 6
+        typingRows.distribution = .fillEqually
+        typingRows.translatesAutoresizingMaskIntoConstraints = false
+        typingRows.accessibilityIdentifier = "keyboard.typingKeys"
+        contentView.addSubview(typingRows)
         NSLayoutConstraint.activate([
-            controller.view.leadingAnchor.constraint(equalTo: actionControl.leadingAnchor),
-            controller.view.trailingAnchor.constraint(equalTo: actionControl.trailingAnchor),
-            controller.view.topAnchor.constraint(equalTo: actionControl.topAnchor),
-            controller.view.bottomAnchor.constraint(equalTo: actionControl.bottomAnchor)
+            typingToggle.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            typingToggle.topAnchor.constraint(equalTo: contentView.topAnchor),
+            typingToggle.widthAnchor.constraint(equalToConstant: 52),
+            typingToggle.heightAnchor.constraint(equalToConstant: 44),
+            typingRows.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
+            typingRows.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
+            typingRows.topAnchor.constraint(equalTo: helperLabel.bottomAnchor, constant: 8),
+            typingRows.heightAnchor.constraint(equalToConstant: 162)
         ])
-        controller.didMove(toParent: self)
+        rebuildTypingKeys()
     }
 
-    private func makeOpenAppLink() -> KeyboardOpenAppLink {
-        KeyboardOpenAppLink(destination: keyboardActivationURL ?? URL(string: "voicetype://keyboard")!) { [weak self] in
-            self?.playActionFeedback()
+    private func rebuildTypingKeys() {
+        typingRows.arrangedSubviews.forEach { typingRows.removeArrangedSubview($0); $0.removeFromSuperview() }
+        let letters = numeric ? ["1234567890", "-/:;()$&@", ".,?!'\""] : ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
+        var rows = letters.map { row in row.map { uppercase && !numeric ? String($0).uppercased() : String($0) } }
+        rows.append([numeric ? "ABC" : "123", "shift", "space", "."])
+        for values in rows {
+            let row = UIStackView()
+            row.axis = .horizontal; row.distribution = .fillEqually; row.spacing = 5
+            for value in values {
+                let button = UIButton(type: .system)
+                configureTextKey(button, text: value == "shift" ? (uppercase ? "⇧ ON" : "⇧") : value,
+                                 accessibilityLabel: value == "shift" ? "Shift" : value)
+                button.titleLabel?.font = .systemFont(ofSize: 18)
+                button.layer.cornerRadius = 6
+                button.accessibilityIdentifier = "keyboard.character.\(value.lowercased())"
+                button.addAction(UIAction { [weak self] _ in self?.typeKey(value) }, for: .touchUpInside)
+                row.addArrangedSubview(button)
+            }
+            typingRows.addArrangedSubview(row)
         }
     }
 
-    private func refreshOpenAppActivation() {
-        guard hasFullAccess, !viewModel.isKeyboardReady, !viewModel.isKeyboardRecording,
-              !viewModel.isTranscribing, pendingAction == nil else {
-            issuedActivationURLs.forEach { KeyboardMicActivationStore.shared.revoke($0) }
-            issuedActivationURLs.removeAll()
-            keyboardActivationURL = nil
-            activationPreparedAt = nil
-            return
+    @objc private func toggleTyping() {
+        typingRequested = !showsTyping
+        updateUI(force: true)
+    }
+
+    private func typeKey(_ value: String) {
+        updateDocumentContext()
+        guard activeDocumentIdentifier != nil else { return }
+        switch value {
+        case "ABC", "123": numeric.toggle(); rebuildTypingKeys()
+        case "shift": uppercase.toggle(); rebuildTypingKeys()
+        default:
+            clearAutoInsert()
+            textDocumentProxy.insertText(value == "space" ? " " : value)
+            if uppercase && !numeric { uppercase = false; rebuildTypingKeys() }
         }
-        guard isKeyboardVisible, viewIfLoaded?.window != nil else { return }
-        let now = ProcessInfo.processInfo.systemUptime
-        if let activationPreparedAt, now - activationPreparedAt >= 0,
-           now - activationPreparedAt < 30 { return }
-        activationPreparedAt = now
-        keyboardActivationURL = KeyboardMicActivationStore.shared.makeURL(uptime: now)
-        if let keyboardActivationURL { issuedActivationURLs.append(keyboardActivationURL) }
-        // Retain the previous URL briefly: rotating the Link while a finger or
-        // VoiceOver is on it must not invalidate an in-flight system open.
-        while issuedActivationURLs.count > 4 {
-            KeyboardMicActivationStore.shared.revoke(issuedActivationURLs.removeFirst())
-        }
-        openAppController?.rootView = makeOpenAppLink()
     }
 
     private func configureIconKey(_ button: UIButton, systemName: String, accessibilityLabel: String) {
@@ -712,7 +729,6 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
 
     private func updateUI(force: Bool = false) {
         updateWaveform()
-        refreshOpenAppActivation()
         if isKeyboardVisible { startRefreshing() }
         let uiState = KeyboardUIState(
             pendingAction: pendingAction,
@@ -735,11 +751,10 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         let canUseBridge = viewModel.isKeyboardReady && hasFullAccess
         let microphoneOff = hasFullAccess && !viewModel.isKeyboardReady
             && !viewModel.isKeyboardRecording && !viewModel.isTranscribing && pendingAction == nil
-        openAppController?.view.isHidden = !microphoneOff
-        actionControl.isHidden = microphoneOff
+        actionControl.isHidden = false
         let needsDocument = hasFullAccess && (viewModel.isKeyboardReady || viewModel.isKeyboardRecording)
         actionControl.isEnabled = pendingAction == nil && (!viewModel.isTranscribing || !hasFullAccess)
-            && (!needsDocument || hasDocumentContext) && !microphoneOff
+            && (!needsDocument || hasDocumentContext)
         returnButton.isEnabled = hasDocumentContext
         deleteButton.isEnabled = hasDocumentContext
         let helperText = actionNotice ?? defaultHelperText(canUseBridge: canUseBridge, pendingAction: pendingAction)
@@ -749,11 +764,17 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         // recording stays compact, with the waveform near the keyboard center.
         let showsNotice = !helperLabel.isHidden
         helperHeightConstraint?.constant = showsNotice ? 32 : 0
-        keyboardHeightConstraint?.constant = keyboardHeight + (showsNotice ? 36 : 0)
+        typingRows.isHidden = !showsTyping
+        typingToggle.setTitle(showsTyping ? "Hide" : "ABC", for: .normal)
+        typingToggle.accessibilityLabel = showsTyping ? "Hide typing keys" : "Show typing keys"
+        typingToggle.isHidden = !hasFullAccess
+        keyboardHeightConstraint?.constant = keyboardHeight + (showsNotice ? 36 : 0) + (showsTyping ? 182 : 0)
 
         actionControl.accessibilityHint = helperText
         if !hasFullAccess {
             setStatusAction(systemName: "gearshape", title: "Enable Access", accessibilityLabel: "Show Full Access instructions", tintColor: palette.inkSoft)
+        } else if microphoneOff {
+            setStatusAction(systemName: "mic", title: "Turn on mic in VoiceType", accessibilityLabel: "Show microphone instructions", tintColor: palette.inkSoft)
         } else if pendingAction == .startingClip {
             setStatusAction(systemName: "mic.fill", title: "Starting", accessibilityLabel: "Starting recording", tintColor: palette.live)
         } else if pendingAction == .stoppingClip {
@@ -864,6 +885,7 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
             RecordingBridgeStore.requestStartClip()
         } else {
             setPendingAction(nil)
+            actionNotice = "Open VoiceType from your Home Screen, tap Turn on keyboard mic, then return here."
         }
         viewModel.refresh()
         clearResolvedPendingAction()
@@ -967,39 +989,6 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
             clearAutoInsert()
             actionNotice = pendingAction.timeoutMessage
         }
-    }
-}
-
-private struct KeyboardOpenAppLink: View {
-    private let palette = KeyboardPalette()
-    let destination: URL
-    let onPress: @MainActor () -> Void
-
-    var body: some View {
-        Link(destination: destination) {
-            Image(systemName: "mic")
-                .font(.system(size: 24, weight: .regular))
-                .foregroundStyle(Color(uiColor: palette.keySurface))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(uiColor: palette.ink), in: Capsule())
-                .contentShape(Capsule())
-        }
-        .buttonStyle(KeyboardLinkButtonStyle(onPress: onPress))
-        .accessibilityLabel("Turn on keyboard microphone")
-        .accessibilityHint("Opens VoiceType and enables the background microphone. Return here to dictate.")
-        .accessibilityIdentifier("keyboard.openAppLink")
-    }
-}
-
-private struct KeyboardLinkButtonStyle: ButtonStyle {
-    let onPress: @MainActor () -> Void
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .opacity(configuration.isPressed ? 0.82 : 1)
-            .onChange(of: configuration.isPressed) { _, pressed in
-                if pressed { onPress() }
-            }
     }
 }
 
