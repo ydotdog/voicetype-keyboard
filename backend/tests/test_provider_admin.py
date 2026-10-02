@@ -1,26 +1,32 @@
 import json
+import logging
 from dataclasses import replace
+from html.parser import HTMLParser
 from pathlib import Path
 
 import httpx
 import pytest
 from cryptography.fernet import Fernet
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from test_billing import load_main
-from provider_admin import password_hash, active_provider
+from provider_admin import password_hash, active_provider, install_admin, ProviderConfigStore, ProviderSettings
 
 
 @pytest.fixture
-def owner(tmp_path, monkeypatch):
+def owner(tmp_path, monkeypatch, request):
+    config = getattr(request, "param", {})
+    origin = config.get("origin", "https://testserver")
+    monkeypatch.setenv("ADMIN_BASE_PATH", config.get("base_path", "/admin"))
     monkeypatch.setenv("ADMIN_SESSION_SECRET", "private-owner-test-secret-" * 3)
     monkeypatch.setenv("ADMIN_PASSWORD_HASH", password_hash("test-owner-password"))
-    monkeypatch.setenv("ADMIN_ORIGIN", "https://testserver")
+    monkeypatch.setenv("ADMIN_ORIGIN", origin)
     monkeypatch.setenv("PROVIDER_CONFIG_PATH", str(tmp_path / "provider.enc"))
     monkeypatch.setenv("PROVIDER_CONFIG_ENCRYPTION_KEY", Fernet.generate_key().decode())
     monkeypatch.setenv("OPENAI_API_KEY", "original-api-secret")
     main = load_main(tmp_path, monkeypatch)
-    with TestClient(main.app, base_url="https://testserver") as client:
+    with TestClient(main.app, base_url=origin) as client:
         yield main, client
 
 
@@ -151,3 +157,95 @@ def test_login_attempts_are_bounded(owner):
     _, c = owner
     for _ in range(12): assert post(c, "login", {"password": "wrong"}).status_code == 401
     assert post(c, "login", {"password": "wrong"}).status_code == 429
+
+
+@pytest.mark.parametrize("owner", [{"base_path": "/voicetype/admin", "origin": "https://apeonwheels.com"}], indirect=True)
+def test_company_prefix_routes_origin_cookie_scope_and_logout(owner, monkeypatch):
+    _, c = owner
+    prefix = "/voicetype/admin"
+    origin = "https://apeonwheels.com"
+
+    class PageLinks(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.base_path = None
+            self.links = []
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if tag == "html": self.base_path = attrs.get("data-admin-base-path")
+            if tag in {"link", "script"}: self.links.append(attrs.get("href") or attrs.get("src"))
+
+    page = c.get(prefix)
+    assert page.status_code == 200 and "__ADMIN_BASE_PATH__" not in page.text
+    parsed = PageLinks(); parsed.feed(page.text)
+    assert parsed.base_path == prefix
+    assert parsed.links == [prefix + "/assets/admin.css", prefix + "/assets/admin.js"]
+    for url in parsed.links:
+        response = c.get(url)
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["x-content-type-options"] == "nosniff"
+    assert 'href="' + prefix + '"' in page.text
+    assert c.get(prefix + "/").url.path == prefix
+    assert c.get("/health").status_code == 200
+    for path in ("/admin", "/admin/api/state", prefix + "-other", "/voicetype/administrator"):
+        response = c.get(path)
+        assert response.status_code == 404
+        assert "x-frame-options" not in response.headers
+
+    unauthenticated = c.get(prefix + "/api/state")
+    assert unauthenticated.status_code == 401
+    assert "frame-ancestors 'none'" in unauthenticated.headers["content-security-policy"]
+    for path, data in [("logout", {}), ("test", body()), ("config", body())]:
+        assert c.post(prefix + "/api/" + path, headers={"Origin": origin}, json=data).status_code == 401
+    credentials = {"password": "test-owner-password"}
+    for headers in ({}, {"Origin": "https://voicetype.y.dog"}, {"Origin": "https://attacker.example"},
+                    {"Origin": origin, "Sec-Fetch-Site": "cross-site"}):
+        assert c.post(prefix + "/api/login", headers=headers, json=credentials).status_code == 403
+
+    response = c.post(prefix + "/api/login", headers={"Origin": origin}, json=credentials)
+    assert response.status_code == 200
+    cookie = response.headers["set-cookie"]
+    assert "Path=" + prefix in cookie and "Domain=" not in cookie
+    assert "Secure" in cookie and "HttpOnly" in cookie and "SameSite=strict" in cookie
+    assert c.get(prefix + "/api/state").status_code == 200
+    for path in ("/", "/voicetype/privacy/", "/admin", prefix + "-other"):
+        assert "cookie" not in c.build_request("GET", path).headers
+
+    upstream(monkeypatch)
+    data = body()
+    proof = c.post(prefix + "/api/test", headers={"Origin": origin}, json=data)
+    assert proof.status_code == 200
+    data["test_token"] = proof.json()["test_token"]
+    assert c.post(prefix + "/api/config", headers={"Origin": origin}, json=data).status_code == 200
+    stolen = c.cookies.get("__Secure-voicetype-admin")
+    assert c.post(prefix + "/api/logout", headers={"Origin": "https://attacker.example"}, json={}).status_code == 403
+    assert c.get(prefix + "/api/state").status_code == 200
+    response = c.post(prefix + "/api/logout", headers={"Origin": origin}, json={})
+    assert response.status_code == 200
+    assert "Path=" + prefix in response.headers["set-cookie"] and "Max-Age=0" in response.headers["set-cookie"]
+    assert not c.cookies.get("__Secure-voicetype-admin")
+    c.cookies.set("__Secure-voicetype-admin", stolen, domain="apeonwheels.com", path=prefix)
+    assert c.get(prefix + "/api/state").status_code == 401
+
+
+@pytest.mark.parametrize("prefix", ["", "/", "admin", "//admin", "/admin/", "/a//admin", "/a/../admin",
+                                    "/a/./admin", "/a%2Fadmin", "/admin?x=1", "/admin#x", "/a\\admin",
+                                    "/admin\n", '/admin\"', "/" + "a" * 201,
+                                    "/v1/admin", "/health", "/privacy", "/support/admin", "/docs/admin"])
+def test_invalid_or_reserved_admin_prefix_fails_at_install(prefix, tmp_path, monkeypatch):
+    monkeypatch.setenv("ADMIN_BASE_PATH", prefix)
+    store = ProviderConfigStore("", "", lambda: ProviderSettings("whisper-1", "test", "test-key"))
+    with pytest.raises(ValueError, match="ADMIN_BASE_PATH"):
+        install_admin(FastAPI(), store, {}, logging.getLogger("test-owner-prefix"))
+
+
+@pytest.mark.parametrize("prefix, existing", [("/private", "/private/status"), ("/private/admin", "/private/{page}"),
+                                               ("/private/admin", "/private/{page}/api/{action}")])
+def test_admin_prefix_cannot_overlap_existing_route(prefix, existing, monkeypatch):
+    monkeypatch.setenv("ADMIN_BASE_PATH", prefix)
+    app = FastAPI()
+    app.add_api_route(existing, lambda: {"ok": True})
+    store = ProviderConfigStore("", "", lambda: ProviderSettings("whisper-1", "test", "test-key"))
+    with pytest.raises(ValueError, match="overlaps"):
+        install_admin(app, store, {}, logging.getLogger("test-owner-prefix"))

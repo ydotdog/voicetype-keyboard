@@ -1,5 +1,6 @@
 "use strict";
 const $ = id => document.getElementById(id);
+const apiBase = document.documentElement.dataset.adminBasePath + "/api/";
 let state, proof = "", restoreRevision = null, busy = false;
 const names = {"gpt-4o-mini-transcribe":"GPT-4o mini Transcribe · 日常口述", "gpt-4o-transcribe":"GPT-4o Transcribe", "whisper-1":"Whisper", "gpt-4o-transcribe-diarize":"GPT-4o Transcribe Diarize · 不支持词汇提示"};
 const messages = {admin_signed_in:"管理员登录",provider_test_passed:"转写测试成功",provider_test_failed:"转写测试失败",provider_config_saved:"配置已生效",transcription_provider_error:"线上转写服务错误"};
@@ -7,7 +8,7 @@ function announce(text) { $("message").textContent = text; }
 function invalidate() { proof = ""; restoreRevision = null; $("save").disabled = true; $("save").textContent = "保存并生效"; $("test-result").hidden = true; }
 function setBusy(value) { busy=value; for(const id of ["test","restore","refresh","model","account","api-key","history"]) $(id).disabled=value; $("save").disabled=value||!proof; if(!value && (!state || state.history.length<2)){ $("restore").disabled=true; $("history").disabled=true; } }
 async function api(path, body) {
-  const result = await fetch("/admin/api/"+path, {method:body===undefined?"GET":"POST", headers:body===undefined?{}:{"Content-Type":"application/json"}, body:body===undefined?undefined:JSON.stringify(body), credentials:"same-origin", cache:"no-store"});
+  const result = await fetch(apiBase+path, {method:body===undefined?"GET":"POST", headers:body===undefined?{}:{"Content-Type":"application/json"}, body:body===undefined?undefined:JSON.stringify(body), credentials:"same-origin", cache:"no-store"});
   const data = await result.json();
   if(!result.ok) {
     if(result.status===401) showLogin();

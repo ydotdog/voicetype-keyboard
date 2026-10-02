@@ -12,6 +12,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import tempfile
 import time
@@ -139,6 +140,23 @@ class ConfigInput(BaseModel):
 
 
 def install_admin(app, store: ProviderConfigStore, models: dict, logger) -> None:
+    base_path = os.getenv("ADMIN_BASE_PATH", "/admin")
+    # A canonical path is required for route matching, cookies, and HTML URLs.
+    # Reject URLs, root mounts, escapes, dot segments, and trailing/double slashes.
+    if (len(base_path) > 200
+            or re.fullmatch(r"/[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*", base_path) is None):
+        raise ValueError("ADMIN_BASE_PATH must be a canonical absolute path such as /admin or /voicetype/admin.")
+    # Public application routes are registered after this installer in main.py.
+    # Keep their namespaces separate even when a deployment changes the prefix.
+    if base_path.split("/")[1] in {"v1", "health", "privacy", "privacy-policy", "support", "help", "docs", "redoc"}:
+        raise ValueError("ADMIN_BASE_PATH overlaps a reserved application path.")
+    admin_paths = [base_path + suffix for suffix in ("", "/assets/admin.js", "/assets/admin.css", "/api/login", "/api/logout", "/api/state", "/api/test", "/api/config")]
+    for route in app.routes:
+        path = getattr(route, "path", "")
+        pattern = getattr(route, "path_regex", None)
+        overlaps = path and path != "/" and (path == base_path or path.startswith(base_path + "/") or base_path.startswith(path.rstrip("/") + "/"))
+        if overlaps or (pattern and any(pattern.fullmatch(candidate) for candidate in admin_paths)):
+            raise ValueError("ADMIN_BASE_PATH overlaps an existing application route.")
     session_secret = os.getenv("ADMIN_SESSION_SECRET", "")
     encoded_password = os.getenv("ADMIN_PASSWORD_HASH", "")
     origin = os.getenv("ADMIN_ORIGIN", "https://voicetype.y.dog").rstrip("/")
@@ -219,7 +237,8 @@ def install_admin(app, store: ProviderConfigStore, models: dict, logger) -> None
     class AdminHeaders:
         def __init__(self, app): self.app = app
         async def __call__(self, scope, receive, send):
-            if scope["type"] != "http" or not scope.get("path", "").startswith("/admin"):
+            path = scope.get("path", "")
+            if scope["type"] != "http" or not (path == base_path or path.startswith(base_path + "/")):
                 await self.app(scope, receive, send)
                 return
             async def secure_send(message):
@@ -233,19 +252,20 @@ def install_admin(app, store: ProviderConfigStore, models: dict, logger) -> None
             await self.app(scope, receive, secure_send)
     app.add_middleware(AdminHeaders)
 
-    @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
+    @app.get(base_path, response_class=HTMLResponse, include_in_schema=False)
     def page():
         available()
-        return HTMLResponse((Path(__file__).parent / "admin/index.html").read_text())
+        template = (Path(__file__).parent / "admin/index.html").read_text()
+        return HTMLResponse(template.replace("__ADMIN_BASE_PATH__", base_path))
 
-    @app.get("/admin/assets/{name}", include_in_schema=False)
+    @app.get(base_path + "/assets/{name}", include_in_schema=False)
     def asset(name: str):
         available()
         types = {"admin.js": "application/javascript", "admin.css": "text/css"}
         if name not in types: raise HTTPException(404, "Not found.")
         return Response((Path(__file__).parent / "admin" / name).read_text(), media_type=types[name])
 
-    @app.post("/admin/api/login", include_in_schema=False)
+    @app.post(base_path + "/api/login", include_in_schema=False)
     def login(body: LoginInput, request: Request):
         same_origin(request)
         # Global bound is intentional: never trust a spoofable forwarding header.
@@ -260,27 +280,27 @@ def install_admin(app, store: ProviderConfigStore, models: dict, logger) -> None
             sessions[sid] = int(time.time()) + 3600
         token = jwt.encode({"sub": "owner", "sid": sid, "aud": "voicetype-admin", "iat": int(time.time()), "exp": int(time.time()) + 3600}, session_secret, algorithm="HS256")
         response = JSONResponse({"ok": True})
-        response.set_cookie(cookie_name, token, max_age=3600, httponly=True, secure=secure, samesite="strict", path="/admin")
+        response.set_cookie(cookie_name, token, max_age=3600, httponly=True, secure=secure, samesite="strict", path=base_path)
         record("admin_signed_in")
         return response
 
-    @app.post("/admin/api/logout", include_in_schema=False)
+    @app.post(base_path + "/api/logout", include_in_schema=False)
     def logout(request: Request):
         same_origin(request)
         session = authenticate(request)
         with limit_lock: sessions.pop(session["sid"], None)
         response = JSONResponse({"ok": True})
-        response.delete_cookie(cookie_name, path="/admin", secure=secure, httponly=True, samesite="strict")
+        response.delete_cookie(cookie_name, path=base_path, secure=secure, httponly=True, samesite="strict")
         return response
 
-    @app.get("/admin/api/state", include_in_schema=False)
+    @app.get(base_path + "/api/state", include_in_schema=False)
     def state(request: Request):
         authenticate(request)
         with event_lock: recent = list(events)
         return {"current": store.current().public(), "history": store.history(),
                 "models": [{"id": k, "pricing": v} for k, v in models.items()], "events": recent}
 
-    @app.post("/admin/api/test", include_in_schema=False)
+    @app.post(base_path + "/api/test", include_in_schema=False)
     async def test(body: ConfigInput, request: Request):
         same_origin(request); session = authenticate(request)
         rate_limit("test", 6, 60)
@@ -312,7 +332,7 @@ def install_admin(app, store: ProviderConfigStore, models: dict, logger) -> None
         record("provider_test_passed", model=value.model, latency_ms=elapsed)
         return {"ok": True, "transcript": transcript[:500], "latency_ms": elapsed, "test_token": proof}
 
-    @app.post("/admin/api/config", include_in_schema=False)
+    @app.post(base_path + "/api/config", include_in_schema=False)
     def save(body: ConfigInput, request: Request):
         same_origin(request); session = authenticate(request)
         value = candidate(body)
