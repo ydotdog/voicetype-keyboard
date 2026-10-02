@@ -1,6 +1,37 @@
 # Deployment Status
 
-## Current TestFlight — build 25, 2026-09-20
+## Current TestFlight — build 27, 2026-09-21
+
+Version **1.0.0 (27)** is **VALID**, **IN_BETA_TESTING**, and available in
+**Internal Testers**, with English and Simplified Chinese testing notes verified.
+Build ID: `759502e9-0841-465f-89e2-eb885378bd00`.
+
+Restores the original logo size and placement using vector paths traced from the
+original asset, retaining the white background and layered icon. Actual compiled
+icon bounds match build 25. Signed archive and 6 packaging checks passed; app
+behavior remains build 26. No formal App Store review submission or backend changes.
+See [build 27 notes](LIQUID_GLASS_27.zh-CN.md); evidence is in `build/icon27/` and
+`build/release27/`. Archive: `build/VoiceType-1.0.0-27.xcarchive`.
+
+## Earlier TestFlight — build 26, 2026-09-21
+
+Version **1.0.0 (26)** is processed as **VALID**, **IN_BETA_TESTING**, and is
+available in **Internal Testers**. English and Simplified Chinese testing notes
+were saved and read back. Build ID: `383766a8-e914-44ae-96c3-13fce7a48e5d`.
+The formal App Store version remains `REJECTED` / `MANUAL`; no review submission
+was created.
+
+This update includes native Liquid Glass controls/navigation, a white layered
+app icon, and a stable Home microphone control. Validation passed: 116 iOS 26
+tests, 7 iOS 18 compatibility tests, and 6 packaging checks. Apple upload validation
+required adding the fourth orientation for iPad multitasking; the final signed
+archive was rebuilt and strictly verified at
+`build/VoiceType-1.0.0-26-final.xcarchive`. Upload and distribution evidence is in
+`build/release26/`. No production backend changes. Physical keyboard/audio/Clear
+appearance testing remains pending; iPhone Duo requires newer SDK/device validation.
+See [build 26 notes](LIQUID_GLASS_26.zh-CN.md) and [quota/API operations](OPERATIONS.zh-CN.md).
+
+## Earlier TestFlight — build 25, 2026-09-20
 
 Version **1.0.0 (25)** is processed as **VALID**, **IN_BETA_TESTING**, and is
 available in **Internal Testers**. English and Simplified Chinese testing notes

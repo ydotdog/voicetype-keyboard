@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VoiceType Privacy Policy · Apeonwheels</title><meta name="description" content="Privacy Policy for VoiceType by Apeonwheels Inc.">
+<link rel="canonical" href="https://apeonwheels.com/voicetype/privacy/"><link rel="stylesheet" href="/voicetype/site.css">
+</head><body><a class="skip" href="#main">Skip to content</a>
+<header><div class="wrap top"><a class="brand" href="/">Apeonwheels</a><nav aria-label="VoiceType navigation"><a href="/voicetype/">VoiceType</a><a href="/voicetype/support/">Support</a><a href="/voicetype/privacy/" aria-current="page">Privacy</a></nav></div></header>
+<main id="main" class="wrap"><h1 id="voicetype-privacy-policy">VoiceType Privacy Policy</h1>
+<p><em>Last updated: 2026-10-02</em></p>
+<p>VoiceType is provided by Apeonwheels Inc. ("we"). The app turns your
+speech into text. This policy explains what we collect, why, who
+processes it, and how you can delete it.</p>
+<h2 id="summary">Summary</h2>
+<ul>
+<li>We do <strong>not</strong> track you across other apps or
+websites.</li>
+<li>We do <strong>not</strong> sell your data or share it with data
+brokers or advertisers.</li>
+<li>You can delete your account from inside the app at any time
+(Settings → Delete account). Limited backups, operational logs, and a
+welcome-credit abuse-prevention marker may remain as described
+below.</li>
+</ul>
+<h2 id="what-we-collect-and-why">What we collect and why</h2>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Data collection details"><table>
+<thead>
+<tr>
+<th>Data</th>
+<th>Why</th>
+<th>Linked to you</th>
+<th>Kept</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Apple account identifier and email (from Sign in with Apple)</td>
+<td>Create and sign in to your account</td>
+<td>Yes</td>
+<td>Until account deletion from the active service; backup exceptions
+are described below</td>
+</tr>
+<tr>
+<td>Name (only if you choose to share it at sign-in)</td>
+<td>Personalize your account</td>
+<td>Yes</td>
+<td>Until account deletion from the active service; backup exceptions
+are described below</td>
+</tr>
+<tr>
+<td>Audio you record</td>
+<td>Sent to our transcription provider to produce text</td>
+<td>Yes, in transit</td>
+<td>Processed transiently on our server; unfinished or failed recordings
+are saved privately on your device for retry</td>
+</tr>
+<tr>
+<td>Transcribed text</td>
+<td>Returned to you and shown in your history</td>
+<td>Yes</td>
+<td>Until account deletion from the active service; backup exceptions
+are described below</td>
+</tr>
+<tr>
+<td>Purchase records (StoreKit transaction identifiers)</td>
+<td>Verify credit purchases and prevent duplicate grants</td>
+<td>Yes</td>
+<td>Until account deletion from the active service; backup and log
+exceptions are described below</td>
+</tr>
+<tr>
+<td>Operational event logs, which may include account and transaction
+identifiers and event times</td>
+<td>Service operation, security, and billing troubleshooting</td>
+<td>Yes, when identifiers are present</td>
+<td>Until logs rotate or are deleted; account deletion does not
+immediately remove them</td>
+</tr>
+<tr>
+<td>Keyed hash of Apple account identifier and first welcome-credit
+grant time</td>
+<td>Prevent repeated welcome-credit claims after account deletion</td>
+<td>Pseudonymous</td>
+<td>Retained after account deletion while the welcome-credit program
+operates</td>
+</tr>
+</tbody>
+</table></div>
+<p>We never ask for your Apple password. Sign in with Apple lets you
+hide your email with Apple's private relay; we support that.</p>
+<h2 id="how-transcription-works">How transcription works</h2>
+<p>When you record, the app keeps an audio session active so the
+VoiceType keyboard can mark the speech to transcribe. Audio is sent over
+an encrypted connection to our backend, which forwards it to our
+speech-to-text provider, <strong>OpenAI</strong>, solely to generate the
+transcript. Our server processes audio transiently without retaining
+audio files. While keyboard mic is on, the app continuously records
+temporary audio on your device. Only clips you actively start are
+submitted for transcription. A clip can finish when you tap to finish,
+turn off the microphone, reach a clip or session time limit, or
+encounter an audio interruption. Idle audio files are periodically
+replaced and are not uploaded. The resulting transcript is stored in
+your account so you can reuse it and is cached in a shared container on
+your device so the keyboard can insert it into the current text
+field.</p>
+<p>Unfinished or failed recordings are saved separately in the app's
+private device storage so you can retry from History after a connection
+failure or app restart. Each saved recording is excluded from device
+backups and is removed after its successful transcription, when you
+delete it from History, when you explicitly sign out, or after account
+deletion. An expired login preserves these recordings for the same
+account to recover after signing in again; signing in to a different
+account removes them. New recordings do not replace older failed
+recordings.</p>
+<h2 id="language-preferences-and-personal-vocabulary">Language
+preferences and personal vocabulary</h2>
+<p>Language choices and vocabulary are saved per account on this device.
+You can add names and phrases, or review and save a spelling suggested
+when you correct a transcript in History. We do not learn from text
+typed in other apps. Up to 50 recent words and your language choices
+accompany each recording sent to our backend and OpenAI. These hints are
+processed transiently, not stored as a server-side vocabulary profile. A
+failed recording retains its original hints until it is transcribed or
+deleted. You can disable learning and remove individual words or clear
+the vocabulary in Settings. Signing out keeps this device's preferences
+for the same account; deleting the account removes them here. History
+corrections are local edits and do not update the server transcript.</p>
+<h2 id="third-parties">Third parties</h2>
+<ul>
+<li><strong>Apple</strong> — Sign in with Apple (authentication) and the
+App Store (payments).</li>
+<li><strong>OpenAI</strong> — speech-to-text processing of the audio,
+language choices, and vocabulary hints you submit. Its processing is
+subject to its <a href="https://openai.com/enterprise-privacy/">API data
+practices</a>. Our statement that we do not retain audio files describes
+our own application server, not a guarantee about a provider's
+independent retention practices.</li>
+<li><strong>Google Cloud</strong> — hosting our application server and
+account database in the United States.</li>
+</ul>
+<p>We do not integrate advertising or analytics SDKs.</p>
+<h2 id="microphone-and-full-access">Microphone and Full Access</h2>
+<ul>
+<li><strong>Microphone:</strong> after you turn on keyboard mic,
+recording continues while you use other apps until you turn it off or
+the selected session duration ends. Only clips you actively start are
+sent for transcription; a time limit, microphone shutdown, or audio
+interruption can also finish and submit a clip.</li>
+<li><strong>Keyboard Full Access:</strong> the VoiceType keyboard
+requests Full Access so it can read the latest transcript from the app's
+shared container and insert it. The keyboard itself does not transmit
+your keystrokes to us.</li>
+</ul>
+<h2 id="data-retention-and-deletion">Data retention and deletion</h2>
+<p>Your account data is kept until you delete it. To delete your
+account:</p>
+<ol type="1">
+<li>Open VoiceType.</li>
+<li>Go to <strong>Settings → Delete account</strong>.</li>
+<li>Confirm.</li>
+</ol>
+<p>This removes your user record, remaining credit, transcription
+history, and stored purchase records from our active service, and
+revokes the app's Sign in with Apple token grant. Restricted
+disaster-recovery backups may retain earlier copies until those backups
+are replaced or deleted; they are not used to operate your deleted
+account. Operational, security, and billing troubleshooting logs may
+contain account and transaction identifiers and event times. Account
+deletion does not immediately remove these logs; they remain until log
+rotation or deletion and are not used to restore your deleted account.
+Deletion cannot be undone. Purchases already consumed are not refundable
+through deletion; refunds are handled by Apple.</p>
+<p>To prevent repeated welcome-credit claims, we retain only a keyed
+hash of your Apple account identifier and the original grant time after
+deletion. This marker contains no raw Apple identifier, email, name, or
+VoiceType account identifier. It cannot restore your deleted account or
+content and is not used for advertising or tracking. It remains while
+the welcome-credit program operates so the same Apple identity cannot
+claim the first-use offer again.</p>
+<p>When Apple refunds a credit pack, its credits are removed. If some
+were already used, your balance may be negative and you need sufficient
+credit before transcribing again. We never charge a payment method
+automatically. If Apple reverses the refund, the removed credits are
+restored.</p>
+<h2 id="security-and-service-operation">Security and service
+operation</h2>
+<p>We use encrypted connections for requests between the app, our
+server, and our transcription provider. Access to account data and
+backups is restricted to authorized service administration. Network
+services necessarily receive connection information such as an IP
+address when you connect. No transmission or storage system can be
+guaranteed completely secure.</p>
+<h2 id="children">Children</h2>
+<p>VoiceType is not directed to children under 13 and does not knowingly
+collect their data.</p>
+<h2 id="changes">Changes</h2>
+<p>We may update this policy. Material changes will be reflected by the
+"Last updated" date above.</p>
+<h2 id="contact">Contact</h2>
+<p>Questions or requests: <strong><a
+href="mailto:kq@apeonwheels.com">kq@apeonwheels.com</a></strong></p>
+</main>
+<footer><div class="wrap">© 2026 Apeonwheels Inc. · <a href="mailto:kq@apeonwheels.com">kq@apeonwheels.com</a></div></footer></body></html>

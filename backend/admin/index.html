@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN" data-admin-base-path="__ADMIN_BASE_PATH__">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VoiceType · 模型管理</title><link rel="stylesheet" href="__ADMIN_BASE_PATH__/assets/admin.css"><script src="__ADMIN_BASE_PATH__/assets/admin.js" defer></script></head>
+<body>
+<header><a class="brand" href="__ADMIN_BASE_PATH__">Voice<span>Type</span><i></i></a><span class="owner">仅限所有者</span><button id="logout" class="quiet" hidden>退出</button></header>
+<main>
+<section id="login-panel" class="login" hidden>
+  <p class="eyebrow">OWNER CONSOLE</p><h1>你的语音服务，<br>在这里管理。</h1><p class="muted">登录后更换 API 密钥、测试模型、管理生效配置。</p>
+  <form id="login-form"><label for="password">管理密码</label><input id="password" type="password" autocomplete="current-password" required maxlength="256"><button type="submit">登录管理后台 <span>→</span></button></form>
+</section>
+<section id="console" hidden>
+  <div class="intro"><div><p class="eyebrow">VOICE SERVICE</p><h1>模型与 API</h1><p class="muted">先测试，再生效。正在处理的录音继续使用原配置。</p></div><button id="refresh" class="quiet">刷新状态</button></div>
+  <section class="current" aria-labelledby="current-heading"><div><p class="eyebrow" id="current-heading">当前配置</p><h2 id="current-model">—</h2><p id="current-account" class="muted">—</p></div><div class="current-meta"><span class="badge">OpenAI</span><p id="current-key">—</p><p id="current-time" class="muted small">—</p></div></section>
+  <div class="grid">
+    <section class="card"><h2>更改配置</h2><p class="muted small">保存后对新请求生效，无需重新发布 App。</p>
+      <form id="config-form">
+        <label for="model">转写模型</label><select id="model" required></select><p id="model-help" class="hint"></p>
+        <label for="account">账户备注</label><input id="account" maxlength="64" pattern="[A-Za-z0-9._-]+" required autocomplete="off"><p class="hint">例如 openai-primary。用于区分不同的供应商账户。</p>
+        <label for="api-key">新的 API 密钥 <span class="optional">可留空</span></label><input id="api-key" type="password" autocomplete="off" spellcheck="false" maxlength="512" placeholder="留空继续使用当前密钥"><p class="hint">密钥加密保存在服务器，不会显示完整内容或传给 App。</p>
+        <div class="actions"><button id="test" type="button" class="secondary">测试转写</button><button id="save" type="submit" disabled>保存并生效</button></div>
+        <p class="hint">测试会向 OpenAI 发送一段固定的合成语音，产生少量 API 费用，不使用用户录音。</p>
+      </form>
+      <div id="test-result" class="result" role="status" hidden></div>
+    </section>
+    <aside>
+      <section class="card"><h2>恢复以前的配置</h2><p class="muted small">保留最近 10 份加密配置。恢复前也会验证密钥仍可使用。</p><label for="history">历史配置</label><select id="history"></select><button id="restore" class="secondary full">测试并准备恢复</button><p id="restore-hint" class="hint"></p></section>
+      <section class="card note"><h2>余额与费用</h2><p>App 内的用户积分，与 OpenAI 账户余额分别管理。更换密钥不会增加供应商余额。</p><a href="https://platform.openai.com/settings/organization/billing/overview" target="_blank" rel="noopener noreferrer">打开 OpenAI 账单 ↗</a><p class="small muted">此版本支持 OpenAI 官方转写接口。其他服务商需要同时调整 App 的数据告知和计费适配。</p></section>
+    </aside>
+  </div>
+  <section class="card activity"><h2>最近活动</h2><p class="muted small">显示本次服务启动后的连接测试和配置变更。完整记录保留在服务器日志中。</p><ul id="events"><li class="muted">暂无活动</li></ul></section>
+</section>
+<p id="message" role="status" aria-live="polite"></p>
+</main><footer>VoiceType · Private administration</footer>
+</body></html>

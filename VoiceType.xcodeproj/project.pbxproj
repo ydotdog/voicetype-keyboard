@@ -55,6 +55,7 @@
 		88D71421925B96CA95686C64 /* KeyboardViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B5A4DDC9C9E54B857D22CF9 /* KeyboardViewController.swift */; };
 		8B5544AC4BF49E118B8125D0 /* AppConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8391ABDC935CC6701BE3282B /* AppConstants.swift */; };
 		8BBDB70DD90F0693725E8C34 /* AppConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8391ABDC935CC6701BE3282B /* AppConstants.swift */; };
+		8E4902A5761976F778710A8F /* VoiceTypeIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = C96E464B265D5EE19B7E44DB /* VoiceTypeIcon.icon */; };
 		8EFD034E6A53235C81CEB50D /* RecordingAudioLevelStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F791F8F582A6A97C1013A7FF /* RecordingAudioLevelStore.swift */; };
 		8F93EC73F7C030FF210B0BC1 /* BackendClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C08C2528ED4CC6B32A429C6 /* BackendClient.swift */; };
 		91826BF6397445E8764CF86D /* DictationSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17D231701F2DDB6441F60A89 /* DictationSettingsView.swift */; };
@@ -188,6 +189,7 @@
 		C313B410B133BB014584577E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C3E3EEAFA87EE1CCAAAF85C3 /* VoiceTypeKeyboard.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = VoiceTypeKeyboard.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		C88A6712BE595BFABF7D8AC7 /* DictationPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationPreferences.swift; sourceTree = "<group>"; };
+		C96E464B265D5EE19B7E44DB /* VoiceTypeIcon.icon */ = {isa = PBXFileReference; path = VoiceTypeIcon.icon; sourceTree = "<group>"; };
 		D00BC21E29F67E6D0F11703E /* WeakObserverRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeakObserverRegistryTests.swift; sourceTree = "<group>"; };
 		D1278A65EC6455C886DEF798 /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
 		D75045E83806D62900EDA442 /* KeyboardMicLiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardMicLiveActivityController.swift; sourceTree = "<group>"; };
@@ -250,6 +252,7 @@
 			children = (
 				C313B410B133BB014584577E /* Assets.xcassets */,
 				8EB855351EB24778695B1930 /* LaunchScreen.storyboard */,
+				C96E464B265D5EE19B7E44DB /* VoiceTypeIcon.icon */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -535,6 +538,7 @@
 				DA52E77CEC1771094A80F4C3 /* Assets.xcassets in Resources */,
 				B2973B5185EF8FD257AB4001 /* LaunchScreen.storyboard in Resources */,
 				F46368354E85A963ACB53AAA /* PrivacyInfo.xcprivacy in Resources */,
+				8E4902A5761976F778710A8F /* VoiceTypeIcon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -702,7 +706,7 @@
 		1798379FA82958E4A91F3067 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = VoiceTypeIcon;
 				CODE_SIGN_ENTITLEMENTS = VoiceType/VoiceType.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
@@ -723,7 +727,7 @@
 		51842321D73A445EAB4377CB /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = VoiceTypeIcon;
 				CODE_SIGN_ENTITLEMENTS = VoiceType/VoiceType.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
@@ -878,7 +882,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 25;
+				CURRENT_PROJECT_VERSION = 27;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -987,7 +991,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 25;
+				CURRENT_PROJECT_VERSION = 27;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;

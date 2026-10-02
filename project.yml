@@ -7,7 +7,7 @@ settings:
   base:
     SWIFT_VERSION: 6.0
     MARKETING_VERSION: 1.0.0
-    CURRENT_PROJECT_VERSION: 25
+    CURRENT_PROJECT_VERSION: 27
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     VOICETYPE_APP_GROUP: group.com.kyleqi.voicetype
     VOICETYPE_DEV_CREDIT_KEY: ""
@@ -23,6 +23,11 @@ targets:
     deploymentTarget: "17.0"
     sources:
       - path: VoiceType
+        excludes:
+          - Resources/VoiceTypeIcon.icon
+      - path: VoiceType/Resources/VoiceTypeIcon.icon
+        type: file
+        buildPhase: resources
       - path: Shared
       - path: VoiceTypeActivityShared
     dependencies:
@@ -46,11 +51,17 @@ targets:
         VoiceTypeDevCreditKey: $(VOICETYPE_DEV_CREDIT_KEY)
         VoiceTypeAppGroup: $(VOICETYPE_APP_GROUP)
         UILaunchStoryboardName: LaunchScreen
-        UIRequiresFullScreen: true
         UIBackgroundModes:
           - audio
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         CFBundleURLTypes:
@@ -64,7 +75,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: VoiceType/VoiceType.entitlements
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: WC3PWB5R2J
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_APPICON_NAME: VoiceTypeIcon
         ENABLE_PREVIEWS: true
   VoiceTypeKeyboard:
     type: app-extension

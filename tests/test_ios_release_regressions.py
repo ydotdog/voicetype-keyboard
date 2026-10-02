@@ -60,3 +60,15 @@ def test_privacy_manifests_do_not_declare_tracking():
         assert manifest['NSPrivacyTracking'] is False
         for api in manifest.get('NSPrivacyAccessedAPITypes', []):
             assert api['NSPrivacyAccessedAPITypeReasons']
+
+
+def test_resizable_ipad_declares_all_multitasking_orientations():
+    app = plist('VoiceType/Info.plist')
+    if not app.get('UIRequiresFullScreen', False):
+        orientations = app.get('UISupportedInterfaceOrientations~ipad', app['UISupportedInterfaceOrientations'])
+        assert set(orientations) == {
+            'UIInterfaceOrientationPortrait',
+            'UIInterfaceOrientationPortraitUpsideDown',
+            'UIInterfaceOrientationLandscapeLeft',
+            'UIInterfaceOrientationLandscapeRight',
+        }

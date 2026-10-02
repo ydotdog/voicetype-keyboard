@@ -1,3 +1,5 @@
+> 2026-09-29 更新：当前候选为 build 29。最新修复、验收证据和待办见 [RELEASE_29.zh-CN.md](RELEASE_29.zh-CN.md)。下文保留历史记录，不能作为当前全部通过的结论。
+
 # Release checklist
 
 ## Current iOS candidate 24

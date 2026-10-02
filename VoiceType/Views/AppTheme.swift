@@ -2,18 +2,12 @@ import SwiftUI
 import UIKit
 
 enum AppTheme {
-    static let background = dynamicColor(light: UIColor(red: 0.953, green: 0.929, blue: 0.882, alpha: 1),
-                                         dark: UIColor(red: 0.082, green: 0.075, blue: 0.055, alpha: 1))
-    static let surface = dynamicColor(light: UIColor(red: 0.984, green: 0.969, blue: 0.937, alpha: 1),
-                                      dark: UIColor(red: 0.118, green: 0.106, blue: 0.078, alpha: 1))
-    static let surface2 = dynamicColor(light: .white,
-                                       dark: UIColor(red: 0.149, green: 0.133, blue: 0.090, alpha: 1))
-    static let ink = dynamicColor(light: UIColor(red: 0.106, green: 0.094, blue: 0.075, alpha: 1),
-                                  dark: UIColor(red: 0.945, green: 0.922, blue: 0.863, alpha: 1))
-    static let inkSoft = dynamicColor(light: UIColor(red: 0.298, green: 0.275, blue: 0.231, alpha: 1),
-                                      dark: UIColor(red: 0.733, green: 0.698, blue: 0.627, alpha: 1))
-    static let secondary = dynamicColor(light: UIColor(red: 0.549, green: 0.522, blue: 0.463, alpha: 1),
-                                        dark: UIColor(red: 0.518, green: 0.486, blue: 0.424, alpha: 1))
+    static let background = Color(uiColor: .systemGroupedBackground)
+    static let surface = Color(uiColor: .secondarySystemGroupedBackground)
+    static let surface2 = Color(uiColor: .tertiarySystemGroupedBackground)
+    static let ink = Color(uiColor: .label)
+    static let inkSoft = Color(uiColor: .secondaryLabel)
+    static let secondary = Color(uiColor: .secondaryLabel)
     static let accent = dynamicColor(light: UIColor(red: 0.878, green: 0.631, blue: 0.102, alpha: 1),
                                      dark: UIColor(red: 0.941, green: 0.737, blue: 0.271, alpha: 1))
     static let accentDeep = dynamicColor(light: UIColor(red: 0.290, green: 0.337, blue: 0.239, alpha: 1),
@@ -168,37 +162,6 @@ struct KickerText: View {
     }
 }
 
-struct InkButtonStyle: ButtonStyle {
-    var color = AppTheme.ink
-    var foreground = AppTheme.surface
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 16, weight: .semibold))
-            .foregroundStyle(foreground)
-            .background(color)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .opacity(configuration.isPressed ? 0.72 : 1)
-            .modifier(HapticPressModifier(isPressed: configuration.isPressed, style: .medium))
-    }
-}
-
-struct GhostButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(AppTheme.ink)
-            .background(AppTheme.surface2.opacity(0.52))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(AppTheme.border, lineWidth: 1)
-            }
-            .opacity(configuration.isPressed ? 0.72 : 1)
-            .modifier(HapticPressModifier(isPressed: configuration.isPressed, style: .light))
-    }
-}
-
 struct PlainHapticButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -225,5 +188,32 @@ private struct HapticPressModifier: ViewModifier {
                 feedback?.prepare()
             }
             .onDisappear { feedback = nil }
+    }
+}
+
+/// Use Apple's glass material for the primary control; older iOS retains a native button.
+struct PrimaryControlStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .buttonStyle(.glassProminent)
+                .tint(Color(red: 0.290, green: 0.337, blue: 0.239))
+                .controlSize(.large)
+        } else {
+            content
+                .buttonStyle(.borderedProminent)
+                .tint(Color(red: 0.290, green: 0.337, blue: 0.239))
+                .controlSize(.large)
+        }
+    }
+}
+
+struct SecondaryControlStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.buttonStyle(.glass).controlSize(.regular)
+        } else {
+            content.buttonStyle(.bordered).controlSize(.regular)
+        }
     }
 }

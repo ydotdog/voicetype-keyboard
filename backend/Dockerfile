@@ -9,7 +9,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY main.py dictation.py ./
+COPY main.py dictation.py provider_admin.py ./
+COPY admin ./admin
 
 # Run as a non-root user. /data keeps the SQLite fallback usable in
 # development; production uses Postgres via DATABASE_URL.
