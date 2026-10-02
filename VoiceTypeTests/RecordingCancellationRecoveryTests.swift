@@ -705,7 +705,6 @@ private final class CaptureFixture {
     ) -> RecordingController {
         RecordingController(
             recoveryDirectory: recoveryDirectory,
-            consentCheck: { _ in true },
             timeSource: timeSource,
             recorderFactory: { [self] in
                 let url = directory.appendingPathComponent("capture-\(UUID().uuidString).m4a")

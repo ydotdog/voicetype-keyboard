@@ -33,9 +33,6 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             publishBridgeState()
         }
     }
-    private enum ConsentAction { case keyboardMic, recording, retry(UUID) }
-    private var consentContinuation: (action: ConsentAction, sessionID: UUID, token: String, userID: String)?
-    @Published var needsCloudConsent = false
     @Published var errorMessage: String?
 
     private var recorder: AVAudioRecorder?
@@ -85,7 +82,6 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     private var recorderAutoStopAt: TimeInterval?
     private var recorderAutoStopFileTime: TimeInterval?
     private var recorderFactory: (() throws -> (AVAudioRecorder, URL))?
-    private var consentCheck: ((String) -> Bool)?
     private var permissionRequest: (() async -> Bool)?
     private var clipExporter: ((URL, URL, TimeInterval, TimeInterval) async throws -> Void)?
     private var audioSessionActivation: (() throws -> Void)?
@@ -112,14 +108,12 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     override init() {
         super.init()
         registerBridgeCommandObserver()
-        registerConsentObserver()
         registerRecoveryObservers()
         restoreFailedTranscription()
     }
 
     init(
         recoveryDirectory: URL,
-        consentCheck: ((String) -> Bool)? = nil,
         timeSource: RecordingTimeSource = .continuous(),
         recorderFactory: (() throws -> (AVAudioRecorder, URL))? = nil,
         permissionRequest: (() async -> Bool)? = nil,
@@ -127,7 +121,6 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         audioSessionActivation: (() throws -> Void)? = nil,
         transcriptionRequest: ((URL, TimeInterval, String, UUID) async throws -> TranscriptionResponse)? = nil
     ) {
-        self.consentCheck = consentCheck
         recoveryDirectoryOverride = recoveryDirectory
         self.timeSource = timeSource
         self.recorderFactory = recorderFactory
@@ -137,7 +130,6 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         self.transcriptionRequest = transcriptionRequest
         super.init()
         registerBridgeCommandObserver()
-        registerConsentObserver()
         registerRecoveryObservers()
         restoreFailedTranscription()
     }
@@ -185,68 +177,6 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         return "Ready"
     }
 
-    private func registerConsentObserver() {
-        notificationObservers.append(NotificationCenter.default.addObserver(
-            forName: CloudTranscriptionConsent.changed, object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                if let account = self.activeAccount, !self.hasCloudConsent(account.userID) {
-                    self.cancel(discardFailed: false)
-                }
-                if let account = self.historyRetryAccount, !self.hasCloudConsent(account.userID) {
-                    self.cancelHistoryRetry()
-                }
-            }
-        })
-    }
-
-    private func hasCloudConsent(_ userID: String) -> Bool {
-        consentCheck?(userID) ?? CloudTranscriptionConsent.shared.isGranted(userID: userID)
-    }
-
-    private func requireCloudConsent(_ userID: String) -> Bool {
-        guard hasCloudConsent(userID) else {
-            needsCloudConsent = true
-            errorMessage = "Allow cloud transcription to use the microphone."
-            return false
-        }
-        return true
-    }
-
-    private func requireCloudConsent(_ account: AccountStore, resuming action: ConsentAction) -> Bool {
-        guard requireCloudConsent(account.userID) else {
-            consentContinuation = (action, account.sessionID, account.token, account.userID)
-            return false
-        }
-        return true
-    }
-
-    /// Resume only the explicit action that displayed this consent sheet. Opening
-    /// Settings or granting another account's consent must never start the mic.
-    @discardableResult
-    func continueAfterCloudConsent(account: AccountStore) -> Task<Void, Never>? {
-        let request = consentContinuation
-        consentContinuation = nil
-        needsCloudConsent = false
-        guard let request else { return nil }
-        return Task { @MainActor [weak self, weak account] in
-            guard let self, let account, account.userID == request.userID,
-                  account.matchesSession(request.sessionID, token: request.token),
-                  self.hasCloudConsent(account.userID) else { return }
-            switch request.action {
-            case .keyboardMic: await self.startKeyboardReady(account: account)
-            case .recording: await self.startRecording(account: account)
-            case .retry(let id): await self.retryFailedTranscription(id: id, account: account)
-            }
-        }
-    }
-
-    func dismissCloudConsent() {
-        consentContinuation = nil
-        needsCloudConsent = false
-    }
-
     func refreshLatest() {
         lastTranscript = SharedTranscriptStore.latest
     }
@@ -277,7 +207,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             errorMessage = "Sign in before recording."
             return
         }
-        guard requireCloudConsent(account, resuming: .recording), canStartRecording(account: account) else { return }
+        guard canStartRecording(account: account) else { return }
         errorMessage = nil
         let startID = UUID()
         let token = account.token
@@ -288,7 +218,6 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         let hasPermission = await requestMicrophonePermission()
         guard pendingStartID == startID, !Task.isCancelled,
               account.matchesSession(accountSessionID, token: token) else { return }
-        guard requireCloudConsent(account.userID) else { return }
         guard hasPermission else {
             errorMessage = "Microphone permission is required."
             return
@@ -349,7 +278,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             errorMessage = "Sign in before turning on the microphone."
             return
         }
-        guard requireCloudConsent(account, resuming: .keyboardMic), canStartRecording(account: account) else { return }
+        guard canStartRecording(account: account) else { return }
         refreshInactiveKeyboardPreference()
         let startID = UUID()
         let token = account.token
@@ -360,7 +289,6 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         let hasPermission = await requestMicrophonePermission()
         guard pendingStartID == startID, !Task.isCancelled,
               account.matchesSession(accountSessionID, token: token) else { return }
-        guard requireCloudConsent(account.userID) else { return }
         guard hasPermission else {
             errorMessage = "Microphone permission is required."
             return
@@ -637,7 +565,6 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     }
 
     func cancel(discardFailed: Bool = true) {
-        dismissCloudConsent()
         cancelPendingStart()
         if discardFailed {
             if let account = recoveryAccount, !account.isSignedIn, account.shouldDiscardPendingRecording {
@@ -861,7 +788,6 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             retryErrorMessage = "Sign in again to retry your saved recordings."
             return
         }
-        guard requireCloudConsent(account, resuming: .retry(id)) else { return }
         guard let recording = recoveryQueue.recordings[id], recording.userID == account.userID,
               !hiddenCheckpointIDs.contains(id) else { return }
         let executionID = UUID()
@@ -956,8 +882,6 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     }
 
     private func transcribe(fileURL: URL, duration: TimeInterval, token: String, requestID: UUID) async throws -> TranscriptionResponse {
-        let owner = recoveryQueue.recordings[requestID]?.userID ?? activeTranscriptionAudio?.userID ?? activeAccountUserID
-        guard requireCloudConsent(owner) else { throw CloudConsentRequired() }
         if let transcriptionRequest { return try await transcriptionRequest(fileURL, duration, token, requestID) }
         let context = recoveryQueue.recordings[requestID]?.context ?? activeTranscriptionAudio?.context ?? .empty
         return try await BackendClient.transcribe(fileURL: fileURL, duration: duration, token: token, requestID: requestID, context: context)
@@ -1961,8 +1885,4 @@ enum RecorderError: LocalizedError {
             "The audio is retained while VoiceType stays open. Free storage before retrying from History."
         }
     }
-}
-
-private struct CloudConsentRequired: LocalizedError {
-    var errorDescription: String? { "Cloud transcription permission is required. Your recording remains in History." }
 }

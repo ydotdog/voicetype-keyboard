@@ -1,4 +1,4 @@
-> 已由 build 29 替代，最新状态见 [RELEASE_29.zh-CN.md](RELEASE_29.zh-CN.md)。build 28 未推送 TestFlight，也未提交正式审核。
+> 历史记录：2026-10-02 已按用户要求撤回 build 28/29 的产品改动，恢复 build 27。当前状态见 [RESTORE_27_AND_STORE_2026-10-02.zh-CN.md](RESTORE_27_AND_STORE_2026-10-02.zh-CN.md)。build 28 未推送 TestFlight，也未提交正式审核。
 
 # VoiceType 1.0.0（28）发布准备
 

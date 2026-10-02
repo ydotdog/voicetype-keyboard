@@ -201,7 +201,6 @@ final class AccountStore: ObservableObject {
         guard !isLoading else { return }
         // Preview/local sessions have no server account; just clear local state.
         guard isSignedIn, !isPreviewMode else {
-            CloudTranscriptionConsent.shared.setGranted(false, userID: userID)
             DictationPreferencesStore.clear(userID: userID)
             signOut()
             return
@@ -214,7 +213,6 @@ final class AccountStore: ObservableObject {
         do {
             try await backend.deleteAccount(token: requestToken)
             guard matchesSession(requestSession, token: requestToken), !Task.isCancelled else { return }
-            CloudTranscriptionConsent.shared.setGranted(false, userID: userID)
             DictationPreferencesStore.clear(userID: userID)
             signOut()
         } catch {

@@ -1,20 +1,20 @@
 Turn speech into text in the apps you use every day.
 
-VoiceType is a pay-as-you-go dictation keyboard for iPhone and iPad. Tap the keyboard microphone to open VoiceType and turn on keyboard mic, then return manually to the text field in your original app. Start and finish a clip from the VoiceType keyboard, and keep the field open while your words are transcribed and inserted.
+VoiceType is a pay-as-you-go dictation keyboard for iPhone and iPad. Tap the keyboard microphone to open VoiceType and turn on the microphone, then return manually to your original app. Tap to record a clip, tap the waveform to finish, and keep the same text field open while your words are transcribed and inserted.
 
 YOUR WORDS, YOUR WORKFLOW
-Choose your languages and add names or phrases to your personal vocabulary. Review transcripts in History, make corrections, or copy text when you need it. Failed recordings are kept privately on your device so you can retry or delete them.
+Choose your preferred languages, including simplified or traditional Chinese, and add names or phrases to your personal vocabulary. Review and copy transcripts in History. Correct a transcript and choose a spelling to remember for future dictation. Failed recordings are saved on your device so you can retry or delete them.
 
-YOU CONTROL THE MICROPHONE
-Choose a 5-minute, 12-hour or untimed microphone session. Turn it off in VoiceType or from the Live Activity. The microphone stays active between clips while the session is on; only clips you start and finish are uploaded. System interruptions can end a session.
+CONTROL YOUR MICROPHONE SESSION
+Choose a 5-minute, 12-hour or untimed session. Your saved choice is used when you turn on the microphone from the keyboard. The microphone stays active in the background between clips so you can dictate repeatedly. Turn it off on VoiceType's Home screen. System interruptions can also end a session.
 
-CLEAR PRIVACY CHOICES
-Cloud dictation sends your selected audio, language choices and vocabulary hints to VoiceType and OpenAI after your permission. Withdraw permission in Settings. Basic typing works without cloud transcription, Full Access or an internet connection. VoiceType does not collect text you type in other apps.
+CLOUD TRANSCRIPTION
+VoiceType sends recorded clips, your language choices and vocabulary hints to its server and OpenAI for transcription. Temporary audio between clips is discarded locally and is not uploaded for transcription. VoiceType does not upload text you type in other apps. Review the privacy policy for details about processing and storage.
 
 PAY AS YOU GO
-Buy consumable credit packs in the App Store and use credit for transcription. No subscription or automatic top-up. Cloud dictation requires an internet connection, microphone permission, keyboard Full Access and sufficient credit.
+Buy consumable credit packs through the App Store and use credit for transcription. No subscription or automatic top-up. Dictation requires Sign in with Apple, an internet connection, microphone permission, keyboard Full Access and sufficient credit.
 
-Third-party keyboards are unavailable in secure fields and in apps that do not support them.
+Third-party keyboards are unavailable in secure text fields and in apps that do not support them.
 
-Privacy: https://voicetype.y.dog/privacy
-Support: https://voicetype.y.dog/support
+Privacy: https://apeonwheels.com/voicetype/privacy/
+Support: https://apeonwheels.com/voicetype/support/

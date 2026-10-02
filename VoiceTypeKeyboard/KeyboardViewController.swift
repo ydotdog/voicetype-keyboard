@@ -32,11 +32,6 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
     private(set) var keyboardActivationURL: URL?
     private var activationPreparedAt: TimeInterval?
     private var issuedActivationURLs: [URL] = []
-    private let typingToggle = UIButton(type: .system)
-    private let typingRows = UIStackView()
-    private var typingRequested = false
-    private var uppercase = false
-    private var numeric = false
     private let bottomRow = UIStackView()
     private let returnButton = UIButton(type: .system)
     private let deleteButton = UIButton(type: .system)
@@ -176,7 +171,6 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         setupActionArea()
         setupOpenAppLink()
         setupBottomRow()
-        setupTypingKeys()
         applyPalette()
     }
 
@@ -204,7 +198,6 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         for bar in waveStack.arrangedSubviews {
             bar.backgroundColor = palette.live
         }
-        if !typingRows.arrangedSubviews.isEmpty { rebuildTypingKeys() }
         markView.setNeedsDisplay()
     }
 
@@ -452,72 +445,6 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
             KeyboardMicActivationStore.shared.revoke(issuedActivationURLs.removeFirst())
         }
         openAppController?.rootView = makeOpenAppLink()
-    }
-
-    private var showsTyping: Bool { typingRequested || !hasFullAccess }
-
-    private func setupTypingKeys() {
-        configureTextKey(typingToggle, text: "ABC", accessibilityLabel: "Show typing keys")
-        typingToggle.accessibilityIdentifier = "keyboard.typingToggle"
-        typingToggle.addTarget(self, action: #selector(toggleTyping), for: .touchUpInside)
-        contentView.addSubview(typingToggle)
-        typingRows.axis = .vertical
-        typingRows.spacing = 6
-        typingRows.distribution = .fillEqually
-        typingRows.translatesAutoresizingMaskIntoConstraints = false
-        typingRows.accessibilityIdentifier = "keyboard.typingKeys"
-        contentView.addSubview(typingRows)
-        NSLayoutConstraint.activate([
-            typingToggle.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
-            typingToggle.topAnchor.constraint(equalTo: contentView.topAnchor),
-            typingToggle.widthAnchor.constraint(equalToConstant: 52),
-            typingToggle.heightAnchor.constraint(equalToConstant: 44),
-            typingRows.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
-            typingRows.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
-            typingRows.topAnchor.constraint(equalTo: helperLabel.bottomAnchor, constant: 8),
-            typingRows.heightAnchor.constraint(equalToConstant: 162)
-        ])
-        rebuildTypingKeys()
-    }
-
-    private func rebuildTypingKeys() {
-        typingRows.arrangedSubviews.forEach { typingRows.removeArrangedSubview($0); $0.removeFromSuperview() }
-        let letters = numeric ? ["1234567890", "-/:;()$&@", ".,?!'\""] : ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
-        var rows = letters.map { row in row.map { uppercase && !numeric ? String($0).uppercased() : String($0) } }
-        rows.append([numeric ? "ABC" : "123", "shift", "space", "."])
-        for values in rows {
-            let row = UIStackView()
-            row.axis = .horizontal; row.distribution = .fillEqually; row.spacing = 5
-            for value in values {
-                let button = UIButton(type: .system)
-                configureTextKey(button, text: value == "shift" ? (uppercase ? "⇧ ON" : "⇧") : value,
-                                 accessibilityLabel: value == "shift" ? "Shift" : value)
-                button.titleLabel?.font = .systemFont(ofSize: 18)
-                button.layer.cornerRadius = 6
-                button.accessibilityIdentifier = "keyboard.character.\(value.lowercased())"
-                button.addAction(UIAction { [weak self] _ in self?.typeKey(value) }, for: .touchUpInside)
-                row.addArrangedSubview(button)
-            }
-            typingRows.addArrangedSubview(row)
-        }
-    }
-
-    @objc private func toggleTyping() {
-        typingRequested = !showsTyping
-        updateUI(force: true)
-    }
-
-    private func typeKey(_ value: String) {
-        updateDocumentContext()
-        guard activeDocumentIdentifier != nil else { return }
-        switch value {
-        case "ABC", "123": numeric.toggle(); rebuildTypingKeys()
-        case "shift": uppercase.toggle(); rebuildTypingKeys()
-        default:
-            clearAutoInsert()
-            textDocumentProxy.insertText(value == "space" ? " " : value)
-            if uppercase && !numeric { uppercase = false; rebuildTypingKeys() }
-        }
     }
 
     private func configureIconKey(_ button: UIButton, systemName: String, accessibilityLabel: String) {
@@ -822,11 +749,7 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         // recording stays compact, with the waveform near the keyboard center.
         let showsNotice = !helperLabel.isHidden
         helperHeightConstraint?.constant = showsNotice ? 32 : 0
-        typingRows.isHidden = !showsTyping
-        typingToggle.setTitle(showsTyping ? "Hide" : "ABC", for: .normal)
-        typingToggle.accessibilityLabel = showsTyping ? "Hide typing keys" : "Show typing keys"
-        typingToggle.isHidden = !hasFullAccess
-        keyboardHeightConstraint?.constant = keyboardHeight + (showsNotice ? 36 : 0) + (showsTyping ? 182 : 0)
+        keyboardHeightConstraint?.constant = keyboardHeight + (showsNotice ? 36 : 0)
 
         actionControl.accessibilityHint = helperText
         if !hasFullAccess {

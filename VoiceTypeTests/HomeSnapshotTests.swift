@@ -8,21 +8,6 @@ import XCTest
 /// No authentication, microphone action, or live service is invoked.
 @MainActor
 final class HomeSnapshotTests: XCTestCase {
-    func testCapturePrivacyAndStoreScreenshots() async throws {
-        for (name, width, height, scale) in [
-            ("iphone", CGFloat(430), CGFloat(932), CGFloat(3)),
-            ("ipad", CGFloat(1024), CGFloat(1366), CGFloat(2)),
-        ] {
-            try await capture(CloudTranscriptionConsentView(userID: "snapshot-owner"), tab: .settings,
-                name: "consent-\(name)", width: width, height: height, scheme: .light, standalone: true, scale: scale)
-            try await capture(HomeContent(micState: .off, elapsedSeconds: 0, durationLimit: .constant(.fiveMinutes),
-                isBusy: false, hasNegativeBalance: false, errorMessage: nil, toggleMic: {}), tab: .home,
-                name: "store-home-\(name)", width: width, height: height, scheme: .light, scale: scale)
-        }
-        try await capture(CloudTranscriptionConsentView(userID: "snapshot-owner"), tab: .settings,
-            name: "consent-narrow", width: 320, height: 700, scheme: .light, standalone: true)
-    }
-
     func testCaptureHome() async throws {
         let savedBalance = SharedAccountStore.balanceText
         defer { SharedAccountStore.balanceText = savedBalance }
@@ -137,7 +122,7 @@ final class HomeSnapshotTests: XCTestCase {
         }
     }
 
-    private func capture<Content: View>(_ content: Content, tab: VoiceTypeTab, name: String, width: CGFloat, height: CGFloat, scheme: ColorScheme, standalone: Bool = false, typeSize: DynamicTypeSize = .large, scale: CGFloat = 2) async throws {
+    private func capture<Content: View>(_ content: Content, tab: VoiceTypeTab, name: String, width: CGFloat, height: CGFloat, scheme: ColorScheme, standalone: Bool = false, typeSize: DynamicTypeSize = .large) async throws {
         let screen = ZStack {
             AppTheme.background.ignoresSafeArea()
             if standalone {
@@ -177,7 +162,7 @@ final class HomeSnapshotTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(200))
         hosting.view.layoutIfNeeded()
         let format = UIGraphicsImageRendererFormat()
-        format.scale = scale
+        format.scale = 2
         let renderer = UIGraphicsImageRenderer(bounds: hosting.view.bounds, format: format)
         let image = renderer.image { _ in
             XCTAssertTrue(hosting.view.drawHierarchy(in: hosting.view.bounds, afterScreenUpdates: true))

@@ -9,95 +9,6 @@ import UIKit
 /// storage and shared preferences touched by a case are restored on exit.
 @MainActor
 final class KeyboardMicActivationTests: XCTestCase {
-    func testKeyboardLinkContinuesAutomaticallyAfterCloudConsentUsingSavedDuration() async throws {
-        let fixture = try ActivationFixture()
-        defer { fixture.cleanUp() }
-        fixture.signIn()
-        fixture.cloudAllowed = false
-        RecordingPreferencesStore.durationLimit = .twelveHours
-        fixture.appState.presentKeyboardMic(autoStart: true)
-        _ = await fixture.activate()
-        XCTAssertTrue(fixture.controller.needsCloudConsent)
-        XCTAssertEqual(fixture.permissionRequests, 0)
-        fixture.cloudAllowed = true
-        let resumed = fixture.controller.continueAfterCloudConsent(account: fixture.account)
-        await resumed?.value
-        XCTAssertTrue(fixture.controller.isKeyboardReady)
-        XCTAssertEqual(fixture.controller.durationLimit, .twelveHours)
-        XCTAssertEqual(fixture.permissionRequests, 1)
-        XCTAssertNil(fixture.controller.continueAfterCloudConsent(account: fixture.account))
-        XCTAssertEqual(fixture.transcriptionRequests, 0)
-    }
-
-    func testDismissedCloudConsentCannotStartMicrophoneLater() async throws {
-        let fixture = try ActivationFixture()
-        defer { fixture.cleanUp() }
-        fixture.signIn()
-        fixture.cloudAllowed = false
-        await fixture.controller.startKeyboardReady(account: fixture.account)
-        fixture.controller.dismissCloudConsent()
-        fixture.cloudAllowed = true
-        XCTAssertNil(fixture.controller.continueAfterCloudConsent(account: fixture.account))
-        XCTAssertEqual(fixture.permissionRequests, 0)
-        XCTAssertFalse(fixture.controller.isKeyboardSessionActive)
-    }
-
-    func testMissingCloudConsentBlocksMicrophoneBeforeSystemPrompt() async throws {
-        let fixture = try ActivationFixture()
-        defer { fixture.cleanUp() }
-        fixture.signIn()
-        fixture.cloudAllowed = false
-        await fixture.controller.startKeyboardReady(account: fixture.account)
-        XCTAssertTrue(fixture.controller.needsCloudConsent)
-        XCTAssertEqual(fixture.permissionRequests, 0)
-        XCTAssertEqual(fixture.audioSessionActivations, 0)
-        XCTAssertEqual(fixture.transcriptionRequests, 0)
-    }
-
-    func testCloudConsentRevokedDuringPermissionDoesNotStartRecording() async throws {
-        let fixture = try ActivationFixture()
-        defer { fixture.cleanUp() }
-        fixture.signIn()
-        fixture.suspendPermission = true
-        let task = Task { await fixture.controller.startKeyboardReady(account: fixture.account) }
-        while fixture.permissionContinuation == nil { await Task.yield() }
-        fixture.cloudAllowed = false
-        let permission = try XCTUnwrap(fixture.permissionContinuation)
-        fixture.permissionContinuation = nil
-        permission.resume(returning: true)
-        await task.value
-        XCTAssertFalse(fixture.controller.isKeyboardSessionActive)
-        XCTAssertEqual(fixture.audioSessionActivations, 0)
-    }
-
-    func testWithdrawingCloudConsentStopsActiveMicrophone() async throws {
-        let fixture = try ActivationFixture()
-        defer { fixture.cleanUp() }
-        fixture.signIn()
-        await fixture.controller.startKeyboardReady(account: fixture.account)
-        XCTAssertTrue(fixture.controller.isKeyboardSessionActive)
-        fixture.cloudAllowed = false
-        NotificationCenter.default.post(name: CloudTranscriptionConsent.changed, object: fixture.account.userID)
-        await fixture.flushCommands()
-        XCTAssertFalse(fixture.controller.isKeyboardSessionActive)
-        XCTAssertEqual(fixture.transcriptionRequests, 0)
-    }
-
-    func testConsentIsVersionedAndScopedToOneAccount() throws {
-        let name = "consent-test-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
-        defer { defaults.removePersistentDomain(forName: name) }
-        let consent = CloudTranscriptionConsent(defaults: defaults)
-        XCTAssertFalse(consent.isGranted(userID: "alice"))
-        consent.setGranted(true, userID: "alice")
-        XCTAssertTrue(consent.isGranted(userID: "alice"))
-        XCTAssertFalse(consent.isGranted(userID: "bob"))
-        consent.setGranted(false, userID: "alice")
-        XCTAssertFalse(consent.isGranted(userID: "alice"))
-        defaults.set("outdated-processor", forKey: "cloudTranscriptionConsent.alice")
-        XCTAssertFalse(consent.isGranted(userID: "alice"))
-    }
-
     func testLiveActivityRemovalStopsCurrentSessionAndCannotStopNextSession() async throws {
         let fixture = try ActivationFixture()
         defer { fixture.cleanUp() }
@@ -373,7 +284,6 @@ private final class ActivationFixture {
     let backend = ActivationAccountBackend()
     var elapsed: TimeInterval = 0
     var wallDate = Date()
-    var cloudAllowed = true
     var permissionAllowed = true
     var suspendPermission = false
     var permissionContinuation: CheckedContinuation<Bool, Never>?
@@ -389,7 +299,6 @@ private final class ActivationFixture {
     )
     lazy var controller = RecordingController(
         recoveryDirectory: directory.appendingPathComponent("recovery"),
-        consentCheck: { [weak self] _ in self?.cloudAllowed ?? false },
         timeSource: RecordingTimeSource { [weak self] in
             RecordingTimeSample(date: self?.wallDate ?? Date(), monotonicSeconds: self?.elapsed ?? 0)
         },

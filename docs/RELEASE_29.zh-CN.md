@@ -1,3 +1,5 @@
+> 历史记录：2026-10-02 已按用户要求撤回 build 28/29 的产品改动，恢复 build 27。当前状态见 [RESTORE_27_AND_STORE_2026-10-02.zh-CN.md](RESTORE_27_AND_STORE_2026-10-02.zh-CN.md)。build 29 未推送 TestFlight，也未提交正式审核。
+
 # VoiceType 1.0.0（29）发布准备
 
 日期：2026-09-29。正式 App Review 尚未重新提交，仍保留手动发布。

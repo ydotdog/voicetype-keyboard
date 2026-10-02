@@ -28,7 +28,6 @@
 		40D0311B5E5F257E6FA6029E /* KeyboardMicLiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D75045E83806D62900EDA442 /* KeyboardMicLiveActivityController.swift */; };
 		41BDC7EFE6683218114C0BD3 /* RecordingPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C8BD93EBD9F56D128832098 /* RecordingPreferences.swift */; };
 		41F0582CC5B5C7B406855D03 /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66790ACA8CA6CAF9B0F71DE7 /* APIModels.swift */; };
-		499901F037A7530C20D5F8DD /* CloudTranscriptionConsent.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA1B23DDA13CBF006AD66E36 /* CloudTranscriptionConsent.swift */; };
 		49C925A862D52744BC586C4C /* DictationPreferencesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 595F765C31DD3D45FAF0309C /* DictationPreferencesTests.swift */; };
 		4FE14D342FFFB78C1016729B /* VoiceTypeKeyboardActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 877E91E0EE024E73FD552A28 /* VoiceTypeKeyboardActivityAttributes.swift */; };
 		502EFDC14FEFD8F8E64BA57A /* SharedAccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43D15ADDBAE32AD6CD904879 /* SharedAccountStore.swift */; };
@@ -191,7 +190,6 @@
 		C3E3EEAFA87EE1CCAAAF85C3 /* VoiceTypeKeyboard.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = VoiceTypeKeyboard.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		C88A6712BE595BFABF7D8AC7 /* DictationPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationPreferences.swift; sourceTree = "<group>"; };
 		C96E464B265D5EE19B7E44DB /* VoiceTypeIcon.icon */ = {isa = PBXFileReference; path = VoiceTypeIcon.icon; sourceTree = "<group>"; };
-		CA1B23DDA13CBF006AD66E36 /* CloudTranscriptionConsent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudTranscriptionConsent.swift; sourceTree = "<group>"; };
 		D00BC21E29F67E6D0F11703E /* WeakObserverRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeakObserverRegistryTests.swift; sourceTree = "<group>"; };
 		D1278A65EC6455C886DEF798 /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
 		D75045E83806D62900EDA442 /* KeyboardMicLiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardMicLiveActivityController.swift; sourceTree = "<group>"; };
@@ -228,7 +226,6 @@
 			children = (
 				D1278A65EC6455C886DEF798 /* AccountStore.swift */,
 				0C08C2528ED4CC6B32A429C6 /* BackendClient.swift */,
-				CA1B23DDA13CBF006AD66E36 /* CloudTranscriptionConsent.swift */,
 				C88A6712BE595BFABF7D8AC7 /* DictationPreferences.swift */,
 				F0F643FED295DB2D80F324FE /* KeyboardMicActivation.swift */,
 				D75045E83806D62900EDA442 /* KeyboardMicLiveActivityController.swift */,
@@ -615,7 +612,6 @@
 				F887E25AEA7A2587231948A7 /* AppConstants.swift in Sources */,
 				783AD5DDCA37DE660D35DC30 /* AppTheme.swift in Sources */,
 				8F93EC73F7C030FF210B0BC1 /* BackendClient.swift in Sources */,
-				499901F037A7530C20D5F8DD /* CloudTranscriptionConsent.swift in Sources */,
 				DCD7F2C2FBE1CAC99542A3F5 /* DashboardView.swift in Sources */,
 				E923466E2BFAAC71071A44F8 /* DictationPreferences.swift in Sources */,
 				91826BF6397445E8764CF86D /* DictationSettingsView.swift in Sources */,
@@ -886,7 +882,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 29;
+				CURRENT_PROJECT_VERSION = 27;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -995,7 +991,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 29;
+				CURRENT_PROJECT_VERSION = 27;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;

@@ -1,32 +1,33 @@
 BACKGROUND DICTATION — GUIDELINE 2.5.4
 
-VoiceType records speech through its containing app while the user dictates from the VoiceType keyboard in another foreground app. The keyboard cannot access the microphone directly. When the microphone is off, the user-tapped keyboard microphone link opens VoiceType and starts the microphone session. Home > Turn on keyboard mic is also available.
+VoiceType uses background audio to record speech through its containing app while the user dictates from the VoiceType keyboard in another foreground app. The keyboard cannot access the microphone directly. Tapping its outlined microphone opens VoiceType and starts the microphone session. The user manually returns to the original app. Home > Turn on keyboard mic is also available.
 
 TEST ON IPHONE OR IPAD
 
-1. Launch VoiceType and use Sign in with Apple. Check the Credit tab for enough credit for a short clip.
+1. Launch VoiceType and use Sign in with Apple. An Apple Account signed in on the device is required. Check the Credit tab for enough credit for a short transcription.
 2. In device Settings > General > Keyboard > Keyboards > Add New Keyboard, add VoiceType. Open its entry and enable Allow Full Access.
-3. In an editable Apple Note, select the VoiceType keyboard and tap its outlined microphone. VoiceType opens and enables keyboard mic automatically. On first use, read the disclosure and choose Allow cloud transcription; activation continues automatically. Allow the system microphone prompt if shown. Home displays Keyboard mic on.
+3. In an editable Apple Note, select VoiceType using the globe/input-mode control and tap its outlined microphone. VoiceType opens and enables keyboard mic automatically. Allow the system microphone prompt if shown; activation continues after permission is granted. Home displays Ready for the keyboard.
 4. Navigate to the Home Screen, then return manually to the same Apple Note and VoiceType keyboard. Notes remains in the foreground while VoiceType records in the background.
-5. Tap the keyboard microphone icon, speak a short sentence, then tap the waveform to finish. Keep the same field open while Transcribing is shown and the text is inserted.
-6. Return to VoiceType. The transcript is also available in History. Tap Turn off keyboard mic on Home. During a clip, Finish clip & turn off mic finishes that clip before ending the session. The Live Activity also has a stop control.
+5. Tap the keyboard microphone, speak a short sentence, then tap the waveform to finish. Keep the same text field open until transcription finishes and text is inserted.
+6. Return to VoiceType. The transcript is also available in History. Tap Turn off keyboard mic on Home. If a clip is active, this finishes and transcribes that clip before ending the session. Home then displays Microphone off.
 
 PERSISTENT AUDIO AND USER CONTROL
 
-The user explicitly turns on keyboard mic. Its audio session stays active between clips for the selected duration: 5 min (default), 12 hr, or Forever. Forever means no app timer; system interruptions can still stop it. Individual clips have a 10-minute limit. Temporary idle audio is rotated and discarded locally. Only clips the user starts and finishes are submitted, rather than continuously uploading the session.
+The user explicitly turns on keyboard mic. Its audio session stays active between clips for the selected duration: 5 min (default), 12 hr, or Forever. The saved duration is reused when activation comes from the keyboard. Starting and finishing clips does not reset the session timer. Forever means no app timer; system interruptions can still end the session. Individual clips have a 10-minute limit.
 
-If a session ends, tap the outlined keyboard microphone to open VoiceType and start another. The saved session duration is reused; otherwise the default is 5 minutes. Secure fields and apps that prohibit third-party keyboards use the system keyboard.
+Temporary idle audio is rotated and discarded locally. Only recorded clips are submitted for transcription; the full microphone session is not continuously uploaded. If a session ends, tap the outlined keyboard microphone to open VoiceType and start another. Secure fields and apps that prohibit third-party keyboards use the system keyboard.
 
-FULL ACCESS, PRIVACY AND OFFLINE INPUT
+FULL ACCESS AND DATA PROCESSING
 
-Full Access allows the keyboard to exchange recording commands, state and transcripts with VoiceType through a shared container. The keyboard does not upload text typed in other apps. Basic letters, numbers, space, punctuation, delete, return and switching keyboards remain available without Full Access or a network connection. Tap ABC to show typing keys; they appear automatically when Full Access is off.
+Full Access lets the keyboard exchange recording commands, state and transcripts with VoiceType through a shared container. It does not upload text typed in the host app. Cloud transcription sends recorded audio, selected languages and vocabulary hints to VoiceType's server and OpenAI.
 
-Before cloud dictation, users expressly allow selected audio, language choices and vocabulary hints to be processed by VoiceType and OpenAI. Settings > Cloud transcription withdraws consent, stops the active microphone and prevents new uploads and retries. Privacy and support links are accessible before sign-in and in Settings.
+Privacy: https://apeonwheels.com/voicetype/privacy/
+Support: https://apeonwheels.com/voicetype/support/
 
 OTHER REVIEW PATHS
 
-History preserves failed recordings separately with Retry and Delete. Credits are consumable App Store packs; Settings > Check purchases reconciles unfinished purchases. Settings > Delete account permanently removes the account and revokes the stored Apple sign-in grant; temporary revocation failures can be retried.
+History preserves failed recordings with Retry and Delete. Credits are consumable App Store packs; Settings > Check purchases reconciles unfinished purchases. Settings > Delete account requests permanent deletion and revokes the stored Apple sign-in grant. Temporary revocation failures are shown so deletion can be retried.
 
-PHYSICAL-DEVICE RECORDING
+PHYSICAL-DEVICE RECORDING — PENDING
 
-The demonstration attachment will be added after final device verification. This draft has not been resubmitted for App Review.
+A demonstration for the submitted build still needs to be attached. It must show microphone activation, navigation to the Home Screen, dictation and text insertion in Notes, and turning the microphone off. No recording is claimed to be attached to this draft.

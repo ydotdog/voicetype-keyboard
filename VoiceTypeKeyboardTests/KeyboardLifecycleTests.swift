@@ -477,22 +477,6 @@ struct KeyboardLifecycleTests {
         }
     }
 
-    @Test func offlineTypingIncludesLettersNumbersAndSpace() throws {
-        try withCleanStores {
-            let controller = FixtureKeyboardController()
-            controller.fullAccess = false
-            controller.proxy.testDocumentIdentifier = UUID()
-            try withVisibleController(controller) {
-                for key in ["q", "space", "123", "7"] {
-                    try control("keyboard.character.\(key)", in: controller).sendActions(for: .touchUpInside)
-                }
-                #expect(controller.proxy.insertedTexts == ["q", " ", "7"])
-                #expect(RecordingBridgeStore.latestCommand == nil)
-                #expect(descendant("keyboard.typingKeys", in: controller.view)?.isHidden == false)
-            }
-        }
-    }
-
     @Test func compactKeyboardWithOwnGlobeKeepsEveryTextKeyReachable() throws {
         try withCleanStores {
             setBridge(.keyboardReady)
