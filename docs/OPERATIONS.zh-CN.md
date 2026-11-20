@@ -18,6 +18,8 @@
 
 线上配置：官方 OpenAI 地址，`gpt-4o-mini-transcribe`，`COST_MARKUP_BPS=7143`；开发赠送接口关闭。`gpt-4o-mini-transcribe` 将于 2027-02-26 停用；代码默认值已改为 `gpt-transcribe`，线上切换在模型管理后台测试后保存（见 [OWNER_CONSOLE.zh-CN.md](OWNER_CONSOLE.zh-CN.md)）。用户使用余额与运营者的 API 账单是不同的账本。`/health/ready` 只检查密钥是否存在，不证明密钥有效或还有余额。
 
+线上后端的版本、部署过程与回滚方法见 [RELEASE_30_BACKEND.zh-CN.md](RELEASE_30_BACKEND.zh-CN.md)（2026-11-20）。
+
 ## 更换同一服务商的 API 密钥
 
 1. 先在供应商后台核对余额、项目归属与权限。更换同一项目下的 key 不会增加余额。
@@ -65,7 +67,7 @@ App 继续访问原来的 `https://voicetype.y.dog`，无须用户升级。更�
 - 断开与计费：
   - 客户端中途断开（切换网络、信号中断等）不会中止转写。服务端照常完成，按实际费用扣一次，并保存结果。App 把这段录音保存在 History；用同一个 Idempotency-Key 重试时，服务端直接返回已保存的结果，不再调用供应商，也不重复扣费。服务端仍在转写时重试，会收到 409 和 `Retry-After`，录音继续保留。
   - 流中途供应商失败或超时：释放预留，不扣费，同一个 key 可以重试。
-  - 服务端关闭（部署、重新创建容器）时，客户端已断开的流式转写最多再等 5 秒（Docker 默认 10 秒后强制停止进程）；仍未完成的被取消，释放预留，不扣费，App 重试时重新转写。与非流式请求一样，部署宜避开正在转写的时段。
+  - 服务端关闭（部署、重新创建容器）时，客户端已断开的流式转写最多再等 5 秒（Docker 默认 10 秒后强制停止进程）；仍未完成的被取消，释放预留，不扣费，App 重试时重新转写。这一步要求 uvicorn 收到停止信号；线上镜像目前收不到，进程被强制停止，没有这 5 秒：没写完的转写同样不扣费，但预留和 request key 留到处理租约过后，期间重试收到 409（见“Live 实时转写”的“重启、部署与代理”）。与非流式请求一样，部署宜避开正在转写的时段。
 - 代理：响应带 `Cache-Control: no-cache, no-transform` 和 `X-Accel-Buffering: no`。按 Caddy 2 源码，`reverse_proxy` 收到 `text/event-stream` 时每次写入立即转发，`encode zstd gzip` 遇到 `no-transform` 不压缩，所以线上 Caddyfile 无需修改，但尚未在线上实测。如果上线后预览要等转写结束才一次出现，先检查代理是否缓冲或压缩了响应。
 - 兼容与发布顺序：旧服务端忽略 `stream`，返回 JSON，新版 App 照常使用最终结果，只是没有预览。代理对流式请求返回 404 或 405 时，App 用同一个 key 改发普通上传。旧版 App 不发 `stream`，行为不变。先部署服务端，再发布 App，用户升级后即可看到预览。
 - 发布前在真机上用不含私人内容的短录音确认：预览逐步出现，最终文字只插入一次，只扣一次额度。再在转写中途断网，确认录音进入 History，重试后不重复扣费。
@@ -119,7 +121,7 @@ App 继续访问原来的 `https://voicetype.y.dog`，无须用户升级。更�
   `realtime` 行是进行中的 Live 会话，其他行是正在转写的上传。部署前等这些都归零；Live 会话最长 11 分钟。
 - 重启、部署与代理：
   - Live 会话保存在进程内，只支持单个 backend 实例。启动时删除所有 `kind = 'realtime'` 的预留和没有完成的 Live request key，不扣费。
-  - 进程收到 SIGTERM 或 SIGINT 后，uvicorn 以 1012 关闭 WebSocket，服务端记为 `server_restarting`，不扣费，App 改为上传（服务端还没恢复时录音保存在 History）。没有收到停止信号时，App 自己发来的 1012 按 App 断开（`disconnected`）扣费。镜像用 `sh -c` 启动 uvicorn；如果 SIGTERM 没有传到 uvicorn，Docker 10 秒后强制停止，连接直接断开，启动清理后同样不扣费。
+  - 进程收到 SIGTERM 或 SIGINT 后，uvicorn 以 1012 关闭 WebSocket，服务端记为 `server_restarting`，不扣费，App 改为上传（服务端还没恢复时录音保存在 History）。没有收到停止信号时，App 自己发来的 1012 按 App 断开（`disconnected`）扣费。镜像用 `sh -c` 启动 uvicorn：容器里 1 号进程是 `sh`，uvicorn 是它的子进程，Docker 发的 SIGTERM 传不到 uvicorn（2026-11-20 部署时实测：旧容器收到 SIGTERM 后继续运行，发布脚本等满 150 秒后把它强制停止，退出码 137）。所以目前停止或重新创建 backend 都要等到 Docker 强制停止（默认 10 秒）：等待期间旧进程照常接收请求，之后连接直接断开，进行中的 Live 会话收不到 1012，启动清理后不扣费。被强制停止的上传也不扣费，但预留和 request key 留在数据库里：同一个 key 重试先收到 409，处理租约（`TRANSCRIPTION_PROCESSING_LEASE_SECONDS`，默认 300 秒）过后才重新转写并释放旧预留；没有重试时，预留在 `CREDIT_RESERVATION_TTL_SECONDS`（默认 1800 秒）后过期。把启动命令改成 `exec uvicorn` 才能让上面的正常关闭生效，尚未修改，见 [RELEASE_30_BACKEND.zh-CN.md](RELEASE_30_BACKEND.zh-CN.md)。
   - Caddy 的 `reverse_proxy backend:8080` 自动转发 WebSocket 升级，`encode` 不处理 WebSocket，线上 Caddyfile 无须修改，但尚未在线上实测。Caddy reload 默认立即关闭已升级的连接（`stream_close_delay` 默认 0）：服务端看到 App 断开，按已发送音频扣费，App 再上传。所以 reload Caddy 也宜避开有 Live 会话的时候。
   - 服务端用 `websockets` 包连接 OpenAI，uvicorn 也用它处理 App 的 WebSocket（`uvicorn[standard]` 自带，线上 websockets 17.1）。部署后确认：
 
