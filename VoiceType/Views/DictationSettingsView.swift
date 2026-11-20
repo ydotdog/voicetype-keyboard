@@ -104,7 +104,7 @@ struct DictationSettingsView: View {
             .tint(AppTheme.coral)
             .navigationTitle("Dictation")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { ToolbarActionButton(title: "Done", systemImage: "checkmark") { dismiss() } } }
             .onChange(of: preferences) { _, value in DictationPreferencesStore.save(value, userID: userID) }
             .confirmationDialog("Clear all saved words?", isPresented: $confirmingClear, titleVisibility: .visible) {
                 Button("Clear vocabulary", role: .destructive) { preferences.words = [] }
@@ -275,9 +275,10 @@ struct TranscriptCorrectionView: View {
             .navigationTitle("Edit & teach")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { ToolbarActionButton(title: "Cancel", systemImage: "xmark") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: save).disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    ToolbarActionButton(title: "Save", systemImage: "checkmark") { save() }
+                        .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             .task(id: text) { await suggest() }
@@ -430,7 +431,7 @@ struct TranscriptionModelSettingsView: View {
             .tint(AppTheme.coral)
             .navigationTitle("Transcription")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { ToolbarActionButton(title: "Done", systemImage: "checkmark") { dismiss() } } }
             .task { await load() }
         }
     }

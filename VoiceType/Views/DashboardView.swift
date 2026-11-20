@@ -32,13 +32,9 @@ struct DashboardView: View {
                     }
                         .environmentObject(account)
                 }
-
-                if let toastMessage {
-                    ToastView(message: toastMessage)
-                        .padding(.bottom, account.isSignedIn ? 92 : 26)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
             }
+            // The tabs show the toast themselves, inside each tab's safe area.
+            .toast(showsTabs ? nil : toastMessage, bottomPadding: 26)
             .task {
                 await initialLoad()
             }
@@ -88,37 +84,34 @@ struct DashboardView: View {
         }
     }
 
+    private var showsTabs: Bool {
+        account.isSignedIn && !isKeyboardSetupPresented
+    }
+
     private var signedInContent: some View {
         VoiceTypeTabs(selection: $selectedTab) { tab in
             Group {
-                if tab == .settings {
+                switch tab {
+                case .home:
+                    TabPage(maxWidth: PageWidth.wide) {
+                        HomeScreen(account: account, recorder: recorder)
+                    }
+                case .history:
+                    TabPage {
+                        HistoryScreen(recorder: recorder, account: account, history: transcriptHistory,
+                                      copy: copyTranscript, refresh: refreshHistory)
+                    }
+                case .credit:
+                    TabPage(maxWidth: PageWidth.wide) {
+                        CreditScreen(store: store, account: account)
+                            .task {
+                                guard store.products.isEmpty, !store.isLoading else { return }
+                                await store.loadProducts()
+                            }
+                    }
+                case .settings:
                     SettingsScreen(account: account, store: store) {
                         isKeyboardSetupPresented = true
-                    }
-                } else {
-                    ScrollView {
-                        Group {
-                            switch tab {
-                            case .home:
-                                HomeScreen(account: account, recorder: recorder)
-                            case .history:
-                                HistoryScreen(recorder: recorder, account: account, history: transcriptHistory,
-                                              copy: copyTranscript, refresh: refreshHistory)
-                            case .credit:
-                                CreditScreen(store: store, account: account)
-                                    .task {
-                                        guard store.products.isEmpty, !store.isLoading else { return }
-                                        await store.loadProducts()
-                                    }
-                            case .settings:
-                                EmptyView()
-                            }
-                        }
-                        .padding(.horizontal, 24)
-                        .padding(.top, 18)
-                        .padding(.bottom, 24)
-                        .frame(maxWidth: 720)
-                        .frame(maxWidth: .infinity)
                     }
                 }
             }
@@ -127,6 +120,9 @@ struct DashboardView: View {
                 await account.refresh()
                 refreshHistory()
             }
+            // Inside the tab, so the toast clears the tab bar wherever the
+            // system puts it: along the bottom, or along a side on iPhone Duo.
+            .toast(toastMessage, bottomPadding: 16)
         }
     }
 
@@ -268,83 +264,93 @@ struct VoiceTypeTabs<Content: View>: View {
     }
 }
 
-private struct SignInScreen: View {
+struct SignInScreen: View {
     @EnvironmentObject private var account: AccountStore
     @Environment(\.colorScheme) private var colorScheme
     let openKeyboardSetup: () -> Void
 
     var body: some View {
-        ScrollView {
-        VStack(alignment: .leading, spacing: 0) {
-            VoiceTypeLogo()
-                .padding(.top, 62)
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    FlexibleGap(minimum: 20, preferred: 62)
 
-            Spacer(minLength: 70)
-
-            VStack(alignment: .leading, spacing: 16) {
-                KickerText(text: "Speech to text · paid by use")
-
-                VStack(alignment: .leading, spacing: -3) {
-                    Text("Voice,")
-                        .font(AppTheme.serif(58, weight: .regular))
-                        .foregroundStyle(AppTheme.ink)
-                    Text("set in type.")
-                        .font(AppTheme.serif(52, weight: .regular))
-                        .italic()
-                        .foregroundStyle(AppTheme.accentDeep)
-                }
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-
-                Text("Dictate anywhere. Your words come back as clean, copy-ready text, and your credit never expires.")
-                    .font(.system(size: 16.5, weight: .regular))
-                    .lineSpacing(5)
-                    .foregroundStyle(AppTheme.inkSoft)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.trailing, 18)
-            }
-
-            Spacer(minLength: 84)
-
-            VStack(spacing: 12) {
-                AppleSignInControl(style: colorScheme == .dark ? .white : .black) {
-                    account.errorMessage = nil
-                } onCompletion: { result in
-                    Task { await handle(result) }
-                }
-                .frame(height: 56)
-                .id(colorScheme)
-                .disabled(account.isLoading)
-
-                if account.isLoading {
-                    ProgressView("Signing in…")
-                        .font(.footnote)
-                }
-
-                Text("No subscription. Buy credit only when you want it.")
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(AppTheme.secondary)
-                    .frame(maxWidth: .infinity)
-                    .multilineTextAlignment(.center)
-
-                if let error = account.errorMessage {
-                    Text(error)
-                        .font(.footnote)
-                        .foregroundStyle(AppTheme.coral)
+                    VoiceTypeLogo()
                         .fixedSize(horizontal: false, vertical: true)
-                }
 
-                Button("How to set up and use the keyboard", action: openKeyboardSetup)
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(AppTheme.accentDeep)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .buttonStyle(PlainHapticButtonStyle())
+                    FlexibleGap(minimum: 24, preferred: 70)
+
+                    VStack(alignment: .leading, spacing: 16) {
+                        KickerText(text: "Speech to text · paid by use")
+
+                        VStack(alignment: .leading, spacing: -3) {
+                            Text("Voice,")
+                                .font(AppTheme.serif(58, weight: .regular))
+                                .foregroundStyle(AppTheme.ink)
+                            Text("set in type.")
+                                .font(AppTheme.serif(52, weight: .regular))
+                                .italic()
+                                .foregroundStyle(AppTheme.accentDeep)
+                        }
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+
+                        Text("Dictate anywhere. Your words come back as clean, copy-ready text, and your credit never expires.")
+                            .font(.system(size: 16.5, weight: .regular))
+                            .lineSpacing(5)
+                            .foregroundStyle(AppTheme.inkSoft)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.trailing, 18)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+
+                    FlexibleGap(minimum: 28, preferred: 84)
+
+                    VStack(spacing: 12) {
+                        AppleSignInControl(style: colorScheme == .dark ? .white : .black) {
+                            account.errorMessage = nil
+                        } onCompletion: { result in
+                            Task { await handle(result) }
+                        }
+                        .frame(height: 56)
+                        .id(colorScheme)
+                        .disabled(account.isLoading)
+
+                        if account.isLoading {
+                            ProgressView("Signing in…")
+                                .font(.footnote)
+                        }
+
+                        Text("No subscription. Buy credit only when you want it.")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(AppTheme.secondary)
+                            .frame(maxWidth: .infinity)
+                            .multilineTextAlignment(.center)
+
+                        if let error = account.errorMessage {
+                            Text(error)
+                                .font(.footnote)
+                                .foregroundStyle(AppTheme.coral)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Button("How to set up and use the keyboard", action: openKeyboardSetup)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(AppTheme.accentDeep)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .buttonStyle(PlainHapticButtonStyle())
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 32)
+                // At least as tall as the window, so the gaps above share the
+                // spare height: a tall window keeps them at full size, and the
+                // closed iPhone Duo tightens them before the page has to scroll.
+                .frame(maxWidth: 560, minHeight: proxy.size.height, alignment: .topLeading)
+                .frame(maxWidth: .infinity)
             }
-        }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 32)
-        .frame(maxWidth: 560, alignment: .topLeading)
-        .frame(maxWidth: .infinity)
+            .scrollBounceBehavior(.basedOnSize)
         }
         .background(AppTheme.background.ignoresSafeArea())
     }
@@ -403,6 +409,18 @@ private struct SignInScreen: View {
         default:
             return "Apple sign-in could not be completed. Try again."
         }
+    }
+}
+
+/// A vertical gap that takes its preferred height when there is room and gives
+/// height back, down to its minimum, before the page has to scroll.
+private struct FlexibleGap: View {
+    let minimum: CGFloat
+    let preferred: CGFloat
+
+    var body: some View {
+        Spacer(minLength: minimum)
+            .frame(maxHeight: preferred)
     }
 }
 
@@ -546,71 +564,75 @@ struct HomeContent: View {
             VoiceTypeLogo()
                 .frame(height: 44, alignment: .leading)
 
-            Button(action: toggleMic) {
-                HStack(spacing: 12) {
-                    Image(systemName: micState.isOn ? "mic.slash.fill" : "mic.fill")
-                        .frame(width: 24)
-                        .accessibilityHidden(true)
-                    ZStack(alignment: .leading) {
-                        Text("Turn on keyboard mic").hidden()
-                        Text("Turn off keyboard mic").hidden()
-                        Text(micState.isOn ? "Turn off keyboard mic" : "Turn on keyboard mic")
+            // The mic control and its status lead; the settings and notes follow
+            // below them, or beside them once the window is wide enough.
+            PageColumns {
+                Button(action: toggleMic) {
+                    HStack(spacing: 12) {
+                        Image(systemName: micState.isOn ? "mic.slash.fill" : "mic.fill")
+                            .frame(width: 24)
+                            .accessibilityHidden(true)
+                        ZStack(alignment: .leading) {
+                            Text("Turn on keyboard mic").hidden()
+                            Text("Turn off keyboard mic").hidden()
+                            Text(micState.isOn ? "Turn off keyboard mic" : "Turn on keyboard mic")
+                        }
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .font(.headline)
+                    .padding(.vertical, 12)
+                    .frame(minHeight: 44)
                 }
-                .font(.headline)
-                .padding(.vertical, 12)
-                .frame(minHeight: 44)
-            }
-            .modifier(PrimaryControlStyle())
-            .disabled(!micState.isOn && isBusy)
-            .accessibilityIdentifier("home.keyboardMic")
-            .accessibilityLabel(micState.isOn ? "Turn off keyboard mic" : "Turn on keyboard mic")
-            .accessibilityValue(micState.title)
-            .accessibilityHint(micState == .recording ? "Finishes and transcribes the current clip, then turns off the microphone." : "")
+                .modifier(PrimaryControlStyle())
+                .disabled(!micState.isOn && isBusy)
+                .accessibilityIdentifier("home.keyboardMic")
+                .accessibilityLabel(micState.isOn ? "Turn off keyboard mic" : "Turn on keyboard mic")
+                .accessibilityValue(micState.title)
+                .accessibilityHint(micState == .recording ? "Finishes and transcribes the current clip, then turns off the microphone." : "")
 
-            VStack(alignment: .leading, spacing: 12) {
-                ViewThatFits(in: .horizontal) {
-                    HStack {
-                        statusLabel
-                        Spacer(minLength: 8)
-                        timer
+                VStack(alignment: .leading, spacing: 12) {
+                    ViewThatFits(in: .horizontal) {
+                        HStack {
+                            statusLabel
+                            Spacer(minLength: 8)
+                            timer
+                        }
+                        VStack(alignment: .leading, spacing: 8) {
+                            statusLabel
+                            timer
+                        }
                     }
-                    VStack(alignment: .leading, spacing: 8) {
-                        statusLabel
-                        timer
+                    if micState == .recording {
+                        LiveWaveform(sessionID: RecordingBridgeStore.state.sessionID, dense: true)
+                            .frame(height: 36)
+                    }
+                    Text(micState.detail)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !partialTranscript.isEmpty {
+                        PartialTranscriptPreview(text: partialTranscript, lineLimit: 4)
+                            .accessibilityIdentifier("home.partialTranscript")
                     }
                 }
-                if micState == .recording {
-                    LiveWaveform(sessionID: RecordingBridgeStore.state.sessionID, dense: true)
-                        .frame(height: 36)
-                }
-                Text(micState.detail)
-                    .font(.subheadline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .panelStyle()
+            } secondary: {
+                RecordingLimitPicker(selection: $durationLimit, isDisabled: isBusy && micState != .recording && micState != .ready)
+
+                Text("While enabled, your microphone stays active in the background. Only clips you record from the keyboard are sent for transcription.")
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                if !partialTranscript.isEmpty {
-                    PartialTranscriptPreview(text: partialTranscript, lineLimit: 4)
-                        .accessibilityIdentifier("home.partialTranscript")
+
+                if hasNegativeBalance { BalanceAdjustmentNotice() }
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(AppTheme.coral)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .panelStyle()
-
-            RecordingLimitPicker(selection: $durationLimit, isDisabled: isBusy && micState != .recording && micState != .ready)
-
-            Text("While enabled, your microphone stays active in the background. Only clips you record from the keyboard are sent for transcription.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if hasNegativeBalance { BalanceAdjustmentNotice() }
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.footnote)
-                    .foregroundStyle(AppTheme.coral)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -1044,7 +1066,9 @@ struct CreditScreen: View {
     @ObservedObject var account: AccountStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        // The balance leads; the packs follow below it, or beside it once the
+        // window is wide enough.
+        PageColumns(spacing: 18) {
             BalanceBlock(balanceText: account.balanceText)
 
             ScreenTitle(
@@ -1056,7 +1080,7 @@ struct CreditScreen: View {
             if account.balanceUSDMicros < 0 {
                 BalanceAdjustmentNotice()
             }
-
+        } secondary: {
             VStack(spacing: 12) {
                 ForEach(FallbackCreditPack.all) { pack in
                     CreditPackCard(pack: pack, product: store.product(for: pack.id)) {
@@ -1410,72 +1434,75 @@ private struct DeveloperToolsSection: View {
 }
 #endif
 
-private struct KeyboardSetupScreen: View {
+struct KeyboardSetupScreen: View {
     let close: () -> Void
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                Button(action: close) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(AppTheme.ink)
-                        .frame(width: 44, height: 44, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(PlainHapticButtonStyle())
-                .accessibilityLabel("Back")
+        // The Back button is a bar item, so the system places it with the other
+        // bars, including along a side of the closed iPhone Duo.
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    ScreenTitle(kicker: "Keyboard", title: "Set up voice typing", detail: "VoiceType uses the microphone in the background so you can dictate into text fields in other apps.")
 
-                ScreenTitle(kicker: "Keyboard", title: "Set up voice typing", detail: "VoiceType uses the microphone in the background so you can dictate into text fields in other apps.")
+                    KeyboardToggleIllustration()
+                        .accessibilityHidden(true)
+                    Text("Example settings — enable these in the Settings app.")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.secondary)
 
-                KeyboardToggleIllustration()
-                    .accessibilityHidden(true)
-                Text("Example settings — enable these in the Settings app.")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.secondary)
-
-                VStack(spacing: 0) {
-                    SetupStep(index: "01", title: "Open Settings", detail: "Go to Settings → General → Keyboard → Keyboards.")
-                    Divider().background(AppTheme.borderSoft)
-                    SetupStep(index: "02", title: "Add VoiceType", detail: "Tap Add New Keyboard and choose VoiceType.")
-                    Divider().background(AppTheme.borderSoft)
-                    SetupStep(index: "03", title: "Allow Full Access", detail: "Tap VoiceType, then enable Allow Full Access so your keyboard can receive transcripts and control recording.")
-                    Divider().background(AppTheme.borderSoft)
-                    SetupStep(index: "04", title: "Turn on the background microphone", detail: "Return to VoiceType, sign in, and on Home tap Turn on keyboard mic. Allow microphone access when asked. You need credit to transcribe a clip.")
-                    Divider().background(AppTheme.borderSoft)
-                    SetupStep(index: "05", title: "Dictate in another app", detail: "Open a text field and use the globe key to select VoiceType. Tap the microphone icon to start, then the waveform to finish. Keep that field open until your text appears. You can also copy your transcript from History.")
-                }
-
-                Button {
-                    if let url = URL(string: UIApplication.openSettingsURLString) {
-                        UIApplication.shared.open(url)
+                    VStack(spacing: 0) {
+                        SetupStep(index: "01", title: "Open Settings", detail: "Go to Settings → General → Keyboard → Keyboards.")
+                        Divider().background(AppTheme.borderSoft)
+                        SetupStep(index: "02", title: "Add VoiceType", detail: "Tap Add New Keyboard and choose VoiceType.")
+                        Divider().background(AppTheme.borderSoft)
+                        SetupStep(index: "03", title: "Allow Full Access", detail: "Tap VoiceType, then enable Allow Full Access so your keyboard can receive transcripts and control recording.")
+                        Divider().background(AppTheme.borderSoft)
+                        SetupStep(index: "04", title: "Turn on the background microphone", detail: "Return to VoiceType, sign in, and on Home tap Turn on keyboard mic. Allow microphone access when asked. You need credit to transcribe a clip.")
+                        Divider().background(AppTheme.borderSoft)
+                        SetupStep(index: "05", title: "Dictate in another app", detail: "Open a text field and use the globe key to select VoiceType. Tap the microphone icon to start, then the waveform to finish. Keep that field open until your text appears. You can also copy your transcript from History.")
                     }
-                } label: {
-                    Label("Open Settings", systemImage: "gearshape")
-                        .frame(maxWidth: .infinity, minHeight: 48)
-                }
-                .modifier(PrimaryControlStyle())
 
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(AppTheme.accentDeep)
-                    Text("The microphone stays active until the selected session ends or you tap Turn off keyboard mic on Home. Only clips you start are sent for transcription. A phone call or another audio interruption can end the session; return to VoiceType to turn it on again. Some apps and secure text fields use the system keyboard instead.")
-                        .font(.system(size: 12.5, weight: .medium))
-                        .lineSpacing(3)
-                        .foregroundStyle(AppTheme.inkSoft)
+                    Button {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(url)
+                        }
+                    } label: {
+                        Label("Open Settings", systemImage: "gearshape")
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                    }
+                    .modifier(PrimaryControlStyle())
+
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(AppTheme.accentDeep)
+                        Text("The microphone stays active until the selected session ends or you tap Turn off keyboard mic on Home. Only clips you start are sent for transcription. A phone call or another audio interruption can end the session; return to VoiceType to turn it on again. Some apps and secure text fields use the system keyboard instead.")
+                            .font(.system(size: 12.5, weight: .medium))
+                            .lineSpacing(3)
+                            .foregroundStyle(AppTheme.inkSoft)
+                    }
+                    .padding(14)
+                    .background(AppTheme.accentTint)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
                 }
-                .padding(14)
-                .background(AppTheme.accentTint)
-                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .padding(.horizontal, 24)
+                .padding(.top, 8)
+                .padding(.bottom, 30)
+                .frame(maxWidth: PageWidth.reading)
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 24)
-            .padding(.top, 8)
-            .padding(.bottom, 30)
-            .frame(maxWidth: 720)
-            .frame(maxWidth: .infinity)
+            .background(AppTheme.background.ignoresSafeArea())
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(action: close) {
+                        Label("Back", systemImage: "chevron.left")
+                    }
+                    .tint(AppTheme.ink)
+                }
+            }
         }
-        .background(AppTheme.background.ignoresSafeArea())
     }
 }
 
@@ -1715,5 +1742,19 @@ private struct ToastView: View {
             .background(AppTheme.ink)
             .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
             .shadow(color: .black.opacity(0.14), radius: 14, x: 0, y: 8)
+    }
+}
+
+extension View {
+    /// Shows a transient message along the bottom of this view's safe area.
+    func toast(_ message: String?, bottomPadding: CGFloat) -> some View {
+        overlay(alignment: .bottom) {
+            if let message {
+                ToastView(message: message)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, bottomPadding)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
     }
 }

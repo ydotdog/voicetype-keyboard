@@ -69,6 +69,7 @@
 		9F08C4C50438E6D1E17A254F /* RecordingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 783E5F55BB73794744018C60 /* RecordingController.swift */; };
 		A0C9E97CA1364AA5D5166414 /* RecordingSessionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EF42EA8181BB6DF48429EB8 /* RecordingSessionPolicy.swift */; };
 		A134A4914E31FA679A9EECE4 /* AccountSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77D4C7F6D77EC6ACA52568C4 /* AccountSessionTests.swift */; };
+		A146614D047E7557C02317BF /* AdaptiveLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B7304BCBEC717B6D7E54AF6 /* AdaptiveLayout.swift */; };
 		A5849C01711F4D67B2253E61 /* WeakObserverRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6463CCF333311F8A848ECC05 /* WeakObserverRegistry.swift */; };
 		A85890393AB41EC8A77AF3EA /* KeyboardMicActivationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF028888DFF2F4AD7B1A8067 /* KeyboardMicActivationStore.swift */; };
 		ABB276D474C7900C0E99B37F /* WeakObserverRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6463CCF333311F8A848ECC05 /* WeakObserverRegistry.swift */; };
@@ -88,6 +89,7 @@
 		E716F6626831D18FDA337D38 /* LiveAudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22608F7A4658B14404AEFBA7 /* LiveAudioCapture.swift */; };
 		E74C037F10BB1CA5D08CE8FA /* RecordingSessionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EF42EA8181BB6DF48429EB8 /* RecordingSessionPolicy.swift */; };
 		E923466E2BFAAC71071A44F8 /* DictationPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = C88A6712BE595BFABF7D8AC7 /* DictationPreferences.swift */; };
+		EB9252FFC7D49AE3A596DF01 /* AdaptiveLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC27AD5FF155715655CA6C91 /* AdaptiveLayoutTests.swift */; };
 		ECC419E43DD760EED891153D /* SharedAccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43D15ADDBAE32AD6CD904879 /* SharedAccountStore.swift */; };
 		ED1A121D0142E0504573A0CB /* VoiceTypeKeyboardLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5DA874302F81CD1ECC9B4E3 /* VoiceTypeKeyboardLiveActivity.swift */; };
 		F07B5D32063597E2D2F89300 /* SharedAccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43D15ADDBAE32AD6CD904879 /* SharedAccountStore.swift */; };
@@ -167,6 +169,7 @@
 		5458544B9AC5E80B66CEE5EF /* StoreKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitService.swift; sourceTree = "<group>"; };
 		595F765C31DD3D45FAF0309C /* DictationPreferencesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationPreferencesTests.swift; sourceTree = "<group>"; };
 		5A25D3F01D0B25F90D32556F /* RecordingCancellationRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingCancellationRecoveryTests.swift; sourceTree = "<group>"; };
+		5B7304BCBEC717B6D7E54AF6 /* AdaptiveLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveLayout.swift; sourceTree = "<group>"; };
 		602EAA3D00D683EEA5A50094 /* VoiceTypeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTypeApp.swift; sourceTree = "<group>"; };
 		622A033B4380678FBA8D23A1 /* ExternalLinkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalLinkTests.swift; sourceTree = "<group>"; };
 		630F802BA78FB06A2DD4F7B0 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -197,6 +200,7 @@
 		C3E3EEAFA87EE1CCAAAF85C3 /* VoiceTypeKeyboard.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = VoiceTypeKeyboard.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		C88A6712BE595BFABF7D8AC7 /* DictationPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationPreferences.swift; sourceTree = "<group>"; };
 		C96E464B265D5EE19B7E44DB /* VoiceTypeIcon.icon */ = {isa = PBXFileReference; path = VoiceTypeIcon.icon; sourceTree = "<group>"; };
+		CC27AD5FF155715655CA6C91 /* AdaptiveLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveLayoutTests.swift; sourceTree = "<group>"; };
 		D00BC21E29F67E6D0F11703E /* WeakObserverRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeakObserverRegistryTests.swift; sourceTree = "<group>"; };
 		D1278A65EC6455C886DEF798 /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
 		D75045E83806D62900EDA442 /* KeyboardMicLiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardMicLiveActivityController.swift; sourceTree = "<group>"; };
@@ -270,6 +274,7 @@
 		702C06E15A6F9485E4BC6A89 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				5B7304BCBEC717B6D7E54AF6 /* AdaptiveLayout.swift */,
 				EE625B147986589D6AA872DD /* AppTheme.swift */,
 				1A38A71FE30A70BD7E45C043 /* DashboardView.swift */,
 				17D231701F2DDB6441F60A89 /* DictationSettingsView.swift */,
@@ -292,6 +297,7 @@
 			isa = PBXGroup;
 			children = (
 				77D4C7F6D77EC6ACA52568C4 /* AccountSessionTests.swift */,
+				CC27AD5FF155715655CA6C91 /* AdaptiveLayoutTests.swift */,
 				595F765C31DD3D45FAF0309C /* DictationPreferencesTests.swift */,
 				622A033B4380678FBA8D23A1 /* ExternalLinkTests.swift */,
 				6BFE05EF53E2EA8FD4E9C1FB /* HomeSnapshotTests.swift */,
@@ -602,6 +608,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A134A4914E31FA679A9EECE4 /* AccountSessionTests.swift in Sources */,
+				EB9252FFC7D49AE3A596DF01 /* AdaptiveLayoutTests.swift in Sources */,
 				49C925A862D52744BC586C4C /* DictationPreferencesTests.swift in Sources */,
 				AECFE94EFE70D5601B0A8184 /* ExternalLinkTests.swift in Sources */,
 				ADBF86E4858E3AA007C37B7D /* HomeSnapshotTests.swift in Sources */,
@@ -623,6 +630,7 @@
 			files = (
 				41F0582CC5B5C7B406855D03 /* APIModels.swift in Sources */,
 				57D3E35305C39026EBD6F782 /* AccountStore.swift in Sources */,
+				A146614D047E7557C02317BF /* AdaptiveLayout.swift in Sources */,
 				F887E25AEA7A2587231948A7 /* AppConstants.swift in Sources */,
 				783AD5DDCA37DE660D35DC30 /* AppTheme.swift in Sources */,
 				8F93EC73F7C030FF210B0BC1 /* BackendClient.swift in Sources */,

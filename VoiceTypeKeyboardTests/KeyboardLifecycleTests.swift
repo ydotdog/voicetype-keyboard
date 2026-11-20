@@ -36,7 +36,9 @@ struct KeyboardLifecycleTests {
             defer { UIView.setAnimationsEnabled(animationsWereEnabled) }
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("VoiceTypeUIReview", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            for width in [320, 390, 768] {
+            // 466, 669 and 951 pt approximate iPhone Duo: closed, open in
+            // portrait and open in landscape.
+            for width in [320, 390, 466, 669, 768, 951] {
                 for (styleName, style) in [("light", UIUserInterfaceStyle.light), ("dark", .dark)] {
                     var transcribingHeight: CGFloat = 0
                     for (stateName, mode) in [("off", RecordingBridgeMode.standard), ("ready", .keyboardReady), ("recording", .keyboardRecording), ("transcribing", .transcribing), ("streaming", .transcribing), ("access", .keyboardReady)] {
@@ -92,6 +94,15 @@ struct KeyboardLifecycleTests {
                             let actionFrame = action.convert(action.bounds, to: controller.view)
                             let bottomFrame = bottomKey.convert(bottomKey.bounds, to: controller.view)
                             #expect(actionFrame.maxY < bottomFrame.minY)
+                            // Compact keyboards keep the phone-sized controls;
+                            // wider ones let them grow with the row, up to a cap.
+                            let expectedActionWidth = min(max(CGFloat(width) * 0.45, 224), 400)
+                            #expect(abs(actionFrame.width - expectedActionWidth) <= 1)
+                            #expect(abs(actionFrame.midX - controller.view.bounds.midX) <= 1)
+                            if width >= 390 {
+                                let expectedReturnWidth = min(max(CGFloat(width) * 0.28, 160), 320)
+                                #expect(abs(bottomFrame.width - expectedReturnWidth) <= 1)
+                            }
                             let preview = try #require(descendant("keyboard.partialTranscript", in: controller.view))
                             #expect(preview.isHidden == (stateName != "streaming"))
                             if stateName == "transcribing" { transcribingHeight = fittingSize.height }

@@ -204,22 +204,100 @@ final class HomeSnapshotTests: XCTestCase {
         }
     }
 
+    /// Approximate iPhone Duo window sizes in points: closed, open in portrait,
+    /// open in landscape, and half of the open display in each orientation.
+    /// Apple publishes no point sizes. These are its App Store screenshot sizes
+    /// (1398 × 2034 px for the outer display, 2007 × 2853 px for the inner one)
+    /// divided by 3. The simulator here has no iPhone Duo, so these check how
+    /// the layouts respond to the sizes, not to the device.
+    private static let duoSizes: [(name: String, width: CGFloat, height: CGFloat)] = [
+        ("duo-closed", 466, 678),
+        ("duo-open-portrait", 669, 951),
+        ("duo-open-landscape", 951, 669),
+        ("duo-half-landscape", 475, 669),
+        ("duo-half-portrait", 334, 951),
+    ]
+
+    func testCaptureIPhoneDuoSizes() async throws {
+        let savedBalance = SharedAccountStore.balanceText
+        defer { SharedAccountStore.balanceText = savedBalance }
+        let account = AccountStore(backend: SnapshotAccountBackend())
+        account.apply(balance: BalancePayload(balanceUSDMicros: 1_000_000, balanceCreditUnits: 100_000, formatted: "100,000 credits"))
+        let store = StoreKitService()
+        let now = Date()
+        let history = HistoryContent(
+            history: [TranscriptSnapshot(id: "snapshot-success", text: "Let's meet at ten tomorrow. I'll bring the notes.",
+                                         createdAt: now.addingTimeInterval(-180), chargeText: "27 credits")],
+            failedTranscriptions: [FailedTranscriptionSnapshot(id: UUID(), createdAt: now.addingTimeInterval(-60), duration: 12.4)],
+            retryingTranscriptionID: nil, retryErrorMessage: nil, isSignedIn: true,
+            copy: { _ in }, retry: { _ in }, delete: { _ in }
+        )
+        for size in Self.duoSizes {
+            for state in [HomeMicState.ready, .recording] {
+                let home = HomeContent(micState: state, elapsedSeconds: 65, durationLimit: .constant(.fiveMinutes),
+                                       isBusy: false, hasNegativeBalance: false, errorMessage: nil, toggleMic: {})
+                try await capture(home, tab: .home, name: "mic-\(state)-\(size.name)",
+                                  width: size.width, height: size.height, scheme: .light)
+            }
+            try await capture(CreditScreen(store: store, account: account), tab: .credit, name: "credit-\(size.name)",
+                              width: size.width, height: size.height, scheme: .light)
+            try await capture(history, tab: .history, name: "history-\(size.name)",
+                              width: size.width, height: size.height, scheme: .light)
+            let settings = VoiceTypeTabs(selection: .constant(.settings)) { _ in
+                SettingsScreen(account: account, store: store, openKeyboardSetup: {})
+            }
+            try await capture(settings, tab: .settings, name: "settings-\(size.name)",
+                              width: size.width, height: size.height, scheme: .light, standalone: true)
+        }
+    }
+
+    func testCaptureSignInAndKeyboardSetup() async throws {
+        let account = AccountStore(backend: SnapshotAccountBackend())
+        let phoneSizes: [(name: String, width: CGFloat, height: CGFloat)] = [
+            ("phone", 390, 844), ("small", 375, 667), ("zoomed", 320, 568),
+        ]
+        for size in phoneSizes + Self.duoSizes {
+            try await capture(SignInScreen(openKeyboardSetup: {}).environmentObject(account), tab: .home,
+                              name: "signin-\(size.name)", width: size.width, height: size.height, scheme: .light, standalone: true)
+            try await capture(KeyboardSetupScreen(close: {}), tab: .home,
+                              name: "setup-\(size.name)", width: size.width, height: size.height, scheme: .light, standalone: true)
+        }
+        try await capture(SignInScreen(openKeyboardSetup: {}).environmentObject(account), tab: .home,
+                          name: "signin-dark", width: 390, height: 844, scheme: .dark, standalone: true)
+        try await capture(SignInScreen(openKeyboardSetup: {}).environmentObject(account), tab: .home,
+                          name: "signin-accessibility", width: 390, height: 844, scheme: .light, standalone: true,
+                          typeSize: .accessibility3)
+    }
+
+    /// The toast belongs to the tab's content, so it sits above the tab bar.
+    func testCaptureToastInsideTab() async throws {
+        let history = HistoryContent(
+            history: [TranscriptSnapshot(id: "snapshot-success", text: "Let's meet at ten tomorrow. I'll bring the notes.",
+                                         createdAt: Date().addingTimeInterval(-180), chargeText: "27 credits")],
+            failedTranscriptions: [], retryingTranscriptionID: nil, retryErrorMessage: nil, isSignedIn: true,
+            copy: { _ in }, retry: { _ in }, delete: { _ in }
+        )
+        let sizes: [(name: String, width: CGFloat, height: CGFloat)] = [("phone", 390, 844), ("duo-open-landscape", 951, 669)]
+        for size in sizes {
+            let tabs = VoiceTypeTabs(selection: .constant(.history)) { _ in
+                TabPage { history }
+                    .toast("Copied", bottomPadding: 16)
+            }
+            try await capture(tabs, tab: .history, name: "toast-\(size.name)",
+                              width: size.width, height: size.height, scheme: .light, standalone: true)
+        }
+    }
+
     private func capture<Content: View>(_ content: Content, tab: VoiceTypeTab, name: String, width: CGFloat, height: CGFloat, scheme: ColorScheme, standalone: Bool = false, typeSize: DynamicTypeSize = .large, delay: Duration = .milliseconds(200)) async throws {
+        let maxWidth = pageWidth(for: tab)
         let screen = ZStack {
             AppTheme.background.ignoresSafeArea()
             if standalone {
                 content
             } else {
-            VoiceTypeTabs(selection: .constant(tab)) { _ in
-            ScrollView {
-                content
-                    .padding(.horizontal, 24)
-                    .padding(.top, 18)
-                    .padding(.bottom, 24)
-                    .frame(maxWidth: 720)
-                    .frame(maxWidth: .infinity)
-            }
-            }
+                VoiceTypeTabs(selection: .constant(tab)) { _ in
+                    TabPage(maxWidth: maxWidth) { content }
+                }
             }
         }
         .environment(\.colorScheme, scheme)
@@ -257,6 +335,14 @@ final class HomeSnapshotTests: XCTestCase {
         attachment.name = "VoiceType \(name)"
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    /// The widest each tab's page grows in the app.
+    private func pageWidth(for tab: VoiceTypeTab) -> CGFloat {
+        switch tab {
+        case .home, .credit: PageWidth.wide
+        case .history, .settings: PageWidth.reading
+        }
     }
 }
 

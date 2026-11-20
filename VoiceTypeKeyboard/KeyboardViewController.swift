@@ -345,8 +345,13 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         helperLabel.accessibilityIdentifier = "keyboard.helper"
         contentView.addSubview(helperLabel)
 
-        let actionWidth = actionControl.widthAnchor.constraint(equalToConstant: 224)
-        actionWidth.priority = .defaultHigh
+        // The control keeps its phone width on compact keyboards and grows with
+        // wider ones (the open iPhone Duo, iPad, landscape) up to a cap, so it
+        // stays a comfortable target instead of a small island in a wide row.
+        let actionProportionalWidth = actionControl.widthAnchor.constraint(equalTo: contentView.widthAnchor, multiplier: 0.45)
+        actionProportionalWidth.priority = .defaultHigh - 10
+        let actionMinimumWidth = actionControl.widthAnchor.constraint(greaterThanOrEqualToConstant: 224)
+        actionMinimumWidth.priority = .defaultHigh
         let helperHeight = helperLabel.heightAnchor.constraint(equalToConstant: 0)
         helperHeightConstraint = helperHeight
 
@@ -363,7 +368,9 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
             actionControl.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
             actionControl.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 24),
             actionControl.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -24),
-            actionWidth,
+            actionProportionalWidth,
+            actionMinimumWidth,
+            actionControl.widthAnchor.constraint(lessThanOrEqualToConstant: 400),
             actionControl.topAnchor.constraint(equalTo: topRow.bottomAnchor, constant: 18),
             actionControl.heightAnchor.constraint(equalToConstant: 48)
         ])
@@ -415,9 +422,12 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         let globeWidth = nextKeyboardButton.widthAnchor.constraint(equalToConstant: 44)
         globeWidth.priority = UILayoutPriority(999)
         // Return yields width before any 44 pt key does on narrow keyboards
-        // that also show their own globe key.
-        let returnWidth = returnButton.widthAnchor.constraint(equalToConstant: 160)
-        returnWidth.priority = .defaultHigh
+        // that also show their own globe key. On wide keyboards it grows with
+        // the row, up to a cap.
+        let returnProportionalWidth = returnButton.widthAnchor.constraint(equalTo: contentView.widthAnchor, multiplier: 0.28)
+        returnProportionalWidth.priority = .defaultHigh - 10
+        let returnPreferredWidth = returnButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 160)
+        returnPreferredWidth.priority = .defaultHigh
         NSLayoutConstraint.activate([
             bottomRow.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
             bottomRow.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 18),
@@ -429,7 +439,9 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
             nextKeyboardButton.heightAnchor.constraint(equalToConstant: 44),
             pasteButton.widthAnchor.constraint(equalToConstant: 44),
             pasteButton.heightAnchor.constraint(equalToConstant: 44),
-            returnWidth,
+            returnProportionalWidth,
+            returnPreferredWidth,
+            returnButton.widthAnchor.constraint(lessThanOrEqualToConstant: 320),
             returnButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 88),
             returnButton.heightAnchor.constraint(equalToConstant: 44),
             deleteButton.widthAnchor.constraint(equalToConstant: 44),
