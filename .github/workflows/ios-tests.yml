@@ -1,0 +1,117 @@
+name: iOS tests
+
+# Builds the app, the keyboard extension and the Live Activity extension for an
+# iOS simulator and runs both test bundles. Every job uploads its logs and the
+# snapshot images the tests render.
+on:
+  push:
+    paths:
+      - .github/workflows/ios-tests.yml
+      - scripts/ci/**
+      - project.yml
+      - VoiceType.xcodeproj/**
+      - Shared/**
+      - StoreKit/**
+      - VoiceType/**
+      - VoiceTypeActivityShared/**
+      - VoiceTypeKeyboard/**
+      - VoiceTypeKeyboardTests/**
+      - VoiceTypeLiveActivity/**
+      - VoiceTypeTests/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.sources }}, ${{ matrix.simulator }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    continue-on-error: ${{ !matrix.required }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # "current" tests the pushed commit. "before-duo" tests the commit just
+        # before the iPhone Duo layout work, so the snapshot images of the two can
+        # be compared from the same kind of machine; drop those jobs once that
+        # comparison is no longer needed.
+        #
+        # xcode-27 is GitHub's preview image with Xcode 27. It is the only hosted
+        # image with an iPhone Duo simulator, and its jobs may fail for reasons
+        # that have nothing to do with this project.
+        include:
+          - sources: current
+            ref: ""
+            runner: macos-26
+            xcode: "26.3"
+            simulator: iPhone 17
+            ios: "26.2"
+            slug: iphone-17
+            required: true
+          - sources: before-duo
+            ref: "8e00b642dd57a28371081219d0f0f9b4eb16ad13"
+            runner: macos-26
+            xcode: "26.3"
+            simulator: iPhone 17
+            ios: "26.2"
+            slug: iphone-17
+            required: false
+          - sources: current
+            ref: ""
+            runner: xcode-27
+            xcode: "27.1"
+            simulator: iPhone Duo
+            ios: "27.1"
+            slug: iphone-duo
+            required: false
+          - sources: before-duo
+            ref: "8e00b642dd57a28371081219d0f0f9b4eb16ad13"
+            runner: xcode-27
+            xcode: "27.1"
+            simulator: iPhone Duo
+            ios: "27.1"
+            slug: iphone-duo
+            required: false
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer
+      SIM_NAME: ${{ matrix.simulator }}
+      SIM_OS: ${{ matrix.ios }}
+    steps:
+      - name: Check out this workflow's script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ci
+          persist-credentials: false
+      - name: Check out the sources to test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.ref }}
+          path: src
+          persist-credentials: false
+      - name: Build for testing
+        run: bash ci/scripts/ci/run_ios_tests.sh build
+      - name: Run the tests
+        timeout-minutes: 35
+        run: bash ci/scripts/ci/run_ios_tests.sh test
+      - name: Collect results and snapshot images
+        if: always()
+        timeout-minutes: 10
+        run: bash ci/scripts/ci/run_ios_tests.sh collect
+      - name: Launch the app and take a screenshot
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 6
+        run: bash ci/scripts/ci/run_ios_tests.sh screenshot
+      - name: Upload logs and images
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-tests-${{ matrix.sources }}-${{ matrix.slug }}
+          path: out
+          if-no-files-found: warn
+          retention-days: 14
