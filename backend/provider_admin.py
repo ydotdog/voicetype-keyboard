@@ -50,6 +50,31 @@ class ProviderSettings:
 
 active_provider: ContextVar[Optional[ProviderSettings]] = ContextVar("active_provider", default=None)
 
+# Models that take a list of expected languages and literal keyword hints. For
+# these, languages[] replaces language and the provider rejects both together.
+MULTILINGUAL_MODELS = frozenset({"gpt-transcribe"})
+
+
+def transcription_form(model: str, *, language: Optional[str] = None, prompt: Optional[str] = None,
+                       languages: tuple[str, ...] | list[str] = (), keywords: tuple[str, ...] | list[str] = (),
+                       stream: bool = False) -> dict:
+    """Form fields for /v1/audio/transcriptions limited to options the model accepts."""
+    data: dict = {"model": model, "response_format": "verbose_json" if model == "whisper-1" else "json"}
+    if stream:
+        # Server-sent transcript.text.delta events, then transcript.text.done.
+        data["stream"] = "true"
+    if model == "gpt-4o-transcribe-diarize":
+        data["chunking_strategy"] = "auto"
+    if model in MULTILINGUAL_MODELS:
+        codes = list(languages) or ([language] if language else [])
+        if codes: data["languages[]"] = codes
+        if keywords: data["keywords[]"] = list(keywords)
+    elif language:
+        data["language"] = language
+    if prompt and model != "gpt-4o-transcribe-diarize":
+        data["prompt"] = prompt
+    return data
+
 
 class ProviderConfigStore:
     def __init__(self, path: str, encryption_key: str, defaults: Callable[[], ProviderSettings]):
@@ -307,9 +332,7 @@ def install_admin(app, store: ProviderConfigStore, models: dict, logger) -> None
         value = candidate(body)
         # This contains only bundled synthetic speech, never customer recordings.
         clip = (Path(__file__).parent / "admin/test-phrase.wav").read_bytes()
-        data = {"model": value.model, "response_format": "json", "language": "en"}
-        if value.model == "whisper-1": data["response_format"] = "verbose_json"
-        if value.model == "gpt-4o-transcribe-diarize": data["chunking_strategy"] = "auto"
+        data = transcription_form(value.model, language="en")
         started = time.monotonic()
         try:
             async with httpx.AsyncClient(timeout=30, follow_redirects=False, trust_env=False) as client:

@@ -2,17 +2,20 @@
 const $ = id => document.getElementById(id);
 const apiBase = document.documentElement.dataset.adminBasePath + "/api/";
 let state, proof = "", restoreRevision = null, busy = false;
-const names = {"gpt-4o-mini-transcribe":"GPT-4o mini Transcribe · 日常口述", "gpt-4o-transcribe":"GPT-4o Transcribe", "whisper-1":"Whisper", "gpt-4o-transcribe-diarize":"GPT-4o Transcribe Diarize · 不支持词汇提示"};
+const names = {"gpt-transcribe":"GPT Transcribe · 推荐，多语言", "gpt-4o-mini-transcribe":"GPT-4o mini Transcribe · 2027-02-26 停用", "gpt-4o-transcribe":"GPT-4o Transcribe · 2027-02-26 停用", "whisper-1":"Whisper · 2027-02-26 停用", "gpt-4o-transcribe-diarize":"GPT-4o Transcribe Diarize · 不支持词汇提示 · 2027-02-26 停用"};
 const messages = {admin_signed_in:"管理员登录",provider_test_passed:"转写测试成功",provider_test_failed:"转写测试失败",provider_config_saved:"配置已生效",transcription_provider_error:"线上转写服务错误"};
 function announce(text) { $("message").textContent = text; }
 function invalidate() { proof = ""; restoreRevision = null; $("save").disabled = true; $("save").textContent = "保存并生效"; $("test-result").hidden = true; }
 function setBusy(value) { busy=value; for(const id of ["test","restore","refresh","model","account","api-key","history"]) $(id).disabled=value; $("save").disabled=value||!proof; if(!value && (!state || state.history.length<2)){ $("restore").disabled=true; $("history").disabled=true; } }
 async function api(path, body) {
-  const result = await fetch(apiBase+path, {method:body===undefined?"GET":"POST", headers:body===undefined?{}:{"Content-Type":"application/json"}, body:body===undefined?undefined:JSON.stringify(body), credentials:"same-origin", cache:"no-store"});
-  const data = await result.json();
+  let result;
+  try { result = await fetch(apiBase+path, {method:body===undefined?"GET":"POST", headers:body===undefined?{}:{"Content-Type":"application/json"}, body:body===undefined?undefined:JSON.stringify(body), credentials:"same-origin", cache:"no-store"}); }
+  catch { throw new Error("无法连接服务器，请检查网络后重试。"); }
+  // A proxy error page is HTML, not JSON; keep the owner-facing message readable.
+  const data = await result.json().catch(() => ({}));
   if(!result.ok) {
     if(result.status===401) showLogin();
-    throw new Error(typeof data.detail === "string" ? data.detail : "请求未完成，请检查输入。");
+    throw new Error(typeof data.detail === "string" ? data.detail : result.status>=500 ? "服务暂时不可用，请稍后重试。" : "请求未完成，请检查输入。");
   }
   return data;
 }
@@ -35,7 +38,7 @@ function render(){
   if(!state.events.length){const item=document.createElement("li");item.textContent="暂无活动";$("events").append(item);}
   invalidate(); modelHelp();
 }
-function modelHelp(){const m=state?.models.find(x=>x.id===$("model").value);if(!m)return;$("model-help").textContent=m.pricing.basis==="audio_minutes"?"按音频时长计费；价格与计费规则由服务端统一管理。":"按供应商返回的用量计费；价格与计费规则由服务端统一管理。";}
+function modelHelp(){const m=state?.models.find(x=>x.id===$("model").value);if(!m)return;$("model-help").textContent=(m.pricing.basis==="audio_minutes"?"按音频时长计费；":"按供应商返回的用量计费；")+"价格与计费规则由服务端统一管理。App 设置里选择“Automatic”的用户使用这里的模型。";}
 function payload(){return {model:$("model").value,account_id:$("account").value.trim(),api_key:$("api-key").value.trim(),expected_revision:state.current.revision,restore_revision:restoreRevision,test_token:proof};}
 async function load(){state=await api("state");render();}
 async function test(restore=false){

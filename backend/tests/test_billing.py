@@ -2,6 +2,7 @@ import base64
 import importlib
 import json
 import sys
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,18 @@ from fastapi.testclient import TestClient
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
+
+
+# Before the 2027 model shutdowns, so the models tests pin stay available.
+TEST_TODAY = date(2026, 10, 1)
+
+
+def import_main(monkeypatch):
+    if "main" in sys.modules:
+        del sys.modules["main"]
+    main = importlib.import_module("main")
+    monkeypatch.setattr(main, "utc_today", lambda: TEST_TODAY)
+    return main
 
 
 def b64url(payload: dict) -> str:
@@ -36,9 +49,7 @@ def load_main(tmp_path, monkeypatch, *, validate_audio=False):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("COST_MARKUP_BPS", raising=False)
 
-    if "main" in sys.modules:
-        del sys.modules["main"]
-    main = importlib.import_module("main")
+    main = import_main(monkeypatch)
     if not validate_audio:
         # Ledger/lifecycle tests use opaque fake clips; real decoder fixtures
         # and bounds are exercised separately with validate_audio=True.
@@ -76,9 +87,7 @@ def load_production_main(tmp_path, monkeypatch, *, apple_signin_credentials=True
     monkeypatch.delenv("COST_MARKUP_BPS", raising=False)
     monkeypatch.delenv("APPLE_AUTH_DEV_BYPASS", raising=False)
 
-    if "main" in sys.modules:
-        del sys.modules["main"]
-    return importlib.import_module("main")
+    return import_main(monkeypatch)
 
 
 def auth(client: TestClient, name: str) -> dict:
@@ -315,6 +324,8 @@ def test_audio_minute_pricing_uses_retail_markup(tmp_path, monkeypatch):
 
 def test_transcription_debits_user_after_successful_provider_response(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
+    # Token usage accounting needs a token-priced model.
+    monkeypatch.setattr(main, "OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
 
     async def fake_transcribe_audio(*args, **kwargs):
         return {"text": "hello world", "usage": {"input_tokens": 1_000, "output_tokens": 100}}
@@ -346,6 +357,8 @@ def test_transcription_debits_user_after_successful_provider_response(tmp_path, 
 
 def test_transcription_reservation_blocks_second_provider_call_when_credit_is_held(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
+    # Token usage accounting needs a token-priced model.
+    monkeypatch.setattr(main, "OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
     main.MIN_TRANSCRIPTION_RESERVATION_USD_MICROS = 20_000
     calls = 0
 

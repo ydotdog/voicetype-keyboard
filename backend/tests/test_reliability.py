@@ -106,7 +106,7 @@ def test_non_object_storekit_payload_is_a_bad_request(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("provider_payload", [
-    None, {"text": []}, {"text": " "}, {"text": "ok", "usage": [1]},
+    None, {"text": []}, {"text": "ok", "usage": [1]},
     {"text": "ok", "usage": {"input_tokens": -5}},
     {"text": "ok", "usage": {"input_tokens": "broken"}},
 ])
@@ -121,10 +121,56 @@ def test_bad_provider_results_release_credit_and_do_not_charge(tmp_path, monkeyp
         response = transcribe(client, user)
         balance = client.get("/v1/me", headers=user["headers"])
     assert response.status_code == 502, response.text
+    # Only a silent clip carries a code; the app keeps these clips for retry.
+    assert "code" not in response.json()
     assert balance.json()["balance"]["balance_usd_micros"] == 1_000_000
     with main.db() as conn:
         assert conn.execute("SELECT COUNT(*) FROM credit_reservations").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM transcriptions").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("text", ["", " \n "])
+def test_silent_clip_reports_no_speech_instead_of_an_outage(tmp_path, monkeypatch, text):
+    main = load_main(tmp_path, monkeypatch)
+    async def provider(*args, **kwargs):
+        return {"text": text}
+    monkeypatch.setattr(main, "transcribe_audio", provider)
+    with TestClient(main.app) as client:
+        user = auth(client, "alice")
+        fund(client, user)
+        response = client.post(
+            "/v1/transcriptions", headers={**user["headers"], "Idempotency-Key": "silent-clip"},
+            data={"audio_seconds": "1"}, files={"file": ("clip.m4a", b"fake audio", "audio/m4a")},
+        )
+        balance = client.get("/v1/me", headers=user["headers"])
+    assert response.status_code == 422, response.text
+    # Older builds still read the same `detail`; newer builds discard on `code`.
+    assert response.json() == {
+        "detail": "No speech was detected in this recording. Nothing was charged.",
+        "code": "no_speech",
+    }
+    assert balance.json()["balance"]["balance_usd_micros"] == 1_000_000
+    with main.db() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM credit_reservations").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM transcriptions").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM transcription_requests").fetchone()[0] == 0
+
+
+def test_other_unprocessable_requests_are_not_reported_as_silence(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    async def provider(*args, **kwargs):
+        raise AssertionError("invalid settings must not reach the provider")
+    monkeypatch.setattr(main, "transcribe_audio", provider)
+    with TestClient(main.app) as client:
+        user = auth(client, "alice")
+        fund(client, user)
+        response = client.post(
+            "/v1/transcriptions", headers=user["headers"],
+            data={"audio_seconds": "1", "preferred_languages": '["invalid"]'},
+            files={"file": ("clip.m4a", b"fake audio", "audio/m4a")},
+        )
+    assert response.status_code == 422, response.text
+    assert "code" not in response.json()
 
 
 def test_provider_timeout_releases_credit_and_returns_retryable_error(tmp_path, monkeypatch):
@@ -270,6 +316,8 @@ def transcribe_key(client, user, key, audio=b"fake audio"):
 
 def test_completed_transcription_retry_survives_restart_and_charges_once(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
+    # Token usage accounting needs a token-priced model.
+    monkeypatch.setattr(main, "OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
     calls = []
     async def provider(*args, **kwargs):
         calls.append(True)

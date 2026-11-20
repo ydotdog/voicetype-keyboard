@@ -1,6 +1,8 @@
 from __future__ import annotations
-from dictation import parse_context, provider_hints, normalize_transcript
-from provider_admin import ProviderConfigStore, ProviderSettings, active_provider, install_admin
+from dictation import multilingual_hints, parse_context, provider_hints, normalize_transcript
+from provider_admin import (MULTILINGUAL_MODELS, ProviderConfigStore, ProviderSettings, active_provider,
+                            install_admin, transcription_form)
+import realtime
 
 import base64
 import asyncio
@@ -12,6 +14,7 @@ import logging
 import math
 import os
 import re
+import signal
 import sqlite3
 import shutil
 import tempfile
@@ -20,13 +23,13 @@ import time
 import uuid
 from collections import deque
 from contextlib import asynccontextmanager, contextmanager
-from datetime import datetime, timedelta, timezone
-from typing import Annotated, Any, Optional
+from datetime import date, datetime, timedelta, timezone
+from typing import Annotated, Any, AsyncIterator, Callable, Optional
 
 import httpx
 import jwt
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile, WebSocket
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from jwt import PyJWKClient
 from pydantic import BaseModel, Field
 from starlette.formparsers import MultiPartException
@@ -50,7 +53,7 @@ except ImportError:
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com").rstrip("/")
-OPENAI_TRANSCRIBE_MODEL = os.getenv("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
+OPENAI_TRANSCRIBE_MODEL = os.getenv("OPENAI_TRANSCRIBE_MODEL", "gpt-transcribe")
 OPENAI_PROVIDER_ACCOUNT_ID = os.getenv("OPENAI_PROVIDER_ACCOUNT_ID", "openai-primary")
 SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "kq@apeonwheels.com")
 
@@ -121,6 +124,30 @@ MAX_AUDIO_SECONDS = 600
 AUDIO_DECODE_TIMEOUT_SECONDS = 20
 PROVIDER_REQUEST_TIMEOUT_SECONDS = 120
 _transcription_slots = BoundedSemaphore(max(1, min(4, int(os.getenv("MAX_CONCURRENT_TRANSCRIPTIONS", "2")))))
+# A streamed transcription runs in its own task. A client that disconnects
+# cancels only the response, so a finished transcript is still saved and
+# charged once. The set holds each task until it ends.
+_transcription_stream_tasks: set[asyncio.Task] = set()
+TRANSCRIPTION_STREAM_KEEPALIVE_SECONDS = 15
+# Shutdown waits this long for streams whose clients left (Docker stops a
+# container after 10 seconds), then cancels them, which charges nothing.
+TRANSCRIPTION_STREAM_SHUTDOWN_GRACE_SECONDS = 5
+# Live transcription: the app streams audio over a WebSocket while recording
+# and sees text as it is spoken. People turn it on in the app; this switch and
+# the optional user list let the owner limit it. A session holds a socket for
+# the whole clip, so live sessions have their own limit, not the upload slots.
+REALTIME_TRANSCRIPTION_ENABLED = os.getenv("REALTIME_TRANSCRIPTION_ENABLED", "true").lower() in {"1", "true", "yes"}
+REALTIME_TRANSCRIPTION_MODEL = os.getenv("REALTIME_TRANSCRIPTION_MODEL", "gpt-live-transcribe").strip()
+MAX_CONCURRENT_REALTIME_SESSIONS = max(1, min(32, int(os.getenv("MAX_CONCURRENT_REALTIME_SESSIONS", "8"))))
+REALTIME_ALLOWED_USER_IDS = frozenset(
+    user_id.strip() for user_id in os.getenv("REALTIME_ALLOWED_USER_IDS", "").split(",") if user_id.strip())
+REALTIME_RATE_LIMIT_PER_WINDOW = int(os.getenv("REALTIME_RATE_LIMIT_PER_WINDOW", "30"))
+# After the app ends a live clip, an upload of the same recording waits this
+# long for the live result instead of transcribing it a second time.
+REALTIME_COMMIT_GRACE_SECONDS = realtime.COMMIT_TIMEOUT_SECONDS + 5
+# The credit hold always covers the audio sent so far plus this much more.
+REALTIME_HOLD_AHEAD_SECONDS = 15
+REALTIME_FINGERPRINT_VERSION = 3
 
 RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() in {"1", "true", "yes"}
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
@@ -198,6 +225,7 @@ DEFAULT_PRODUCTS = [
 
 
 MODEL_PRICING = {
+    "gpt-transcribe": {"basis": "audio_minutes", "per_minute_usd_micros": 4_500},
     "whisper-1": {"basis": "audio_minutes", "per_minute_usd_micros": 6_000},
     "gpt-4o-mini-transcribe": {
         "basis": "tokens",
@@ -216,6 +244,35 @@ MODEL_PRICING = {
     },
 }
 
+MODEL_NAMES = {
+    "gpt-transcribe": "GPT Transcribe",
+    "gpt-4o-mini-transcribe": "GPT-4o mini Transcribe",
+    "gpt-4o-transcribe": "GPT-4o Transcribe",
+    "whisper-1": "Whisper",
+    "gpt-4o-transcribe-diarize": "GPT-4o Transcribe Diarize",
+}
+# OpenAI shuts these down on this date. A model someone chose in the app falls
+# back to the service default from then on instead of failing every dictation.
+MODEL_RETIREMENTS = {
+    model: date(2027, 2, 26)
+    for model in ("whisper-1", "gpt-4o-mini-transcribe", "gpt-4o-transcribe", "gpt-4o-transcribe-diarize")
+}
+# Models people can pick in the app, in display order. Token-priced models are
+# billed on reported usage; OpenAI's published per-minute estimate is shown.
+SELECTABLE_MODELS = {
+    "gpt-transcribe": {"typical_per_minute_usd_micros": 4_500, "streaming": True},
+    "gpt-4o-mini-transcribe": {"typical_per_minute_usd_micros": 3_000, "streaming": True},
+    "gpt-4o-transcribe": {"typical_per_minute_usd_micros": 6_000, "streaming": True},
+    "whisper-1": {"typical_per_minute_usd_micros": 6_000, "streaming": False},
+}
+RECOMMENDED_MODEL = "gpt-transcribe"
+# Live transcription is billed per minute of audio sent to the provider. These
+# stay out of MODEL_PRICING so uploads cannot select a live-only model.
+REALTIME_PRICING = {"gpt-live-transcribe": 17_000, "gpt-transcribe": 4_500}
+REALTIME_MODEL_NAMES = {"gpt-live-transcribe": "GPT Live Transcribe", "gpt-transcribe": "GPT Transcribe"}
+if set(REALTIME_PRICING) != set(realtime.REALTIME_MODELS):
+    raise RuntimeError("Every live transcription model needs a price.")
+
 
 provider_store = ProviderConfigStore(
     os.getenv("PROVIDER_CONFIG_PATH", ""), os.getenv("PROVIDER_CONFIG_ENCRYPTION_KEY", ""),
@@ -230,10 +287,12 @@ def request_provider() -> ProviderSettings:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> Any:
+    watch_for_server_stop()
     on_startup()
     try:
         yield
     finally:
+        await finish_transcription_streams()
         on_shutdown()
 
 
@@ -666,6 +725,45 @@ class TranscriptionResponse(BaseModel):
     balance: BalancePayload
 
 
+class TranscriptionModel(BaseModel):
+    id: str
+    name: str
+    recommended: bool
+    streaming: bool
+    retires_on: Optional[str]
+    pricing_basis: str
+    credit_units_per_minute: int
+    formatted_per_minute: str
+
+
+class RealtimeTranscriptionModel(BaseModel):
+    id: str
+    name: str
+    recommended: bool
+    # True for models that only transcribe live audio, not uploaded recordings.
+    live_only: bool
+    # "while_speaking" or "after_pauses".
+    text_timing: str
+    retires_on: Optional[str]
+    pricing_basis: str
+    credit_units_per_minute: int
+    formatted_per_minute: str
+
+
+class RealtimeTranscriptionCatalog(BaseModel):
+    available: bool
+    default_model: str
+    models: list[RealtimeTranscriptionModel]
+
+
+class TranscriptionModelsResponse(BaseModel):
+    default_model: str
+    default_model_name: str
+    models: list[TranscriptionModel]
+    # Absent from older servers; apps then offer only uploads.
+    realtime: Optional[RealtimeTranscriptionCatalog] = None
+
+
 class LedgerEntry(BaseModel):
     id: str
     amount_usd_micros: int
@@ -904,6 +1002,7 @@ def ensure_schema_migrations(conn: Any) -> None:
     )
     add_column_if_missing(conn, "transcription_requests", "fingerprint_version", "INTEGER NOT NULL DEFAULT 1")
     add_column_if_missing(conn, "transcription_requests", "selected_model", "TEXT")
+    add_column_if_missing(conn, "transcription_requests", "realtime_committed_at", "TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS storekit_refund_states (
@@ -1113,6 +1212,12 @@ def on_startup() -> None:
     init_db()
     with db() as conn:
         clear_expired_credit_reservations(conn)
+        # Live sessions end with the process. Their holds and unfinished
+        # request keys are released without a charge; the app uploads the
+        # recording instead.
+        execute(conn, "DELETE FROM transcription_requests WHERE fingerprint_version = ? AND transcription_id IS NULL",
+                (REALTIME_FINGERPRINT_VERSION,))
+        execute(conn, "DELETE FROM credit_reservations WHERE kind = 'realtime'")
     logger.info(
         "startup_complete",
         extra={
@@ -1270,6 +1375,20 @@ def reserve_credit(conn: Any, *, user_id: str, amount_usd_micros: int, kind: str
 
 def release_credit_reservation(conn: Any, *, reservation_id: str, user_id: str) -> None:
     execute(conn, "DELETE FROM credit_reservations WHERE id = ? AND user_id = ?", (reservation_id, user_id))
+
+
+def extend_credit_reservation(conn: Any, *, reservation_id: str, user_id: str, amount_usd_micros: int) -> bool:
+    """Adds to an existing hold. False when the hold is gone because a newer attempt released it."""
+    lock_user(conn, user_id)
+    clear_expired_credit_reservations(conn)
+    if not execute(conn, "SELECT 1 FROM credit_reservations WHERE id = ? AND user_id = ?",
+                   (reservation_id, user_id)).fetchone():
+        return False
+    if balance_for_user(conn, user_id) < amount_usd_micros:
+        raise HTTPException(status_code=402, detail=f"Insufficient credit. Need at least {format_credits(amount_usd_micros)}.")
+    execute(conn, "UPDATE credit_reservations SET amount_usd_micros = amount_usd_micros + ? WHERE id = ? AND user_id = ?",
+            (amount_usd_micros, reservation_id, user_id))
+    return True
 
 
 def apple_signin_private_key_pem() -> str:
@@ -1694,8 +1813,24 @@ def verify_storekit_notification(jws: str) -> dict[str, Any]:
     raise HTTPException(status_code=401, detail="Invalid StoreKit notification signature.")
 
 
+def utc_today() -> date:
+    return datetime.now(timezone.utc).date()
+
+
+def model_retired(model: str, today: Optional[date] = None) -> bool:
+    retires_on = MODEL_RETIREMENTS.get(model)
+    return retires_on is not None and (today or utc_today()) >= retires_on
+
+
+def service_default_model() -> str:
+    # Requests that use the owner's setting keep working after it is shut down upstream.
+    configured = request_provider().model.strip()
+    return RECOMMENDED_MODEL if model_retired(configured) else configured
+
+
 def resolve_model(model: Optional[str]) -> str:
-    selected = (model or request_provider().model).strip()
+    requested = (model or "").strip()
+    selected = requested if requested and not model_retired(requested) else service_default_model()
     if selected not in MODEL_PRICING:
         raise HTTPException(status_code=400, detail=f"Unsupported transcription model: {selected}")
     return selected
@@ -1771,6 +1906,25 @@ def estimate_reservation_cost(model: str, audio_seconds: float) -> int:
     return max(estimated, MIN_TRANSCRIPTION_RESERVATION_USD_MICROS)
 
 
+def realtime_cost(model: str, audio_seconds: float, *, minimum: bool = True) -> int:
+    """Live audio is priced per minute sent to the provider. A finished clip pays for at least one second."""
+    seconds = max(audio_seconds, 1.0) if minimum else audio_seconds
+    if seconds <= 0:
+        return 0
+    return max(1, apply_cost_markup(math.ceil(seconds / 60 * REALTIME_PRICING[model])))
+
+
+def realtime_default_model() -> str:
+    configured = REALTIME_TRANSCRIPTION_MODEL
+    return configured if configured in realtime.REALTIME_MODELS else "gpt-live-transcribe"
+
+
+def realtime_available(user_id: Optional[str] = None) -> bool:
+    if not REALTIME_TRANSCRIPTION_ENABLED or not provider_store.current().api_key:
+        return False
+    return user_id is None or not REALTIME_ALLOWED_USER_IDS or user_id in REALTIME_ALLOWED_USER_IDS
+
+
 async def measure_audio_duration(audio: bytes) -> float:
     """Decode bounded audio locally so forged duration metadata cannot buy cheap work."""
     decoder = shutil.which("ffmpeg")
@@ -1822,19 +1976,12 @@ def provider_audio_duration(payload: dict[str, Any], measured_seconds: float) ->
     return max(measured_seconds, float(value))
 
 
-async def transcribe_audio(audio: bytes, filename: str, content_type: Optional[str], model: str, language: Optional[str], prompt: Optional[str] = None) -> dict[str, Any]:
+async def transcribe_audio(audio: bytes, filename: str, content_type: Optional[str], model: str, language: Optional[str],
+                           prompt: Optional[str] = None, languages: tuple[str, ...] = (), keywords: tuple[str, ...] = ()) -> dict[str, Any]:
     require_openai_key()
     provider = request_provider()
     headers = {"Authorization": f"Bearer {provider.api_key}"}
-    data: dict[str, str] = {"model": model, "response_format": "json"}
-    if model == "whisper-1":
-        data["response_format"] = "verbose_json"
-    if model == "gpt-4o-transcribe-diarize":
-        data["chunking_strategy"] = "auto"
-    if language:
-        data["language"] = language
-    if prompt and model != "gpt-4o-transcribe-diarize":
-        data["prompt"] = prompt
+    data = transcription_form(model, language=language, prompt=prompt, languages=languages, keywords=keywords)
     files = {"file": (filename, audio, content_type or "audio/m4a")}
     async with httpx.AsyncClient(timeout=httpx.Timeout(120.0), follow_redirects=False, trust_env=False) as client:
         response = await client.post(f"{provider.base_url}/v1/audio/transcriptions", headers=headers, data=data, files=files)
@@ -1854,29 +2001,214 @@ async def transcribe_audio(audio: bytes, filename: str, content_type: Optional[s
     return payload
 
 
+class ProviderEventStream:
+    """Incremental reader for the provider's server-sent JSON events."""
+
+    def __init__(self) -> None:
+        self.buffer, self.after_cr, self.name, self.data = b"", False, "", []
+
+    def feed(self, chunk: bytes) -> list[tuple[str, dict[str, Any]]]:
+        """(type, event) pairs completed by this chunk of the body. Raises
+        ValueError for text that is not UTF-8 or data that is not a JSON object."""
+        if not chunk:
+            return []
+        if self.after_cr and chunk.startswith(b"\n"):
+            chunk = chunk[1:]  # The LF of a CRLF split between chunks.
+        self.after_cr = chunk.endswith(b"\r")
+        # Lines end only at CR, LF or CRLF. str.splitlines, and so httpx's
+        # aiter_lines, also splits at characters such as U+2028 that JSON
+        # strings may contain unescaped.
+        lines = (self.buffer + chunk).splitlines(keepends=True)
+        self.buffer = lines.pop() if lines and not lines[-1].endswith((b"\r", b"\n")) else b""
+        events = []
+        for raw in lines:
+            line = raw.rstrip(b"\r\n").decode("utf-8")
+            if line:
+                # A comment line starts with ":", so it has no field name.
+                field, _, value = line.partition(":")
+                value = value[1:] if value.startswith(" ") else value
+                if field == "data":
+                    self.data.append(value)
+                elif field == "event":
+                    self.name = value
+                continue
+            data, name, self.name, self.data = "\n".join(self.data), self.name, "", []
+            if data and data != "[DONE]":
+                event = json.loads(data)
+                if not isinstance(event, dict):
+                    raise ValueError("Provider event is not a JSON object.")
+                events.append((event.get("type") or name, event))
+        return events
+
+
+async def stream_transcribe_audio(audio: bytes, filename: str, content_type: Optional[str], model: str,
+                                  language: Optional[str], prompt: Optional[str] = None,
+                                  languages: tuple[str, ...] = (), keywords: tuple[str, ...] = (), *,
+                                  on_delta: Callable[[str], None]) -> dict[str, Any]:
+    """transcribe_audio with stream=true. Passes each text delta to on_delta and
+    returns the final transcript.text.done event, which carries the usage."""
+    require_openai_key()
+    provider = request_provider()
+    headers = {"Authorization": f"Bearer {provider.api_key}", "Accept": "text/event-stream"}
+    data = transcription_form(model, language=language, prompt=prompt, languages=languages, keywords=keywords, stream=True)
+    files = {"file": (filename, audio, content_type or "audio/m4a")}
+    payload: Any = None
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0), follow_redirects=False, trust_env=False) as client:
+        async with client.stream("POST", f"{provider.base_url}/v1/audio/transcriptions",
+                                 headers=headers, data=data, files=files) as response:
+            if response.status_code >= 400:
+                logger.error("transcription_provider_error", extra={"status_code": response.status_code})
+                raise HTTPException(status_code=502, detail="Transcription provider request failed.")
+            try:
+                if response.headers.get("content-type", "").split(";")[0].strip().lower() != "text/event-stream":
+                    # A model that cannot stream answers with its usual JSON body.
+                    payload = json.loads(await response.aread())
+                else:
+                    reader = ProviderEventStream()
+                    async for chunk in response.aiter_bytes():
+                        for kind, event in reader.feed(chunk):
+                            if kind == "transcript.text.delta":
+                                delta = event.get("delta")
+                                if isinstance(delta, str) and delta:
+                                    on_delta(delta)
+                            elif kind == "transcript.text.done":
+                                payload = event
+                                break
+                            elif kind == "error":
+                                error = event.get("error")
+                                logger.error("transcription_provider_stream_error",
+                                             extra={"error_code": error.get("code") if isinstance(error, dict) else None})
+                                raise HTTPException(status_code=502, detail="Transcription provider request failed.")
+                        if payload is not None:
+                            break
+            except ValueError as exc:
+                raise HTTPException(status_code=502, detail="Transcription provider returned invalid data.") from exc
+    if payload is None:
+        # The stream ended without its final event.
+        raise HTTPException(status_code=502, detail="Transcription service is temporarily unavailable. Try again.")
+    validated_transcript(payload)
+    return payload
+
+
+class NoSpeechDetected(HTTPException):
+    """A silent or accidental clip, not an outage: retrying cannot help."""
+
+    code = "no_speech"
+
+    def __init__(self) -> None:
+        super().__init__(status_code=422, detail="No speech was detected in this recording. Nothing was charged.")
+
+
+@app.exception_handler(NoSpeechDetected)
+async def no_speech_response(request: Request, exc: NoSpeechDetected) -> JSONResponse:
+    # Older builds show `detail`. Newer builds read `code` and discard the clip
+    # instead of saving a retry that would pay the provider again for nothing.
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail, "code": exc.code})
+
+
 def validated_transcript(payload: Any) -> str:
     transcript = payload.get("text") if isinstance(payload, dict) else None
-    if not isinstance(transcript, str) or not transcript.strip():
+    if not isinstance(transcript, str):
         raise HTTPException(status_code=502, detail="Transcription provider returned no usable text.")
+    if not transcript.strip():
+        raise NoSpeechDetected()
     return transcript.strip()
 
 
-def transcription_response(transcription: dict[str, Any], balance: int) -> JSONResponse:
+def transcription_payload(transcription: dict[str, Any], balance: int) -> dict[str, Any]:
     cost = transcription["cost_usd_micros"]
-    return JSONResponse(
-        TranscriptionResponse(
-            id=transcription["id"],
-            transcript=transcription["transcript"],
-            model=transcription["model"],
-            charge=ChargePayload(
-                cost_usd_micros=cost,
-                cost_credit_units=credit_units_from_usd_micros(cost),
-                formatted=format_credits(cost),
-                pricing_basis=transcription["pricing_basis"],
-            ),
-            balance=balance_payload(balance),
-        ).model_dump()
-    )
+    return TranscriptionResponse(
+        id=transcription["id"],
+        transcript=transcription["transcript"],
+        model=transcription["model"],
+        charge=ChargePayload(
+            cost_usd_micros=cost,
+            cost_credit_units=credit_units_from_usd_micros(cost),
+            formatted=format_credits(cost),
+            pricing_basis=transcription["pricing_basis"],
+        ),
+        balance=balance_payload(balance),
+    ).model_dump()
+
+
+def sse_event(event: str, payload: dict[str, Any]) -> bytes:
+    # json.dumps escapes CR and LF, so the data always fits on one line.
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n".encode()
+
+
+def stream_error_payload(exc: BaseException) -> dict[str, Any]:
+    if not isinstance(exc, HTTPException):
+        return {"status": 500, "detail": "Transcription failed. Try again."}
+    payload: dict[str, Any] = {"status": exc.status_code, "detail": exc.detail}
+    if getattr(exc, "code", None):
+        payload["code"] = exc.code
+    return payload
+
+
+async def stream_transcription_worker(slots: Any, events: asyncio.Queue, *args: Any) -> None:
+    """Runs one streamed transcription to the end, whether or not anyone still reads it."""
+    terminal: tuple[str, Any] = (
+        "error", HTTPException(status_code=502, detail="Transcription service is temporarily unavailable. Try again."))
+    try:
+        terminal = ("done", await perform_transcription(*args, on_delta=lambda delta: events.put_nowait(("delta", delta))))
+    except Exception as exc:
+        terminal = ("error", exc)
+    finally:
+        # perform_transcription has charged, or released its hold and request
+        # claim, before the client sees the last event.
+        slots.release()
+        events.put_nowait(terminal)
+
+
+async def transcription_event_stream(first: tuple[str, Any], events: asyncio.Queue, user_id: str) -> AsyncIterator[bytes]:
+    item: Optional[tuple[str, Any]] = first
+    finished = False
+    try:
+        while True:
+            if item is None:
+                try:
+                    item = await asyncio.wait_for(events.get(), timeout=TRANSCRIPTION_STREAM_KEEPALIVE_SECONDS)
+                except asyncio.TimeoutError:
+                    yield b": keepalive\n\n"
+                    continue
+            (kind, value), item = item, None
+            if kind == "delta":
+                # Deltas that queued up meanwhile go out as one event.
+                while item is None and not events.empty():
+                    queued = events.get_nowait()
+                    if queued[0] == "delta":
+                        value += queued[1]
+                    else:
+                        item = queued
+                yield sse_event("delta", {"delta": value})
+                continue
+            finished = True
+            if kind == "done":
+                yield sse_event("done", value)
+            else:
+                if not isinstance(value, HTTPException):
+                    logger.error("transcription_stream_failed", exc_info=value)
+                yield sse_event("error", stream_error_payload(value))
+            return
+    finally:
+        if not finished:
+            # The worker still finishes and charges; a retry with the same
+            # Idempotency-Key returns the saved result.
+            logger.info("transcription_stream_client_disconnected", extra={"user_id": user_id})
+
+
+async def finish_transcription_streams() -> None:
+    loop = asyncio.get_running_loop()
+    pending = [task for task in _transcription_stream_tasks if task.get_loop() is loop]
+    if not pending:
+        return
+    _, unfinished = await asyncio.wait(pending, timeout=TRANSCRIPTION_STREAM_SHUTDOWN_GRACE_SECONDS)
+    for task in unfinished:
+        # Cancelling releases the hold and the request claim before the
+        # database pool closes; the client's retry transcribes again.
+        task.cancel()
+    if unfinished:
+        await asyncio.wait(unfinished)
 
 
 @app.get("/health")
@@ -1989,6 +2321,48 @@ def delete_account(user: Annotated[dict[str, Any], Depends(current_user)]) -> di
         execute(conn, "DELETE FROM users WHERE id = ?", (user["id"],))
     logger.info("account_deleted", extra={"user_id": user["id"], "apple_token_revoked": revoked})
     return {"ok": True, "apple_token_revoked": revoked}
+
+
+@app.get("/v1/transcription/models", response_model=TranscriptionModelsResponse)
+def transcription_models() -> TranscriptionModelsResponse:
+    default = service_default_model()
+    models = []
+    for model, details in SELECTABLE_MODELS.items():
+        if model_retired(model):
+            continue
+        per_minute = apply_cost_markup(details["typical_per_minute_usd_micros"])
+        retires_on = MODEL_RETIREMENTS.get(model)
+        models.append(TranscriptionModel(
+            id=model,
+            name=MODEL_NAMES[model],
+            recommended=model == RECOMMENDED_MODEL,
+            streaming=details["streaming"],
+            retires_on=retires_on.isoformat() if retires_on else None,
+            pricing_basis=MODEL_PRICING[model]["basis"],
+            credit_units_per_minute=credit_units_from_usd_micros(per_minute),
+            formatted_per_minute=f"{format_credits(per_minute)}/min",
+        ))
+    live_default = realtime_default_model()
+    live_models = []
+    for model, settings in realtime.REALTIME_MODELS.items():
+        per_minute = realtime_cost(model, 60)
+        retires_on = MODEL_RETIREMENTS.get(model)
+        live_models.append(RealtimeTranscriptionModel(
+            id=model,
+            name=REALTIME_MODEL_NAMES[model],
+            recommended=model == live_default,
+            live_only=model not in MODEL_PRICING,
+            text_timing=settings["text_timing"],
+            retires_on=retires_on.isoformat() if retires_on else None,
+            pricing_basis="audio_minutes",
+            credit_units_per_minute=credit_units_from_usd_micros(per_minute),
+            formatted_per_minute=f"{format_credits(per_minute)}/min",
+        ))
+    # This request carries no account, so a user list set by the owner is
+    # checked when a session starts; the app then uploads instead.
+    live = RealtimeTranscriptionCatalog(available=realtime_available(), default_model=live_default, models=live_models)
+    return TranscriptionModelsResponse(default_model=default, default_model_name=MODEL_NAMES.get(default, default),
+                                       models=models, realtime=live)
 
 
 @app.get("/v1/billing/products")
@@ -2211,26 +2585,48 @@ async def create_transcription(
     idempotency_key: Annotated[Optional[str], Header(alias="Idempotency-Key", max_length=128)] = None,
     preferred_languages: Annotated[Optional[str], Form(max_length=256)] = None,
     vocabulary: Annotated[Optional[str], Form(max_length=16000)] = None,
-) -> JSONResponse:
+    stream: Annotated[bool, Form()] = False,
+) -> Response:
     # Reject excess work before loading/decoding the upload. No waiting queue
     # retains many 24 MB audio buffers on the small production server.
-    if not _transcription_slots.acquire(blocking=False):
+    slots = _transcription_slots
+    if not slots.acquire(blocking=False):
         raise HTTPException(status_code=503, detail="Transcription service is busy. Please retry shortly.", headers={"Retry-After": "3"})
     provider_token = None
+    worker = None
     try:
         provider_token = active_provider.set(provider_store.current())
-        return await perform_transcription(user, file, audio_seconds, language, model, idempotency_key,
-                                           parse_context(preferred_languages, vocabulary))
+        args = (user, file, audio_seconds, language, model, idempotency_key, parse_context(preferred_languages, vocabulary))
+        if not stream:
+            return JSONResponse(await perform_transcription(*args))
+        # The response starts with the first transcript event. Validation, the
+        # balance check, the request-key claim and the credit hold come before
+        # it, so their failures stay ordinary HTTP errors.
+        events: asyncio.Queue = asyncio.Queue()
+        worker = asyncio.create_task(stream_transcription_worker(slots, events, *args))
+        _transcription_stream_tasks.add(worker)
+        worker.add_done_callback(_transcription_stream_tasks.discard)
+        first = await events.get()
+        if first[0] == "error":
+            raise first[1]
+        return StreamingResponse(
+            transcription_event_stream(first, events, user["id"]), media_type="text/event-stream",
+            # no-transform keeps proxies from compressing (and so buffering)
+            # events; nosniff keeps clients from holding them for type sniffing.
+            headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no",
+                     "X-Content-Type-Options": "nosniff"},
+        )
     finally:
         if provider_token is not None: active_provider.reset(provider_token)
-        _transcription_slots.release()
+        # The worker releases its slot itself once it has finished.
+        if worker is None: slots.release()
 
 
 async def perform_transcription(
     user: dict[str, Any], file: UploadFile, audio_seconds: float,
     language: Optional[str], model: Optional[str], idempotency_key: Optional[str],
-    context: Optional[dict] = None,
-) -> JSONResponse:
+    context: Optional[dict] = None, on_delta: Optional[Callable[[str], None]] = None,
+) -> dict[str, Any]:
     selected_model = resolve_model(model)
     audio = await file.read(MAX_AUDIO_BYTES + 1)
     if not audio:
@@ -2267,7 +2663,15 @@ async def perform_transcription(
                         conn, "SELECT * FROM transcriptions WHERE id = ? AND user_id = ?",
                         (previous["transcription_id"], user["id"]),
                     ).fetchone())
-                if previous["fingerprint_version"] == 1:
+                live = previous["fingerprint_version"] == REALTIME_FINGERPRINT_VERSION
+                if live:
+                    # A live session used this key first. Its fingerprint covers
+                    # the settings, not the audio, so its result is only replayed
+                    # for a recording of about the same length.
+                    if previous["fingerprint"] != realtime_fingerprint(language, context) or (completed and abs(
+                            completed["audio_seconds"] - measured_seconds) > max(2.0, 0.1 * measured_seconds)):
+                        raise HTTPException(status_code=409, detail="This request key was already used for a different recording.")
+                elif previous["fingerprint_version"] == 1:
                     if has_context:
                         raise HTTPException(status_code=409, detail="This request key was already used with different preferences.")
                     # Old fingerprints included the then-current server default.
@@ -2287,10 +2691,13 @@ async def perform_transcription(
                 else:
                     selected_model = previous["selected_model"] or selected_model
                 if completed:
-                    return transcription_response(completed, balance_for_user(conn, user["id"]))
-                remaining = TRANSCRIPTION_PROCESSING_LEASE_SECONDS - (
-                    datetime.now(timezone.utc) - datetime.fromisoformat(previous["updated_at"])
-                ).total_seconds()
+                    return transcription_payload(completed, balance_for_user(conn, user["id"]))
+                # A live clip the app has finished is waited for. One still
+                # recording, or one the app gave up on, is replaced by this upload.
+                lease_started = previous["realtime_committed_at"] if live else previous["updated_at"]
+                remaining = (REALTIME_COMMIT_GRACE_SECONDS if live else TRANSCRIPTION_PROCESSING_LEASE_SECONDS) - (
+                    datetime.now(timezone.utc) - datetime.fromisoformat(lease_started)
+                ).total_seconds() if lease_started else 0
                 if remaining > 0:
                     retry_after = str(max(1, math.ceil(remaining)))
                     raise HTTPException(status_code=409,
@@ -2300,6 +2707,12 @@ async def perform_transcription(
                 # claim an expired attempt; the old worker must verify ownership
                 # again before it can write any debit.
                 release_credit_reservation(conn, reservation_id=previous["attempt_id"], user_id=user["id"])
+                if live:
+                    # The live session pays for the audio it already sent.
+                    stop_realtime_sessions(user["id"], request_key)
+        if model_retired(selected_model):
+            # An unfinished attempt from before the upstream shutdown.
+            selected_model = resolve_model(None)
         reservation_cost = estimate_reservation_cost(selected_model, measured_seconds)
         reservation_id = reserve_credit(
             conn,
@@ -2317,19 +2730,27 @@ async def perform_transcription(
                 ON CONFLICT (user_id, request_key) DO UPDATE SET
                     attempt_id = excluded.attempt_id, updated_at = excluded.updated_at,
                     fingerprint = excluded.fingerprint, fingerprint_version = excluded.fingerprint_version,
-                    selected_model = excluded.selected_model
+                    selected_model = excluded.selected_model, realtime_committed_at = NULL
                 """,
                 (user["id"], request_key, fingerprint, reservation_id, utc_now(), selected_model),
             )
 
     try:
         try:
-            input_language, prompt = provider_hints(context, language)
-            hint_args = {"prompt": prompt} if prompt else {}
-            payload = await asyncio.wait_for(
-                transcribe_audio(audio, file.filename or "recording.m4a", file.content_type, selected_model, input_language, **hint_args),
-                timeout=PROVIDER_REQUEST_TIMEOUT_SECONDS,
-            )
+            if selected_model in MULTILINGUAL_MODELS:
+                languages, keywords, prompt = multilingual_hints(context, language)
+                input_language, hint_args = None, {"languages": languages, "keywords": keywords}
+            else:
+                input_language, prompt = provider_hints(context, language)
+                hint_args = {}
+            hint_args = {key: value for key, value in {**hint_args, "prompt": prompt}.items() if value}
+            filename = file.filename or "recording.m4a"
+            if on_delta is not None and SELECTABLE_MODELS.get(selected_model, {}).get("streaming"):
+                provider_call = stream_transcribe_audio(audio, filename, file.content_type, selected_model, input_language,
+                                                        on_delta=on_delta, **hint_args)
+            else:
+                provider_call = transcribe_audio(audio, filename, file.content_type, selected_model, input_language, **hint_args)
+            payload = await asyncio.wait_for(provider_call, timeout=PROVIDER_REQUEST_TIMEOUT_SECONDS)
         except (httpx.HTTPError, asyncio.TimeoutError) as exc:
             raise HTTPException(status_code=502, detail="Transcription service is temporarily unavailable. Try again.") from exc
         transcript = normalize_transcript(validated_transcript(payload), context["languages"])
@@ -2430,7 +2851,380 @@ async def perform_transcription(
             "pricing_basis": pricing_basis,
         },
     )
-    return transcription_response({
+    return transcription_payload({
         "id": transcription_id, "transcript": transcript, "model": selected_model,
         "cost_usd_micros": charged_cost, "pricing_basis": pricing_basis,
     }, balance)
+
+
+# Live transcription. The app streams a clip over a WebSocket while it records
+# and sees the text as it is spoken; realtime.py relays the audio to the
+# provider. Sessions live in this process, so one server instance is assumed:
+# startup releases every live hold and unfinished live request key.
+_realtime_sessions: dict[str, dict[str, Any]] = {}
+# Silent clips and server faults cost nothing. Any other unfinished session
+# pays for the audio already sent to the provider, whose text was shown.
+REALTIME_UNCHARGED_ENDINGS = frozenset({"no_speech", "server_restarting", "internal_error"})
+# Set by a stop signal. Uvicorn then closes each WebSocket with 1012, and only
+# then does 1012 end a live session as server_restarting.
+_server_stopping = False
+
+
+def watch_for_server_stop() -> None:
+    """Notes SIGINT and SIGTERM before uvicorn's own handlers shut the server down."""
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        previous = signal.getsignal(sig)
+        if not callable(previous):
+            continue  # SIG_DFL or SIG_IGN: keep the default behaviour.
+
+        def note_stop(signum: int, frame: Any, previous: Callable[..., Any] = previous) -> None:
+            global _server_stopping
+            _server_stopping = True
+            previous(signum, frame)
+
+        try:
+            signal.signal(sig, note_stop)
+        except ValueError:
+            return  # Only the main thread handles signals; the test client runs the app in another.
+
+
+def active_realtime_sessions() -> int:
+    return sum(1 for session in _realtime_sessions.values() if not session["stopped"])
+
+
+def stop_realtime_sessions(user_id: str, request_key: Optional[str] = None) -> None:
+    """Ends the live session for one recording, or each of the user's sessions still recording."""
+    for session in list(_realtime_sessions.values()):
+        if session["user_id"] != user_id or session["stopped"]:
+            continue
+        if (session["request_key"] != request_key) if request_key else session["committed"]:
+            continue
+        session["stopped"] = True
+        session["relay"].stop(realtime.superseded_error())
+
+
+def realtime_fingerprint(language: Optional[str], context: dict[str, Any]) -> str:
+    """Covers a live session's settings. An upload with the same request key must use the same ones."""
+    fields: dict[str, Any] = {"kind": "realtime", "language": (language or "").strip() or None}
+    if context["languages"] or context["vocabulary"]:
+        fields["dictation_context"] = context
+    return hashlib.sha256(json.dumps(fields, separators=(",", ":")).encode()).hexdigest()
+
+
+def realtime_internal_error() -> realtime.RealtimeError:
+    return realtime.RealtimeError("internal_error", 500, "Live transcription failed. Upload the recording instead.")
+
+
+def realtime_http_error(exc: HTTPException) -> realtime.RealtimeError:
+    if exc.status_code == 402:
+        return realtime.RealtimeError("insufficient_credit", 402, str(exc.detail))
+    if exc.status_code == 401:
+        return realtime.RealtimeError("unauthorized", 401, str(exc.detail))
+    return realtime_internal_error()
+
+
+async def realtime_send(websocket: WebSocket, payload: dict[str, Any]) -> None:
+    try:
+        await websocket.send_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    except Exception:
+        pass  # The app has gone. A finished clip is saved for its upload to replay.
+
+
+async def end_realtime_socket(websocket: WebSocket, error: realtime.RealtimeError) -> None:
+    await realtime_send(websocket, error.payload())
+    try:
+        await websocket.close(1000 if error.code == "cancelled" else 1011 if error.status >= 500 else 1008)
+    except Exception:
+        pass
+
+
+async def realtime_start_options(websocket: WebSocket) -> tuple[str, Optional[str], dict[str, Any]]:
+    """Reads the start message: the audio format and the settings an upload of the same clip sends."""
+    try:
+        message = await asyncio.wait_for(websocket.receive(), realtime.START_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        raise realtime.RealtimeError("timeout", 408, "The app did not start the recording.") from None
+    if message["type"] == "websocket.disconnect":
+        raise realtime.RealtimeError("disconnected", 499, "The app disconnected before the recording started.")
+    text = message.get("text")
+    try:
+        data = json.loads(text) if isinstance(text, str) and len(text) <= realtime.MAX_TEXT_MESSAGE_CHARS else None
+    except (ValueError, RecursionError):
+        data = None
+    if not isinstance(data, dict) or data.get("type") != "start":
+        raise realtime.protocol_error("The first message must start the recording.")
+    if data.get("format") != realtime.AUDIO_FORMAT:
+        raise realtime.protocol_error(f"Audio must be {realtime.AUDIO_FORMAT}.")
+    fields: dict[str, Optional[str]] = {}
+    # The same limits as the upload form.
+    for name, limit in (("model", 128), ("language", 32), ("preferred_languages", 256), ("vocabulary", 16000)):
+        value = data.get(name)
+        if value is not None and (not isinstance(value, str) or len(value) > limit):
+            raise realtime.RealtimeError("invalid_request", 400, f"{name} must be text of at most {limit} characters.")
+        fields[name] = value
+    model = (fields["model"] or "").strip() or realtime_default_model()
+    if model not in realtime.REALTIME_MODELS:
+        raise realtime.RealtimeError("unsupported_model", 400, "This model does not support live transcription.")
+    try:
+        context = parse_context(fields["preferred_languages"], fields["vocabulary"])
+    except HTTPException as exc:
+        raise realtime.RealtimeError("invalid_request", 400, str(exc.detail)) from None
+    return model, fields["language"], context
+
+
+async def open_realtime_session(websocket: WebSocket, user: dict[str, Any]) -> dict[str, Any]:
+    """Checks the request, holds credit for the first minute and claims the request key for this session."""
+    user_id = user["id"]
+    if not realtime_available(user_id):
+        raise realtime.RealtimeError("realtime_unavailable", 403,
+                                     "Live transcription is not available. Upload the recording instead.")
+    if RATE_LIMIT_ENABLED:
+        # The HTTP rate limit middleware does not see WebSockets.
+        allowed, retry_after = check_rate_limit(websocket, limit=REALTIME_RATE_LIMIT_PER_WINDOW,
+                                                window_seconds=RATE_LIMIT_WINDOW_SECONDS)
+        if not allowed:
+            raise realtime.RealtimeError("rate_limited", 429, "Too many requests. Please retry shortly.",
+                                         retry_after=retry_after)
+    request_key = (websocket.headers.get("idempotency-key") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", request_key):
+        raise realtime.RealtimeError("invalid_request", 400, "Invalid transcription request key.")
+    model, language, context = await realtime_start_options(websocket)
+    # One recording at a time: a new clip ends the user's earlier ones still recording.
+    stop_realtime_sessions(user_id)
+    if active_realtime_sessions() >= MAX_CONCURRENT_REALTIME_SESSIONS:
+        raise realtime.RealtimeError("busy", 503, "Live transcription is busy. Upload the recording instead.",
+                                     retry_after=3)
+    provider = provider_store.current()
+    languages, keywords, prompt = multilingual_hints(context, language)
+    hold = max(MIN_TRANSCRIPTION_RESERVATION_USD_MICROS, realtime_cost(model, 60))
+    try:
+        with db() as conn:
+            lock_user(conn, user_id)
+            if execute(conn, "SELECT 1 FROM transcription_requests WHERE user_id = ? AND request_key = ?",
+                       (user_id, request_key)).fetchone():
+                raise realtime.RealtimeError("key_used", 409,
+                                             "This request key was already used. Upload the recording instead.")
+            reservation_id = reserve_credit(conn, user_id=user_id, amount_usd_micros=hold, kind="realtime")
+            execute(
+                conn,
+                """
+                INSERT INTO transcription_requests
+                    (user_id, request_key, fingerprint, attempt_id, transcription_id, updated_at, fingerprint_version, selected_model)
+                VALUES (?, ?, ?, ?, NULL, ?, ?, ?)
+                """,
+                (user_id, request_key, realtime_fingerprint(language, context), reservation_id, utc_now(),
+                 REALTIME_FINGERPRINT_VERSION, model),
+            )
+    except HTTPException as exc:
+        raise realtime_http_error(exc) from None
+    session: dict[str, Any] = {
+        "id": str(uuid.uuid4()), "user_id": user_id, "request_key": request_key, "model": model,
+        "languages": context["languages"], "reservation_id": reservation_id, "held": hold,
+        "provider_account_id": provider.account_id, "committed": False, "stopped": False,
+    }
+    session["relay"] = realtime.RealtimeRelay(
+        websocket, model=model, upstream_url=realtime.realtime_url(provider.base_url), api_key=provider.api_key,
+        configuration=realtime.session_update(model, languages=languages, keywords=keywords, prompt=prompt),
+        ready_payload={
+            "session_id": session["id"], "model": model, "text_timing": realtime.REALTIME_MODELS[model]["text_timing"],
+            "credit_units_per_minute": credit_units_from_usd_micros(realtime_cost(model, 60)),
+        },
+        reserve=lambda seconds: extend_realtime_hold(session, seconds),
+        on_commit=lambda: mark_realtime_committed(session),
+        server_stopping=lambda: _server_stopping,
+    )
+    _realtime_sessions[session["id"]] = session
+    return session
+
+
+async def extend_realtime_hold(session: dict[str, Any], seconds: float) -> None:
+    """Keeps the credit hold ahead of the audio sent to the provider, about a minute at a time."""
+    needed = realtime_cost(session["model"], seconds + REALTIME_HOLD_AHEAD_SECONDS)
+    if needed <= session["held"]:
+        return
+    extra = max(realtime_cost(session["model"], 60), needed - session["held"])
+    try:
+        with db() as conn:
+            extended = extend_credit_reservation(conn, reservation_id=session["reservation_id"],
+                                                 user_id=session["user_id"], amount_usd_micros=extra)
+    except HTTPException as exc:
+        if exc.status_code == 402:
+            raise realtime.RealtimeError("credit_exhausted", 402, "Your credit ran out during this recording.") from None
+        raise realtime_http_error(exc) from None
+    if not extended:
+        # An upload of this recording took over and released the hold.
+        raise realtime.superseded_error()
+    session["held"] += extra
+
+
+async def mark_realtime_committed(session: dict[str, Any]) -> None:
+    """From now on an upload of this recording waits for the live result instead of replacing it."""
+    now = utc_now()
+    try:
+        with db() as conn:
+            updated = execute(
+                conn,
+                "UPDATE transcription_requests SET realtime_committed_at = ?, updated_at = ? "
+                "WHERE user_id = ? AND request_key = ? AND attempt_id = ? AND transcription_id IS NULL",
+                (now, now, session["user_id"], session["request_key"], session["reservation_id"]),
+            ).rowcount
+    except HTTPException as exc:
+        raise realtime_http_error(exc) from None
+    if not updated:
+        raise realtime.superseded_error()
+    session["committed"] = True
+
+
+async def finish_realtime_relay(session: dict[str, Any]) -> tuple[realtime.RelayResult, str]:
+    try:
+        result = await session["relay"].run()
+        return result, normalize_transcript(validated_transcript({"text": result.text}), session["languages"])
+    except realtime.RealtimeError:
+        raise
+    except NoSpeechDetected as exc:
+        raise realtime.RealtimeError("no_speech", 422, str(exc.detail)) from None
+    except Exception:
+        logger.exception("realtime_failed", extra={"user_id": session["user_id"], "session_id": session["id"]})
+        raise realtime_internal_error() from None
+
+
+def save_realtime_transcription(session: dict[str, Any], result: realtime.RelayResult, transcript: str) -> dict[str, Any]:
+    """Charges a finished clip once and saves it, so an upload with the same request key replays it."""
+    user_id, model = session["user_id"], session["model"]
+    seconds = max(result.forwarded_seconds, result.usage_seconds)
+    cost = realtime_cost(model, seconds)
+    transcription_id = str(uuid.uuid4())
+    try:
+        with db() as conn:
+            lock_user(conn, user_id)
+            claim = row_to_dict(execute(
+                conn, "SELECT attempt_id FROM transcription_requests WHERE user_id = ? AND request_key = ?",
+                (user_id, session["request_key"]),
+            ).fetchone())
+            if claim.get("attempt_id") != session["reservation_id"]:
+                raise realtime.superseded_error()
+            release_credit_reservation(conn, reservation_id=session["reservation_id"], user_id=user_id)
+            charged = min(cost, max(0, balance_for_user(conn, user_id)))
+            if charged < cost:
+                logger.warning("transcription_charge_capped_by_available_balance", extra={
+                    "user_id": user_id, "model": model, "estimated_cost": session["held"],
+                    "calculated_cost": cost, "charged_cost": charged,
+                })
+            execute(
+                conn,
+                """
+                INSERT INTO transcriptions
+                    (id, user_id, provider_account_id, model, audio_seconds, transcript, input_tokens,
+                     output_tokens, cost_usd_micros, pricing_basis, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (transcription_id, user_id, session["provider_account_id"], model, seconds, transcript,
+                 math.ceil(max(seconds, 1.0)), 0, charged, "duration", utc_now()),
+            )
+            insert_ledger(conn, user_id=user_id, amount_usd_micros=-charged, kind="transcription",
+                          description=f"{model} live transcription", source_id=f"transcription:{transcription_id}")
+            execute(
+                conn,
+                "UPDATE transcription_requests SET transcription_id = ?, updated_at = ? "
+                "WHERE user_id = ? AND request_key = ? AND attempt_id = ?",
+                (transcription_id, utc_now(), user_id, session["request_key"], session["reservation_id"]),
+            )
+            balance = balance_for_user(conn, user_id)
+    except realtime.RealtimeError:
+        raise
+    except HTTPException as exc:
+        raise realtime_http_error(exc) from None
+    except Exception:
+        logger.exception("realtime_save_failed", extra={"user_id": user_id, "session_id": session["id"]})
+        raise realtime_internal_error() from None
+    logger.info("realtime_completed", extra={
+        "user_id": user_id, "session_id": session["id"], "model": model, "audio_seconds": round(seconds, 2),
+        "turns": result.turns, "cost_usd_micros": charged,
+    })
+    return transcription_payload({
+        "id": transcription_id, "transcript": transcript, "model": model,
+        "cost_usd_micros": charged, "pricing_basis": "duration",
+    }, balance)
+
+
+def release_realtime_session(session: dict[str, Any], *, cost: int = 0) -> int:
+    """Releases the hold and the unfinished request key, charging up to cost. Returns the charge."""
+    user_id = session["user_id"]
+    with db() as conn:
+        lock_user(conn, user_id)
+        release_credit_reservation(conn, reservation_id=session["reservation_id"], user_id=user_id)
+        execute(
+            conn, "DELETE FROM transcription_requests WHERE user_id = ? AND request_key = ? "
+            "AND attempt_id = ? AND transcription_id IS NULL",
+            (user_id, session["request_key"], session["reservation_id"]),
+        )
+        charged = min(cost, max(0, balance_for_user(conn, user_id)))
+        if charged:
+            insert_ledger(conn, user_id=user_id, amount_usd_micros=-charged, kind="transcription",
+                          description=f"{session['model']} live transcription (unfinished)",
+                          source_id=f"realtime:{session['id']}")
+    return charged
+
+
+async def end_unfinished_realtime(websocket: WebSocket, session: dict[str, Any], error: realtime.RealtimeError) -> None:
+    relay = session["relay"]
+    seconds = max(relay.forwarded_seconds, relay.text.usage_seconds)
+    cost = 0 if error.code in REALTIME_UNCHARGED_ENDINGS else realtime_cost(session["model"], seconds, minimum=False)
+    charged = 0
+    try:
+        charged = release_realtime_session(session, cost=cost)
+    except Exception as exc:
+        # A deleted account takes its hold and request key with it.
+        if not (isinstance(exc, HTTPException) and exc.status_code == 401):
+            logger.exception("realtime_release_failed", extra={"user_id": session["user_id"], "session_id": session["id"]})
+    logger.info("realtime_ended", extra={
+        "user_id": session["user_id"], "session_id": session["id"], "model": session["model"], "code": error.code,
+        "audio_seconds": round(seconds, 2), "cost_usd_micros": charged,
+    })
+    await end_realtime_socket(websocket, error)
+
+
+@app.websocket("/v1/realtime/transcriptions")
+async def realtime_transcription(websocket: WebSocket) -> None:
+    # Refused before the handshake completes, which the app sees as HTTP 403
+    # and treats like an older server: it uploads the recording instead.
+    if realtime.PROTOCOL not in websocket.scope.get("subprotocols", []):
+        await websocket.close(1008)
+        return
+    try:
+        user = current_user(websocket.headers.get("authorization"))
+    except HTTPException:
+        await websocket.close(1008)
+        return
+    try:
+        await websocket.accept(subprotocol=realtime.PROTOCOL)
+    except Exception:
+        return
+    try:
+        session = await open_realtime_session(websocket, user)
+    except realtime.RealtimeError as exc:
+        await end_realtime_socket(websocket, exc)
+        return
+    settled = False
+    try:
+        try:
+            result, transcript = await finish_realtime_relay(session)
+            done = save_realtime_transcription(session, result, transcript)
+        except realtime.RealtimeError as exc:
+            settled = True
+            await end_unfinished_realtime(websocket, session, exc)
+            return
+        settled = True
+        await realtime_send(websocket, {"type": "done", **done})
+        try:
+            await websocket.close(1000)
+        except Exception:
+            pass
+    finally:
+        _realtime_sessions.pop(session["id"], None)
+        if not settled:
+            # Cancelled with the server: nothing is charged and the app uploads instead.
+            try:
+                release_realtime_session(session)
+            except Exception:
+                logger.exception("realtime_release_failed", extra={"user_id": user["id"], "session_id": session["id"]})

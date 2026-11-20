@@ -143,6 +143,8 @@ def test_real_duration_is_reserved_before_provider_even_if_client_reports_zero(t
 
 def test_valid_zero_provider_tokens_do_not_invent_usage_or_charge(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
+    # Token usage accounting needs a token-priced model.
+    monkeypatch.setattr(main, "OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
     async def provider(*args, **kwargs):
         return {"text": "No billable tokens", "usage": {"type": "tokens", "input_tokens": 0, "output_tokens": 0}}
     monkeypatch.setattr(main, "transcribe_audio", provider)
@@ -165,6 +167,7 @@ def test_invalid_provider_duration_is_not_billable(tmp_path, monkeypatch, durati
 
 
 @pytest.mark.parametrize("model,expected", [
+    ("gpt-transcribe", {"response_format": "json"}),
     ("whisper-1", {"response_format": "verbose_json"}),
     ("gpt-4o-transcribe-diarize", {"chunking_strategy": "auto"}),
 ])
@@ -308,6 +311,7 @@ def test_completed_retry_survives_changed_server_default_model(tmp_path, monkeyp
     import hashlib
     import json
     main = load_main(tmp_path, monkeypatch)
+    original_model = main.OPENAI_TRANSCRIBE_MODEL
     calls = []
     async def provider(*args, **kwargs):
         calls.append(args[3])
@@ -327,7 +331,7 @@ def test_completed_retry_survives_changed_server_default_model(tmp_path, monkeyp
         replay = transcribe_key(client, user, "same-clip")
         assert replay.status_code == 200, replay.text
         assert replay.json() == first.json()
-        assert calls == ["gpt-4o-mini-transcribe"]
+        assert calls == [original_model]
 
 
 @pytest.mark.parametrize("legacy", [False, True])
@@ -335,6 +339,7 @@ def test_stale_retry_keeps_original_selected_model_after_default_change(tmp_path
     import hashlib
     import json
     main = load_main(tmp_path, monkeypatch)
+    original_model = main.OPENAI_TRANSCRIBE_MODEL
     entered, release = Event(), Event()
     calls = []
     async def provider(*args, **kwargs):
@@ -360,11 +365,11 @@ def test_stale_retry_keeps_original_selected_model_after_default_change(tmp_path
             main.OPENAI_TRANSCRIBE_MODEL = "gpt-4o-transcribe"
             recovered = transcribe_key(client, user, "same-clip")
             assert recovered.status_code == 200, recovered.text
-            assert recovered.json()["model"] == "gpt-4o-mini-transcribe"
+            assert recovered.json()["model"] == original_model
         finally:
             release.set()
         assert old.result(5).status_code == 409
-        assert calls == ["gpt-4o-mini-transcribe"] * 2
+        assert calls == [original_model] * 2
 
 
 def test_explicit_model_change_conflicts_with_same_semantic_request_key(tmp_path, monkeypatch):

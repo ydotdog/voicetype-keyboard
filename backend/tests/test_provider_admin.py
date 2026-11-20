@@ -107,6 +107,17 @@ def test_save_requires_exact_test_and_encrypts_history(owner, monkeypatch, tmp_p
     assert post(c, "config", data).status_code == 409
 
 
+@pytest.mark.parametrize("model,fields", [
+    ("gpt-transcribe", {"response_format": "json", "languages[]": ["en"]}),
+    ("gpt-4o-transcribe", {"response_format": "json", "language": "en"}),
+    ("whisper-1", {"response_format": "verbose_json", "language": "en"}),
+])
+def test_connection_test_sends_only_options_the_model_accepts(owner, monkeypatch, model, fields):
+    _, c = owner; login(c); calls = upstream(monkeypatch)
+    assert post(c, "test", {**body(), "model": model}).status_code == 200
+    assert calls[0][1]["data"] == {"model": model, **fields}
+
+
 def test_test_failure_and_unsupported_model_preserve_current(owner, monkeypatch):
     main, c = owner; login(c); upstream(monkeypatch, 429)
     assert post(c, "test", body()).status_code == 502
