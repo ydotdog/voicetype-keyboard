@@ -713,6 +713,49 @@ def test_upload_takes_over_a_clip_still_recording(tmp_path, monkeypatch):
     assert counts == ONE_CLIP
 
 
+@pytest.mark.parametrize("answer, status", [
+    (asyncio.TimeoutError, 502),
+    ({"text": " "}, 422),
+], ids=["provider-fails", "no-speech"])
+def test_live_audio_is_paid_when_the_upload_that_took_over_holds_the_balance(tmp_path, monkeypatch, answer, status):
+    main = load_realtime_main(tmp_path, monkeypatch)
+    provider = use_provider(monkeypatch, FakeProvider())
+    # A ten-minute upload holds the whole balance, and then ends without a charge.
+    async def ten_minutes(audio):
+        return 600.0
+    monkeypatch.setattr(main, "measure_audio_duration", ten_minutes)
+    balance = main.estimate_reservation_cost(main.resolve_model(None), 600.0)
+    during_upload = []
+    async def upload_provider(*args, **kwargs):
+        # A provider answers after the live session has ended.
+        deadline = time.monotonic() + 5
+        while main._realtime_sessions and time.monotonic() < deadline:
+            await asyncio.sleep(0.01)
+        with main.db() as conn:
+            during_upload.append(main.balance_for_user(conn, user_id(alice)))
+        if isinstance(answer, type):
+            raise answer()
+        return answer
+    with TestClient(main.app) as client:
+        alice = auth(client, "alice")
+        fund(client, alice, balance)
+        with connect(client, alice) as ws:
+            ready = begin(ws)
+            send_frames(ws, (LOUD,) * 10)
+            wait_until(lambda: provider.session.audio_bytes == 48_000)
+            monkeypatch.setattr(main, "transcribe_audio", upload_provider)
+            taken_over = transcribe_key(client, alice, "clip-1")
+            messages, code = read_until_close(ws)
+        wait_until(lambda: main._realtime_sessions == {})
+        left = client.get("/v1/me", headers=alice["headers"]).json()["balance"]["balance_usd_micros"]
+    assert taken_over.status_code == status, taken_over.text
+    assert (messages[-1], code) == (SUPERSEDED, 1008)
+    assert ledger(main) == ([(-487, f"realtime:{ready['session_id']}")], NO_ROWS)
+    # The upload's hold was larger than what the live audio left, and the balance read zero, not less.
+    assert during_upload == [0]
+    assert left == balance - 487
+
+
 def test_provider_error_ends_the_session_and_logs_codes_only(tmp_path, monkeypatch, api_logs):
     main = load_realtime_main(tmp_path, monkeypatch)
     use_provider(monkeypatch, FakeProvider(error_on_append={

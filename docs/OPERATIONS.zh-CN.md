@@ -95,7 +95,7 @@ App 继续访问原来的 `https://voicetype.y.dog`，无须用户升级。更�
   - 完成：按发送的音频秒数扣一次，结果写入 History 和账单，`model` 是实时模型。同一个 key 再上传时直接返回这条结果，不重复扣费。
   - 取消、App 断开、App 发来格式不对的消息（`protocol_error`）、供应商错误、超时、余额用完等没有完成的会话：已发给 OpenAI 的音频按 Live 价格扣费，账单描述为 `<模型> live transcription (unfinished)`，不保存文字。只有 `no_speech`、`server_restarting`（服务端收到停止信号之后才算）、`internal_error` 不扣费。
   - Live 没有完成时，App 用同一个 key 上传录音，按 Upload model 再扣一次，这段录音两次都计费。
-  - 上传与 Live 争用同一个 key：Live 已 commit（App 已停止录音）时，上传收到 409 和 `Retry-After`，等 Live 结果；还没 commit 时上传接管，Live 会话结束。
+  - 上传与 Live 争用同一个 key：Live 已 commit（App 已停止录音）时，上传收到 409 和 `Retry-After`，等 Live 结果；还没 commit 时上传接管，Live 会话结束。接管时，Live 已发的音频照样按 Live 价格扣费：按账本余额封顶，不受这次上传自己的预留影响（2026-11-20 修复并部署；之前上传把余额全部预留时，这部分没有扣到）。
 - 限制：单段最长 600 秒；连接后 10 秒内要收到 `start`；OpenAI 会话 10 秒内要就绪；15 秒没有任何消息就断开；会话最长 660 秒；commit 后 30 秒内要出结果。单帧不超过 32 KB；发送速度不能超过实时的 1.5 倍（连接期间缓冲的最多 15 秒音频可以一次补发）；OpenAI 会话就绪前最多缓存 20 秒音频。App 端积压超过 10 秒，或停止后 15 秒仍没有结果，就改为上传。
 - 环境变量（都有默认值，`backend.env` 不设也能运行；修改后重新创建 backend 才生效，会结束进行中的会话）：
 

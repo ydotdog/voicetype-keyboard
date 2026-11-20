@@ -1325,7 +1325,9 @@ def reserved_balance_for_user(conn: Any, user_id: str) -> int:
 
 
 def balance_for_user(conn: Any, user_id: str) -> int:
-    return ledger_balance_for_user(conn, user_id) - reserved_balance_for_user(conn, user_id)
+    """The credit a user can spend now. Holds lower it to zero at most; only the ledger takes it below."""
+    ledger = ledger_balance_for_user(conn, user_id)
+    return max(ledger - reserved_balance_for_user(conn, user_id), min(ledger, 0))
 
 
 def balance_payload(balance: int) -> BalancePayload:
@@ -2551,7 +2553,9 @@ def grant_dev_credit(
 ) -> PurchaseCreditResponse:
     if not ALLOW_DEV_CREDIT:
         raise HTTPException(status_code=404, detail="Dev credit is disabled.")
-    if DEV_CREDIT_SHARED_SECRET and x_voicetype_dev_credit_key != DEV_CREDIT_SHARED_SECRET:
+    if DEV_CREDIT_SHARED_SECRET and not hmac.compare_digest(
+        (x_voicetype_dev_credit_key or "").encode(), DEV_CREDIT_SHARED_SECRET.encode()
+    ):
         raise HTTPException(status_code=404, detail="Dev credit is disabled.")
     if request.amount_usd_micros > DEV_CREDIT_MAX_USD_MICROS:
         raise HTTPException(status_code=400, detail=f"Dev credit is capped at {format_credits(DEV_CREDIT_MAX_USD_MICROS)}.")
@@ -3158,7 +3162,10 @@ def release_realtime_session(session: dict[str, Any], *, cost: int = 0) -> int:
             "AND attempt_id = ? AND transcription_id IS NULL",
             (user_id, session["request_key"], session["reservation_id"]),
         )
-        charged = min(cost, max(0, balance_for_user(conn, user_id)))
+        # An upload that took this recording over released this hold and may hold
+        # the same credit itself. The audio already transcribed is still owed, so
+        # it is charged against the ledger, not against what other holds leave free.
+        charged = min(cost, max(0, ledger_balance_for_user(conn, user_id)))
         if charged:
             insert_ledger(conn, user_id=user_id, amount_usd_micros=-charged, kind="transcription",
                           description=f"{session['model']} live transcription (unfinished)",

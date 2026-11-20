@@ -517,9 +517,10 @@ App 不用等 `ready` 才推音频：连接建立前 App 自己缓存，`start` 
 
 按用户的决定（第 10 节问题 1 和 5），和设计相比改了两处：
 
-- **未完成也收费。** 设计是中途断开、取消、出错都只释放预留，不扣费。实现是：取消、App 断开、App 发来格式不对的消息、超时、供应商出错、余额用完、被新的 Live 会话或同 key 的整段上传接管、时长对不上（`fallback_required`）、超过 600 秒，都按已发给 OpenAI 的秒数收实时价。秒数取 max(转发秒数, OpenAI 返回的秒数)，按余额封顶。账本描述是 `<模型> live transcription (unfinished)`，`source_id = realtime:{会话 ID}`，不保存文字。
+- **未完成也收费。** 设计是中途断开、取消、出错都只释放预留，不扣费。实现是：取消、App 断开、App 发来格式不对的消息、超时、供应商出错、余额用完、被新的 Live 会话或同 key 的整段上传接管、时长对不上（`fallback_required`）、超过 600 秒，都按已发给 OpenAI 的秒数收实时价。秒数取 max(转发秒数, OpenAI 返回的秒数)，按账本余额封顶，不减其他预留（原因见下面“被上传接管”一条）。账本描述是 `<模型> live transcription (unfinished)`，`source_id = realtime:{会话 ID}`，不保存文字。
 - **只有三种结局不收费：** `no_speech`、`server_restarting`、`internal_error`。`server_restarting` 只在服务端收到 SIGTERM 或 SIGINT 之后才算。没有收到停止信号时，App 自己发来的 1012 按 `disconnected` 收费，免得被当成免费通道。
 - **兜底时收两次。** Live 没完成、录音再整段上传时，Live 已发的音频按实时价收一次，整段上传按上传模型再收一次。设计里用户只付一次，差额由运营者承担。
+- **被上传接管时，Live 部分按账本余额收。** 同 key 的整段上传接管时，先释放 Live 的预留，再为自己预留，可能把同一笔余额全部占住。所以未完成的 Live 费用按账本余额封顶，不按可用余额（账本余额减去所有预留）封顶。之后上传完成，再按剩下的可用余额封顶，两笔合计不超过账本余额。上传进行期间，可用余额最低是 0，不会因为预留变成负数。2026-11-20 之前这里按可用余额封顶：上传把余额全部预留时算出 0，已经转写的 Live 音频没有收费。修复在 `release_realtime_session` 和 `balance_for_user`，回归测试是 `test_live_audio_is_paid_when_the_upload_that_took_over_holds_the_balance`，当天已部署到线上。
 
 其他：
 
