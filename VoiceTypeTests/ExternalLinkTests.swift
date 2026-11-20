@@ -140,6 +140,24 @@ struct ExternalLinkTests {
         }
     }
 
+    @Test func issuingALinkRemovesCorruptRequestsButKeepsUnreadableAndPendingOnes() throws {
+        try withActivationStore { store in
+            let pending = try #require(store.makeURL())
+            let directory = try #require(store.directoryURL)
+            let corrupt = directory.appendingPathComponent("request-\(UUID().uuidString).json")
+            let unreadable = directory.appendingPathComponent("request-\(UUID().uuidString).json")
+            try Data("not json".utf8).write(to: corrupt)
+            try Data("{}".utf8).write(to: unreadable)
+            // Stands in for a request that is protected until first unlock.
+            try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: unreadable.path)
+            defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: unreadable.path) }
+            #expect(store.makeURL() != nil)
+            #expect(!FileManager.default.fileExists(atPath: corrupt.path))
+            #expect(FileManager.default.fileExists(atPath: unreadable.path))
+            #expect(store.consume(pending))
+        }
+    }
+
     @Test func concurrentReceiversCanClaimAnActivationOnlyOnce() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("keyboard-activation-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }

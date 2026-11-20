@@ -1,6 +1,6 @@
 # VoiceType Privacy Policy
 
-_Last updated: 2026-10-02_
+_Last updated: 2026-10-24_
 
 VoiceType is provided by Apeonwheels Inc. ("we"). The app turns your speech into text. This policy explains what
 we collect, why, who processes it, and how you can delete it.
@@ -21,7 +21,7 @@ Public URL: https://apeonwheels.com/voicetype/privacy/
 | --- | --- | --- | --- |
 | Apple account identifier and email (from Sign in with Apple) | Create and sign in to your account | Yes | Until account deletion from the active service; backup exceptions are described below |
 | Name (only if you choose to share it at sign-in) | Personalize your account | Yes | Until account deletion from the active service; backup exceptions are described below |
-| Audio you record | Sent to our transcription provider to produce text | Yes, in transit | Processed transiently on our server; unfinished or failed recordings are saved privately on your device for retry |
+| Audio you record | Sent to our transcription provider to produce text | Yes, in transit | Processed transiently on our server; unfinished or failed recordings are saved privately on your device for retry. With Live, a clip is streamed while you speak, and OpenAI may keep Live audio for up to 30 days (see Third parties) |
 | Transcribed text | Returned to you and shown in your history | Yes | Until account deletion from the active service; backup exceptions are described below |
 | Purchase records (StoreKit transaction identifiers) | Verify credit purchases and prevent duplicate grants | Yes | Until account deletion from the active service; backup and log exceptions are described below |
 | Operational event logs, which may include account and transaction identifiers and event times | Service operation, security, and billing troubleshooting | Yes, when identifiers are present | Until logs rotate or are deleted; account deletion does not immediately remove them |
@@ -44,6 +44,18 @@ periodically replaced and are not uploaded. The resulting transcript is stored i
 reuse it and is cached in a shared container on your device so the keyboard can
 insert it into the current text field.
 
+You choose how a clip becomes text in Settings → Transcription mode & model, and
+the keyboard follows the same choice. **After recording** and **Streaming** upload
+a clip after it finishes. **Live** sends the audio of a clip you start to our
+backend while you speak, and our backend forwards it to OpenAI's Realtime API so
+text can appear before you finish. Live starts sending when you start a clip and
+stops when the clip finishes; idle audio is never sent. Audio Live has already
+sent is processed and charged even if you cancel the clip, but no transcript of a
+cancelled clip is kept. If Live can't finish a clip, for example because the
+connection drops, the recording saved on your device is uploaded instead, as with
+Streaming. Live uses about 3 MB of data per minute of speech and is not used in
+Low Data Mode.
+
 Unfinished or failed recordings are saved separately in the app's private device
 storage so you can retry from History after a connection failure or app restart.
 Each saved recording is excluded from device backups and is removed after its
@@ -54,16 +66,21 @@ account removes them. New recordings do not replace older failed recordings.
 
 ## Language preferences and personal vocabulary
 
-Language choices and vocabulary are saved per account on this device. You can add
-names and phrases, or review and save a spelling suggested when you correct a
-transcript in History. We do not learn from text typed in other apps. Up to 50
-recent words and your language choices accompany each recording sent to our
-backend and OpenAI. These hints are processed transiently, not stored as a
-server-side vocabulary profile. A failed recording retains its original hints
-until it is transcribed or deleted. You can disable learning and remove individual
-words or clear the vocabulary in Settings. Signing out keeps this device's
-preferences for the same account; deleting the account removes them here.
-History corrections are local edits and do not update the server transcript.
+Language choices, your transcription mode and model choices, and vocabulary are
+saved per account on this device. You can add names and phrases, or review and save the
+spellings suggested when you correct a transcript in History. When you save a fix
+for a misheard form, the app also remembers that form and replaces it in new
+transcripts on this device; misheard forms are not sent to our backend or OpenAI.
+We do not learn from text typed in other apps. Up to 50 recent words, your
+language choices, and your chosen transcription model accompany each recording
+sent to our backend and OpenAI. These hints are processed transiently, not stored
+as a server-side vocabulary profile. A failed recording retains its original
+hints and model until it is transcribed or deleted. You can turn off suggestions,
+remove individual words or the misheard forms they fix, or clear the vocabulary
+in Settings; saved fixes keep applying until you remove them. Signing out keeps
+this device's preferences for the same account; deleting the account removes
+them here. History corrections are local edits and do not update the server
+transcript.
 
 ## Third parties
 
@@ -72,7 +89,9 @@ History corrections are local edits and do not update the server transcript.
   vocabulary hints you submit. Its processing is subject to its
   [API data practices](https://openai.com/enterprise-privacy/). Our statement
   that we do not retain audio files describes our own application server, not a
-  guarantee about a provider's independent retention practices.
+  guarantee about a provider's independent retention practices. Live uses
+  OpenAI's Realtime API, and OpenAI may retain audio and transcripts sent through
+  it for up to 30 days for abuse monitoring.
 - **Google Cloud** — hosting our application server and account database in the
   United States.
 
@@ -84,6 +103,7 @@ We do not integrate advertising or analytics SDKs.
   use other apps until you turn it off or the selected session duration ends.
   Only clips you actively start are sent for transcription; a time limit,
   microphone shutdown, or audio interruption can also finish and submit a clip.
+  With Live, a clip's audio is streamed while the clip is in progress.
 - **Keyboard Full Access:** the VoiceType keyboard requests Full Access so it can
   read the latest transcript from the app's shared container and insert it. The
   keyboard itself does not transmit your keystrokes to us.

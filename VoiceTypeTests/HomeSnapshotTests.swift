@@ -66,6 +66,31 @@ final class HomeSnapshotTests: XCTestCase {
             isSignedIn: true, copy: { _ in }, retry: { _ in }, delete: { _ in }
         )
         try await capture(errorContent, tab: .history, name: "history-error-narrow", width: 320, height: 700, scheme: .light)
+
+        let longHistory = history + [TranscriptSnapshot(
+            id: "snapshot-long",
+            text: "下周一上午十点和设计团队过一遍新版键盘的交互稿，重点看粘贴按钮的位置和录音状态的提示。会后把结论整理成文档发给大家，周三之前确认是否进入开发排期。Remember to invite Priya from the QA team.",
+            createdAt: now.addingTimeInterval(-240),
+            chargeText: "112 credits"
+        )]
+        let defaults = UserDefaults.standard
+        let savedDisplay = defaults.object(forKey: HistoryDisplay.fullTextKey)
+        defer {
+            if let savedDisplay {
+                defaults.set(savedDisplay, forKey: HistoryDisplay.fullTextKey)
+            } else {
+                defaults.removeObject(forKey: HistoryDisplay.fullTextKey)
+            }
+        }
+        for showsFullText in [false, true] {
+            defaults.set(showsFullText, forKey: HistoryDisplay.fullTextKey)
+            let content = HistoryContent(
+                history: longHistory, failedTranscriptions: [], retryingTranscriptionID: nil,
+                retryErrorMessage: nil, isSignedIn: true, copy: { _ in }, retry: { _ in }, delete: { _ in }
+            )
+            try await capture(content, tab: .history, name: "history-\(showsFullText ? "full" : "preview")-narrow",
+                              width: 320, height: 760, scheme: .light)
+        }
     }
 
     func testCaptureDictationSettingsAndCorrection() async throws {
@@ -73,16 +98,73 @@ final class HomeSnapshotTests: XCTestCase {
         var preferences = DictationPreferences()
         preferences.toggle(.simplifiedChinese)
         preferences.toggle(.english)
-        preferences.remember("龚玥", learned: true)
+        preferences.remember("龚玥", learned: true, heardAs: "工月")
+        preferences.teach("龚月", to: DictationPreferences.key("龚玥"))
+        preferences.remember("Kyle Qi", learned: true)
         preferences.remember("VoiceType")
         DictationPreferencesStore.save(preferences, userID: userID)
-        defer { DictationPreferencesStore.clear(userID: userID) }
+        // A new account, so neither fix is already saved.
+        let learnerID = "snapshot-correction-\(UUID().uuidString)"
+        DictationPreferencesStore.save(DictationPreferences(languages: preferences.languages), userID: learnerID)
+        defer {
+            DictationPreferencesStore.clear(userID: userID)
+            DictationPreferencesStore.clear(userID: learnerID)
+        }
+        let snapshot = TranscriptSnapshot(id: "preview", text: "明天和工月在曲周见面。", createdAt: Date(), chargeText: nil)
         for (suffix, width, scheme) in [("narrow", CGFloat(320), ColorScheme.light), ("dark", CGFloat(430), ColorScheme.dark)] {
             try await capture(DictationSettingsView(userID: userID), tab: .settings,
                 name: "dictation-\(suffix)", width: width, height: 880, scheme: scheme, standalone: true)
-            try await capture(TranscriptCorrectionView(snapshot: TranscriptSnapshot(id: "preview", text: "明天和龚玥在衢州见面。", createdAt: Date(), chargeText: nil), userID: userID, onSave: {}), tab: .history,
-                name: "correction-\(suffix)", width: width, height: 880, scheme: scheme, standalone: true)
+            // Suggestions are computed off the main thread after the view appears.
+            try await capture(TranscriptCorrectionView(snapshot: snapshot, userID: learnerID, draft: "明天和龚玥在衢州见面。", onSave: {}), tab: .history,
+                name: "correction-\(suffix)", width: width, height: 880, scheme: scheme, standalone: true, delay: .seconds(2))
         }
+    }
+
+    func testCaptureTranscriptionModels() async throws {
+        let userID = "snapshot-models-\(UUID().uuidString)"
+        var preferences = DictationPreferences()
+        preferences.model = "gpt-transcribe"
+        DictationPreferencesStore.save(preferences, userID: userID)
+        defer { DictationPreferencesStore.clear(userID: userID) }
+        func option(_ id: String, _ name: String, recommended: Bool = false, credits: Int, retiresOn: String? = nil) -> TranscriptionModelOption {
+            TranscriptionModelOption(id: id, name: name, recommended: recommended, streaming: id != "whisper-1", retiresOn: retiresOn,
+                                     pricingBasis: "duration", creditUnitsPerMinute: credits,
+                                     formattedPerMinute: "\(credits.formatted()) credits/min")
+        }
+        let catalog = TranscriptionModelCatalog(defaultModel: "gpt-4o-mini-transcribe", defaultModelName: "GPT-4o mini Transcribe", models: [
+            option("gpt-transcribe", "GPT Transcribe", recommended: true, credits: 7_715),
+            option("gpt-4o-mini-transcribe", "GPT-4o mini Transcribe", credits: 5_143, retiresOn: "2027-02-26"),
+            option("gpt-4o-transcribe", "GPT-4o Transcribe", credits: 10_286, retiresOn: "2027-02-26"),
+            option("whisper-1", "Whisper", credits: 10_286, retiresOn: "2027-02-26"),
+        ])
+        for (suffix, width, scheme) in [("narrow", CGFloat(320), ColorScheme.light), ("dark", CGFloat(430), ColorScheme.dark)] {
+            try await capture(TranscriptionModelSettingsView(userID: userID, catalog: catalog, refreshCatalog: { catalog }), tab: .settings,
+                name: "models-\(suffix)", width: width, height: 880, scheme: scheme, standalone: true)
+        }
+        try await capture(TranscriptionModelSettingsView(userID: userID, catalog: nil, refreshCatalog: { nil }), tab: .settings,
+            name: "models-unavailable-narrow", width: 320, height: 700, scheme: .light, standalone: true)
+
+        preferences.mode = .live
+        DictationPreferencesStore.save(preferences, userID: userID)
+        func live(_ id: String, _ name: String, recommended: Bool = false, timing: String, credits: Int) -> RealtimeTranscriptionModel {
+            RealtimeTranscriptionModel(id: id, name: name, recommended: recommended, liveOnly: id == "gpt-live-transcribe",
+                                       textTiming: timing, retiresOn: nil, pricingBasis: "audio_minutes", creditUnitsPerMinute: credits,
+                                       formattedPerMinute: "\(credits.formatted()) credits/min")
+        }
+        let liveCatalog = TranscriptionModelCatalog(
+            defaultModel: catalog.defaultModel, defaultModelName: catalog.defaultModelName, models: catalog.models,
+            realtime: RealtimeTranscriptionCatalog(available: true, defaultModel: "gpt-live-transcribe", models: [
+                live("gpt-live-transcribe", "GPT Live Transcribe", recommended: true, timing: "while_speaking", credits: 29_144),
+                live("gpt-transcribe", "GPT Transcribe", timing: "after_pauses", credits: 7_715),
+            ])
+        )
+        for (suffix, width, scheme) in [("narrow", CGFloat(320), ColorScheme.light), ("dark", CGFloat(430), ColorScheme.dark)] {
+            try await capture(TranscriptionModelSettingsView(userID: userID, catalog: liveCatalog, refreshCatalog: { liveCatalog }), tab: .settings,
+                name: "models-live-\(suffix)", width: width, height: 1500, scheme: scheme, standalone: true)
+        }
+        // An older or switched-off service: Live explains that it uploads.
+        try await capture(TranscriptionModelSettingsView(userID: userID, catalog: catalog, refreshCatalog: { catalog }), tab: .settings,
+            name: "models-live-unavailable-narrow", width: 320, height: 880, scheme: .light, standalone: true)
     }
 
     func testCaptureNativeSettings() async throws {
@@ -122,7 +204,7 @@ final class HomeSnapshotTests: XCTestCase {
         }
     }
 
-    private func capture<Content: View>(_ content: Content, tab: VoiceTypeTab, name: String, width: CGFloat, height: CGFloat, scheme: ColorScheme, standalone: Bool = false, typeSize: DynamicTypeSize = .large) async throws {
+    private func capture<Content: View>(_ content: Content, tab: VoiceTypeTab, name: String, width: CGFloat, height: CGFloat, scheme: ColorScheme, standalone: Bool = false, typeSize: DynamicTypeSize = .large, delay: Duration = .milliseconds(200)) async throws {
         let screen = ZStack {
             AppTheme.background.ignoresSafeArea()
             if standalone {
@@ -159,7 +241,7 @@ final class HomeSnapshotTests: XCTestCase {
         hosting.view.setNeedsLayout()
         hosting.view.layoutIfNeeded()
         await Task.yield()
-        try await Task.sleep(for: .milliseconds(200))
+        try await Task.sleep(for: delay)
         hosting.view.layoutIfNeeded()
         let format = UIGraphicsImageRendererFormat()
         format.scale = 2

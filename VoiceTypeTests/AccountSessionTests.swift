@@ -214,6 +214,126 @@ struct AccountSessionTests {
         #expect(!StoreKitTransactionPolicy.canCredit(productID: product, transactionAccount: owner, signedInAccount: owner, isRevoked: true))
         #expect(!StoreKitTransactionPolicy.canCredit(productID: "unrelated.product", transactionAccount: owner, signedInAccount: owner, isRevoked: false))
     }
+
+    @Test func purchaseWithoutAnAccountTokenIsNotBlamedOnAnotherAccount() throws {
+        let owner = UUID()
+        #expect(StoreKitTransactionPolicy.refusal(transactionAccount: owner, signedInAccount: UUID()) == .differentAccount)
+        // No account can claim it, so it doesn't matter whether the ID has loaded.
+        #expect(StoreKitTransactionPolicy.refusal(transactionAccount: nil, signedInAccount: nil) == .unlinkedPurchase)
+        let unlinked = StoreKitTransactionPolicy.refusal(transactionAccount: nil, signedInAccount: owner)
+        #expect(unlinked == .unlinkedPurchase)
+        let message = try #require(unlinked.errorDescription)
+        #expect(message.contains("isn't linked to a VoiceType account"))
+        #expect(!message.contains("another"))
+    }
+
+    @Test func purchaseIsNotBlamedOnAnotherAccountWhileTheSignedInAccountIDIsUnknown() async throws {
+        // Deleting the app clears UserDefaults but keeps the Keychain sign-in, so
+        // a reinstall stays signed in without an ID until a profile request succeeds.
+        let original = AccountStore(backend: DeferredAccountBackend())
+        original.apply(auth: auth("A"))
+        UserDefaults.standard.removeObject(forKey: "accountUserID")
+        let backend = DeferredAccountBackend()
+        let account = AccountStore(backend: backend)
+        defer { account.signOut() }
+        let refresh = Task { await account.refresh() }
+        try await waitForRequest(backend)
+        backend.profileContinuation?.resume(throwing: URLError(.notConnectedToInternet))
+        await refresh.value
+        #expect(account.isSignedIn)
+        #expect(account.appAccountToken == nil)
+
+        let purchase = try #require(UUID(uuidString: auth("A").user.id))
+        let notLoaded = StoreKitTransactionPolicy.refusal(transactionAccount: purchase, signedInAccount: account.appAccountToken)
+        #expect(notLoaded == .accountNotLoaded)
+        let message = try #require(notLoaded.errorDescription)
+        #expect(message.contains("hasn't loaded yet"))
+        #expect(message.contains("check purchases again"))
+        #expect(message.contains("do not need to buy it again"))
+        #expect(!message.contains("another"))
+        #expect(!message.localizedCaseInsensitiveContains("sign in"))
+    }
+
+    @Test func checkingPurchasesLoadsAMissingAccountIDBeforeMatchingThem() async {
+        let original = AccountStore(backend: DeferredAccountBackend())
+        original.apply(auth: auth("A"))
+        UserDefaults.standard.removeObject(forKey: "accountUserID")
+        let backend = LoadedAccountBackend(MeResponse(user: auth("A").user, balance: payload(100)))
+        let account = AccountStore(backend: backend)
+        defer { account.signOut() }
+        let store = StoreKitService()
+        await store.checkPurchases(account: account)
+        // One request loads the ID for matching; the other is the usual balance
+        // refresh after the check.
+        #expect(backend.profileRequests == 2)
+        #expect(account.appAccountToken == UUID(uuidString: auth("A").user.id))
+    }
+
+    @Test func buyingWhileTheAccountIDCanNotLoadAsksForAConnectionInsteadOfASignIn() async throws {
+        let original = AccountStore(backend: DeferredAccountBackend())
+        original.apply(auth: auth("A"))
+        UserDefaults.standard.removeObject(forKey: "accountUserID")
+        let backend = DeferredAccountBackend()
+        let account = AccountStore(backend: backend)
+        defer { account.signOut() }
+        let store = StoreKitService()
+        let load = Task { await store.loadPurchaseAccount(account, session: account.sessionID, token: account.token) }
+        try await waitForRequest(backend)
+        backend.profileContinuation?.resume(throwing: URLError(.notConnectedToInternet))
+        let loaded = await load.value
+        #expect(loaded == nil)
+        #expect(account.isSignedIn)
+        let message = try #require(store.errorMessage)
+        #expect(message.contains("hasn't loaded yet"))
+        #expect(!message.localizedCaseInsensitiveContains("sign in"))
+    }
+
+    @Test func buyingAfterTheSessionExpiresAsksToSignInAgain() async throws {
+        let original = AccountStore(backend: DeferredAccountBackend())
+        original.apply(auth: auth("A"))
+        UserDefaults.standard.removeObject(forKey: "accountUserID")
+        let backend = DeferredAccountBackend()
+        let account = AccountStore(backend: backend)
+        defer { account.signOut() }
+        let store = StoreKitService()
+        let load = Task { await store.loadPurchaseAccount(account, session: account.sessionID, token: account.token) }
+        try await waitForRequest(backend)
+        backend.profileContinuation?.resume(throwing: BackendClientError.httpError(status: 401, message: "Expired", context: .general))
+        let loaded = await load.value
+        #expect(loaded == nil)
+        #expect(!account.isSignedIn)
+        #expect(store.errorMessage == "Sign in again before adding credit.")
+    }
+
+    @Test func backendErrorsShowServiceDetailButNeverProxyPages() {
+        #expect(BackendClient.backendMessage(from: Data(#"{"detail":"Unsupported transcription model: x"}"#.utf8))
+            == "Unsupported transcription model: x")
+        let proxyPage = Data("<!DOCTYPE html><html><title>Gateway time-out</title></html>".utf8)
+        #expect(BackendClient.backendMessage(from: proxyPage).isEmpty)
+        let forbidden = BackendClientError.httpError(status: 403, message: BackendClient.backendMessage(from: proxyPage), context: .general)
+        #expect(forbidden.errorDescription == "Backend error 403.")
+        let timeout = BackendClientError.httpError(status: 524, message: "", context: .general)
+        #expect(timeout.errorDescription == "The service is temporarily unavailable. Please try again in a moment.")
+        let silent = BackendClientError.httpError(status: 422, message: "No speech was detected in this recording. Nothing was charged.", context: .general)
+        #expect(silent.errorDescription == "No speech was detected in this recording. Nothing was charged.")
+        // An older backend sends no code, so its silent clip stays in History.
+        #expect(!silent.isNoSpeech)
+
+        let coded = Data(#"{"detail":"No speech was detected in this recording. Nothing was charged.","code":"no_speech"}"#.utf8)
+        #expect(BackendClient.backendErrorCode(from: coded) == "no_speech")
+        let noSpeech = BackendClientError.httpError(status: 422, message: BackendClient.backendMessage(from: coded),
+                                                    context: .general, code: BackendClient.backendErrorCode(from: coded))
+        #expect(noSpeech.isNoSpeech)
+        #expect(noSpeech.errorDescription == silent.errorDescription)
+        #expect(BackendClient.backendErrorCode(from: Data(#"{"detail":"Unsupported transcription model: x"}"#.utf8)) == nil)
+        #expect(BackendClient.backendErrorCode(from: proxyPage) == nil)
+        // A code of an unexpected type is ignored and never hides the detail.
+        let numericCode = Data(#"{"detail":"Busy","code":7}"#.utf8)
+        #expect(BackendClient.backendMessage(from: numericCode) == "Busy")
+        #expect(BackendClient.backendErrorCode(from: numericCode) == nil)
+        #expect(!BackendClientError.httpError(status: 422, message: "", context: .general, code: "other").isNoSpeech)
+        #expect(!BackendClientError.invalidResponse.isNoSpeech)
+    }
 }
 
 @MainActor
@@ -230,5 +350,28 @@ private final class DeferredAccountBackend: AccountBackend {
 
     func deleteAccount(token: String) async throws {
         throw BackendClientError.httpError(status: 503, message: "Revocation temporarily unavailable", context: .general)
+    }
+}
+
+@MainActor
+private final class LoadedAccountBackend: AccountBackend {
+    let profile: MeResponse
+    private(set) var profileRequests = 0
+
+    init(_ profile: MeResponse) {
+        self.profile = profile
+    }
+
+    func me(token: String) async throws -> MeResponse {
+        profileRequests += 1
+        return profile
+    }
+
+    func signInWithApple(identityToken: String, authorizationCode: String?, email: String?, fullName: String?) async throws -> AuthResponse {
+        throw BackendClientError.invalidResponse
+    }
+
+    func deleteAccount(token: String) async throws {
+        throw BackendClientError.invalidResponse
     }
 }

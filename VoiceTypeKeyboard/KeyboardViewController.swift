@@ -8,7 +8,7 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
     private var lastStateRefreshAt: TimeInterval = 0
     private var pendingAction: PendingKeyboardAction?
     private var pendingActionStartedAt: Date?
-    private var actionNotice: String?
+    private var actionNotice: KeyboardNotice?
     private let pendingActionTimeout: TimeInterval = 4
 
     private let backdropView = UIInputView(frame: .zero, inputViewStyle: .keyboard)
@@ -33,12 +33,14 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
     private var activationPreparedAt: TimeInterval?
     private var issuedActivationURLs: [URL] = []
     private let bottomRow = UIStackView()
+    private let pasteButton = UIButton(type: .system)
     private let returnButton = UIButton(type: .system)
     private let deleteButton = UIButton(type: .system)
     private let nextKeyboardButton = UIButton(type: .system)
     private let keyFeedback = UIImpactFeedbackGenerator(style: .light)
     private let actionFeedback = UIImpactFeedbackGenerator(style: .medium)
     private var deleteRepeatTimer: Timer?
+    private var noticeClearTask: Task<Void, Never>?
     private var deleteRepeatDocumentIdentifier: UUID?
     private var styleTraitRegistration: UITraitChangeRegistration?
     private var renderedUIState: KeyboardUIState?
@@ -47,6 +49,10 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
     private var insertionDocumentIdentifier: UUID?
     private var keyboardHeightConstraint: NSLayoutConstraint?
     private var helperHeightConstraint: NSLayoutConstraint?
+
+    /// The clipboard the Paste key reads. Tests substitute a private named
+    /// pasteboard so they never read the shared one, which prompts.
+    var pasteboard: UIPasteboard = .general
 
     private let palette = KeyboardPalette()
     private let keyboardHeight: CGFloat = 160
@@ -60,10 +66,14 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         // The run loop retains scheduled timers even when their owner is gone.
         refreshTimer?.invalidate()
         deleteRepeatTimer?.invalidate()
+        noticeClearTask?.cancel()
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // The big VoiceType control is the dictation key. Declaring it hides
+        // the system dictation microphone below the keyboard.
+        hasDictationKey = true
         styleTraitRegistration = registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
             (controller: KeyboardViewController, _: UITraitCollection) in
             controller.applyPalette()
@@ -85,6 +95,9 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // Send it again once on screen. The host records the flag on its
+        // current keyboard, which can still be the previous one at load time.
+        hasDictationKey = true
         isKeyboardVisible = true
         // Returning after a previous launch gets a fresh single-use capability.
         keyboardActivationURL = nil
@@ -191,6 +204,8 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         actionTitleLabel.textColor = palette.keySurface
         returnButton.backgroundColor = palette.keySurface
         returnButton.setTitleColor(palette.ink, for: .normal)
+        pasteButton.backgroundColor = palette.keyGray
+        pasteButton.tintColor = palette.inkSoft
         deleteButton.backgroundColor = palette.keyGray
         deleteButton.tintColor = palette.inkSoft
         nextKeyboardButton.backgroundColor = palette.keyGray
@@ -234,12 +249,21 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
     }
 
     private func setupActionArea() {
-        promptLabel.font = .systemFont(ofSize: 24, weight: .regular)
+        // The prompt previews the words heard so far while a clip is recorded
+        // live or transcribes.
+        // It shares the brand row, so it never changes the keyboard's height,
+        // and it truncates from the front to keep the newest words in view.
+        promptLabel.font = .systemFont(ofSize: 15, weight: .regular)
         promptLabel.textColor = palette.inkSoft
-        promptLabel.textAlignment = .center
-        promptLabel.adjustsFontSizeToFitWidth = true
-        promptLabel.minimumScaleFactor = 0.72
+        promptLabel.textAlignment = .natural
+        promptLabel.lineBreakMode = .byTruncatingHead
+        promptLabel.numberOfLines = 1
         promptLabel.isHidden = true
+        promptLabel.accessibilityIdentifier = "keyboard.partialTranscript"
+        promptLabel.accessibilityLabel = "Heard so far"
+        // Yield to the wordmark: the preview stretches and truncates, never the brand.
+        promptLabel.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
+        promptLabel.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
         promptLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(promptLabel)
 
@@ -327,10 +351,9 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         helperHeightConstraint = helperHeight
 
         NSLayoutConstraint.activate([
-            promptLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 18),
+            promptLabel.leadingAnchor.constraint(equalTo: topRow.trailingAnchor, constant: 12),
             promptLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -18),
-            promptLabel.topAnchor.constraint(equalTo: topRow.bottomAnchor, constant: 7),
-            promptLabel.heightAnchor.constraint(equalToConstant: 0),
+            promptLabel.centerYAnchor.constraint(equalTo: topRow.centerYAnchor),
 
             helperLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
             helperLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
@@ -371,17 +394,30 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         deleteLongPress.minimumPressDuration = 0.35
         deleteButton.addGestureRecognizer(deleteLongPress)
 
+        configureIconKey(pasteButton, systemName: "doc.on.clipboard", accessibilityLabel: "Paste")
+        pasteButton.accessibilityIdentifier = "keyboard.paste"
+        pasteButton.accessibilityHint = "Inserts the text on the clipboard."
+        installKeyPressFeedback(on: pasteButton)
+        pasteButton.addTarget(self, action: #selector(pasteTapped), for: .touchUpInside)
+        pasteButton.setContentHuggingPriority(.required, for: .horizontal)
+        pasteButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+
         configureIconKey(nextKeyboardButton, systemName: "globe", accessibilityLabel: "Next keyboard")
         nextKeyboardButton.accessibilityIdentifier = "keyboard.nextKeyboard"
         nextKeyboardButton.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
         nextKeyboardButton.isHidden = !needsInputModeSwitchKey
         bottomRow.addArrangedSubview(nextKeyboardButton)
+        bottomRow.addArrangedSubview(pasteButton)
         bottomRow.addArrangedSubview(returnButton)
         bottomRow.addArrangedSubview(deleteButton)
 
         // UIStackView gives hidden arranged views a required zero width.
         let globeWidth = nextKeyboardButton.widthAnchor.constraint(equalToConstant: 44)
         globeWidth.priority = UILayoutPriority(999)
+        // Return yields width before any 44 pt key does on narrow keyboards
+        // that also show their own globe key.
+        let returnWidth = returnButton.widthAnchor.constraint(equalToConstant: 160)
+        returnWidth.priority = .defaultHigh
         NSLayoutConstraint.activate([
             bottomRow.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
             bottomRow.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 18),
@@ -391,7 +427,10 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
 
             globeWidth,
             nextKeyboardButton.heightAnchor.constraint(equalToConstant: 44),
-            returnButton.widthAnchor.constraint(equalToConstant: 160),
+            pasteButton.widthAnchor.constraint(equalToConstant: 44),
+            pasteButton.heightAnchor.constraint(equalToConstant: 44),
+            returnWidth,
+            returnButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 88),
             returnButton.heightAnchor.constraint(equalToConstant: 44),
             deleteButton.widthAnchor.constraint(equalToConstant: 44),
             deleteButton.heightAnchor.constraint(equalToConstant: 44)
@@ -641,12 +680,13 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         let wasKeyboardReady = viewModel.isKeyboardReady
         viewModel.refresh()
         if viewModel.isKeyboardReady && hasFullAccess {
-            if !wasKeyboardReady { actionNotice = nil }
+            if !wasKeyboardReady { clearStatusNotice() }
         }
         if !hasFullAccess { clearAutoInsert() }
         applyKeyboardAppearanceOverride()
         updateReturnKey()
         clearResolvedPendingAction()
+        showUnseenFailureNotice()
         updateUI()
         guard hasFullAccess, !viewModel.isRecording, let insertionDocumentIdentifier else { return }
         guard let identifier = visibleDocumentIdentifier(),
@@ -706,12 +746,15 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         case .continue: title = "continue"
         default: title = "return"
         }
+        // This runs on every state refresh; only touch the button on change.
+        guard returnButton.title(for: .normal) != title else { return }
         returnButton.setTitle(title, for: .normal)
         returnButton.accessibilityLabel = title.capitalized
     }
 
     private func updateUI(force: Bool = false) {
         updateWaveform()
+        updatePartialPreview()
         refreshOpenAppActivation()
         if isKeyboardVisible { startRefreshing() }
         let uiState = KeyboardUIState(
@@ -721,7 +764,7 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
             isKeyboardReady: viewModel.isKeyboardReady,
             hasFullAccess: hasFullAccess,
             hasDocumentContext: activeDocumentIdentifier != nil,
-            notice: actionNotice
+            notice: actionNotice?.text
         )
         guard force || uiState != renderedUIState else { return }
         renderedUIState = uiState
@@ -742,9 +785,10 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
             && (!needsDocument || hasDocumentContext) && !microphoneOff
         returnButton.isEnabled = hasDocumentContext
         deleteButton.isEnabled = hasDocumentContext
-        let helperText = actionNotice ?? defaultHelperText(canUseBridge: canUseBridge, pendingAction: pendingAction)
-        helperLabel.text = actionNotice
-        helperLabel.isHidden = actionNotice?.isEmpty != false
+        pasteButton.isEnabled = hasDocumentContext
+        let helperText = actionNotice?.text ?? defaultHelperText(canUseBridge: canUseBridge, pendingAction: pendingAction)
+        helperLabel.text = actionNotice?.text
+        helperLabel.isHidden = actionNotice?.text.isEmpty != false
         // Reserve explanation space only when it is actually needed. Normal
         // recording stays compact, with the waveform near the keyboard center.
         let showsNotice = !helperLabel.isHidden
@@ -767,7 +811,6 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         } else if viewModel.isTranscribing {
             setStatusAction(systemName: "waveform", title: "Transcribing", accessibilityLabel: "Transcribing", tintColor: palette.live)
         } else {
-            promptLabel.textColor = palette.inkSoft
             actionControl.backgroundColor = palette.ink
             actionControl.layer.borderWidth = 0
             micImageView.image = UIImage(systemName: "mic.fill")
@@ -786,6 +829,17 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         }
     }
 
+    /// A preview only. The keyboard inserts nothing until the app publishes the
+    /// final, corrected text as `latest`, and the app clears this text first.
+    private func updatePartialPreview() {
+        let text = hasFullAccess && (viewModel.isKeyboardRecording || viewModel.isTranscribing)
+            ? viewModel.partialTranscript : ""
+        guard (promptLabel.text ?? "") != text else { return }
+        promptLabel.text = text
+        promptLabel.accessibilityValue = text
+        promptLabel.isHidden = text.isEmpty
+    }
+
     private func setStatusAction(
         systemName: String? = nil,
         title: String,
@@ -796,7 +850,6 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         actionControl.backgroundColor = palette.keySurface
         actionControl.layer.borderColor = tintColor.withAlphaComponent(0.22).cgColor
         actionControl.layer.borderWidth = 1
-        promptLabel.textColor = tintColor
         actionControl.accessibilityLabel = accessibilityLabel
         if showsWave {
             actionStack.addArrangedSubview(waveStack)
@@ -849,7 +902,7 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
 
         if !hasFullAccess {
             clearAutoInsert()
-            actionNotice = "Settings → General → Keyboard → Keyboards → VoiceType → Allow Full Access."
+            actionNotice = .status("Settings → General → Keyboard → Keyboards → VoiceType → Allow Full Access.")
         } else if viewModel.isKeyboardRecording {
             guard armAutoInsert() else { updateUI(); return }
             setPendingAction(.stoppingClip)
@@ -868,6 +921,49 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         viewModel.refresh()
         clearResolvedPendingAction()
         updateUI()
+    }
+
+    @objc private func pasteTapped() {
+        updateDocumentContext()
+        guard activeDocumentIdentifier != nil else { updateUI(); return }
+        guard hasFullAccess else {
+            showNotice("Allow Full Access to paste from VoiceType Keyboard.")
+            return
+        }
+        // Read the clipboard only for this explicit tap. Keyboards have no
+        // paste command on the text proxy, so the text is inserted directly.
+        guard pasteboard.hasStrings, let text = pasteboard.string, !text.isEmpty else {
+            showNotice("The clipboard has no text to paste.")
+            return
+        }
+        textDocumentProxy.insertText(text)
+    }
+
+    private func showNotice(_ text: String, for duration: TimeInterval = 2.5) {
+        noticeClearTask?.cancel()
+        actionNotice = .timed(text)
+        updateUI()
+        UIAccessibility.post(notification: .announcement, argument: text)
+        noticeClearTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(duration))
+            guard !Task.isCancelled, let self, self.actionNotice == .timed(text) else { return }
+            self.actionNotice = nil
+            self.updateUI()
+        }
+    }
+
+    /// State changes clear only the status notices that describe them. A
+    /// timed notice stays until its own timer ends.
+    private func clearStatusNotice() {
+        if case .status = actionNotice { actionNotice = nil }
+    }
+
+    /// Without this, a clip that produced no text would just return the
+    /// keyboard to ready. Each notice shows once, and only while visible.
+    private func showUnseenFailureNotice() {
+        guard hasFullAccess, isKeyboardVisible, viewIfLoaded?.window != nil,
+              let notice = KeyboardFailureNoticeStore.claimUnshown() else { return }
+        showNotice(notice.message, for: 4)
     }
 
     @objc private func returnTapped() {
@@ -943,8 +1039,7 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
     private func clearResolvedPendingAction() {
         guard let pendingAction else {
             if viewModel.isKeyboardRecording || viewModel.isTranscribing {
-                actionNotice = nil
-                promptLabel.textColor = palette.inkSoft
+                clearStatusNotice()
             }
             return
         }
@@ -952,10 +1047,10 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
         switch pendingAction {
         case .startingClip where viewModel.isKeyboardRecording:
             setPendingAction(nil)
-            actionNotice = nil
+            clearStatusNotice()
         case .stoppingClip where !viewModel.isKeyboardRecording:
             setPendingAction(nil)
-            actionNotice = nil
+            clearStatusNotice()
         default:
             guard
                 let pendingActionStartedAt,
@@ -965,7 +1060,7 @@ class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
             }
             setPendingAction(nil)
             clearAutoInsert()
-            actionNotice = pendingAction.timeoutMessage
+            actionNotice = .status(pendingAction.timeoutMessage)
         }
     }
 }
@@ -1013,6 +1108,20 @@ private struct KeyboardUIState: Equatable {
     let notice: String?
 }
 
+/// A status notice explains the keyboard's state and clears when that state
+/// resolves. A timed notice, from `showNotice`, clears on its own timer, a
+/// newer notice or the user's next tap of the main control.
+private enum KeyboardNotice: Equatable {
+    case status(String)
+    case timed(String)
+
+    var text: String {
+        switch self {
+        case let .status(text), let .timed(text): text
+        }
+    }
+}
+
 private enum PendingKeyboardAction {
     case startingClip
     case stoppingClip
@@ -1045,6 +1154,9 @@ private final class KeyboardActionControl: UIControl {
 final class KeyboardViewModel: ObservableObject {
     @Published private(set) var snapshot = SharedTranscriptStore.latest
     @Published private(set) var recordingState = RecordingBridgeStore.state
+    /// Words heard so far in this session's clip, while it is recorded live
+    /// or transcribed.
+    @Published private(set) var partialTranscript = ""
 
     var isRecording: Bool {
         recordingState.isRecording
@@ -1065,6 +1177,8 @@ final class KeyboardViewModel: ObservableObject {
     func refresh() {
         snapshot = SharedTranscriptStore.latest
         recordingState = RecordingBridgeStore.state
+        partialTranscript = isKeyboardRecording || isTranscribing
+            ? PartialTranscriptStore.latest(for: recordingState.sessionID)?.text ?? "" : ""
     }
 }
 

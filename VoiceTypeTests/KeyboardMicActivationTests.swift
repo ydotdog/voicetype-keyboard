@@ -320,7 +320,7 @@ private final class ActivationFixture {
             throw ActivationTestError.unexpectedOperation
         },
         audioSessionActivation: { [weak self] in self?.audioSessionActivations += 1 },
-        transcriptionRequest: { [weak self] _, _, _, _ in
+        transcriptionRequest: { [weak self] _, _, _, _, _ in
             self?.transcriptionRequests += 1
             throw ActivationTestError.unexpectedOperation
         }

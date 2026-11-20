@@ -95,3 +95,61 @@ enum SharedTranscriptStore {
         defaults.set(data, forKey: transcriptHistoryKey)
     }
 }
+
+/// Text the service has heard so far in the keyboard clip being transcribed.
+struct PartialTranscript: Codable, Equatable {
+    let sessionID: String
+    let text: String
+}
+
+/// The keyboard previews this text and never inserts it: it is raw provider
+/// output, before normalization and saved corrections. A disposable file like
+/// the audio meter, since deltas arrive several times a second and only the
+/// latest matters. The app clears it when the clip finishes or fails.
+enum PartialTranscriptStore {
+    private static let encoder = JSONEncoder()
+    private static let decoder = JSONDecoder()
+    private static let fileURL: URL? = {
+        guard let container = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: AppConstants.appGroup
+        ) else { return nil }
+        let directory = container.appendingPathComponent("Library/Caches/PartialTranscript", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            return directory.appendingPathComponent("partial.json")
+        } catch { return nil }
+    }()
+
+    static func publish(_ text: String, sessionID: String) {
+        guard let fileURL, !sessionID.isEmpty,
+              let data = try? encoder.encode(PartialTranscript(sessionID: sessionID, text: text)) else { return }
+        #if os(iOS)
+        let options: Data.WritingOptions = [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+        #else
+        let options: Data.WritingOptions = .atomic
+        #endif
+        do {
+            try data.write(to: fileURL, options: options)
+        } catch {
+            // iOS may purge Caches while the keyboard session is open.
+            try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? data.write(to: fileURL, options: options)
+        }
+    }
+
+    /// Only the keyboard session that recorded the clip sees its text.
+    static func latest(for sessionID: String) -> PartialTranscript? {
+        guard let fileURL, !sessionID.isEmpty,
+              let data = try? Data(contentsOf: fileURL),
+              let partial = try? decoder.decode(PartialTranscript.self, from: data),
+              partial.sessionID == sessionID,
+              !partial.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return nil }
+        return partial
+    }
+
+    static func clear() {
+        guard let fileURL else { return }
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+}

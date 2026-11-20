@@ -54,5 +54,12 @@ container. Text typed in the host app is not uploaded by the keyboard.
   purchase, delivery and account-specific reconciliation separately.
 - [ ] Confirm the company privacy and support pages are deployed and accessible
   before saving their URLs in App Store Connect.
+- [ ] If the submission build includes Live transcription, update the reviewer
+  text: Settings → Transcription mode & model offers After recording, Streaming
+  (default) and Live, and the keyboard follows it. With Live on, the audio of a
+  clip the user starts is streamed through VoiceType's server to OpenAI's
+  Realtime API while the clip is recorded; idle session audio is still never
+  sent. Republish the company privacy page from `docs/PRIVACY_POLICY.md` first,
+  since it discloses Live and OpenAI's up-to-30-day Realtime retention.
 
 Preparing metadata and attachments does not constitute App Review submission.

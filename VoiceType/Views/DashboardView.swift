@@ -150,6 +150,7 @@ struct DashboardView: View {
         await store.syncUnfinishedTransactions(account: account)
         recorder.refreshLatest()
         refreshHistory()
+        await TranscriptionModelCatalogStore.refresh()
     }
 
     private func refreshHistory() {
@@ -490,7 +491,8 @@ struct HomeScreen: View {
             durationLimit: $recorder.durationLimit,
             isBusy: recorder.isStarting || recorder.isProcessing || recorder.isRecording,
             hasNegativeBalance: account.balanceUSDMicros < 0,
-            errorMessage: recorder.errorMessage ?? account.errorMessage
+            errorMessage: recorder.errorMessage ?? account.errorMessage,
+            partialTranscript: recorder.partialTranscript
         ) {
             Task {
                 if recorder.isKeyboardSessionActive {
@@ -536,6 +538,8 @@ struct HomeContent: View {
     let isBusy: Bool
     let hasNegativeBalance: Bool
     let errorMessage: String?
+    /// Text heard so far in the clip being recorded live or transcribed.
+    var partialTranscript = ""
     let toggleMic: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -586,6 +590,10 @@ struct HomeContent: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if !partialTranscript.isEmpty {
+                    PartialTranscriptPreview(text: partialTranscript, lineLimit: 4)
+                        .accessibilityIdentifier("home.partialTranscript")
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .panelStyle()
@@ -678,6 +686,7 @@ private struct HistoryScreen: View {
             failedTranscriptions: recorder.failedTranscriptions,
             retryingTranscriptionID: recorder.retryingTranscriptionID,
             retryErrorMessage: recorder.retryErrorMessage,
+            retryPartialTranscript: recorder.retryPartialTranscript,
             isSignedIn: account.isSignedIn,
             copy: copy,
             retry: { id in
@@ -697,15 +706,27 @@ struct HistoryContent: View {
     let failedTranscriptions: [FailedTranscriptionSnapshot]
     let retryingTranscriptionID: UUID?
     let retryErrorMessage: String?
+    /// Text heard so far in the recording being retried.
+    var retryPartialTranscript = ""
     let isSignedIn: Bool
     let copy: (TranscriptSnapshot) -> Void
     let retry: (UUID) -> Void
     let delete: (UUID) -> Void
     var edit: ((TranscriptSnapshot) -> Void)? = nil
+    @AppStorage(HistoryDisplay.fullTextKey) private var showsFullText = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             ScreenTitle(kicker: "Transcripts", title: "History")
+
+            if !history.isEmpty {
+                Picker("Transcript display", selection: $showsFullText) {
+                    Text("Preview").tag(false)
+                    Text("Full text").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("history.displayMode")
+            }
 
             if let retryErrorMessage {
                 Text(retryErrorMessage)
@@ -733,11 +754,17 @@ struct HistoryContent: View {
                                 ForEach(group.items, id: \.id) { item in
                                     switch item {
                                     case .transcript(let snapshot):
-                                        HistoryRow(snapshot: snapshot, copy: { copy(snapshot) }, edit: edit.map { action in { action(snapshot) } })
+                                        HistoryRow(
+                                            snapshot: snapshot,
+                                            showsFullText: showsFullText,
+                                            copy: { copy(snapshot) },
+                                            edit: edit.map { action in { action(snapshot) } }
+                                        )
                                     case .failed(let snapshot):
                                         FailedTranscriptionHistoryRow(
                                             snapshot: snapshot,
                                             isRetrying: retryingTranscriptionID == snapshot.id,
+                                            partialTranscript: retryingTranscriptionID == snapshot.id ? retryPartialTranscript : "",
                                             canRetry: isSignedIn && retryingTranscriptionID == nil,
                                             retry: { retry(snapshot.id) },
                                             delete: { delete(snapshot.id) }
@@ -811,6 +838,7 @@ private enum HistoryEntry: Identifiable {
 private struct FailedTranscriptionHistoryRow: View {
     let snapshot: FailedTranscriptionSnapshot
     let isRetrying: Bool
+    var partialTranscript = ""
     let canRetry: Bool
     let retry: () -> Void
     let delete: () -> Void
@@ -826,6 +854,10 @@ private struct FailedTranscriptionHistoryRow: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(AppTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if isRetrying, !partialTranscript.isEmpty {
+                PartialTranscriptPreview(text: partialTranscript, lineLimit: 3)
+            }
 
             HStack(spacing: 10) {
                 Button(action: retry) {
@@ -870,50 +902,133 @@ private struct FailedTranscriptionHistoryRow: View {
     }
 }
 
-private struct HistoryRow: View {
-    let snapshot: TranscriptSnapshot
-    let copy: () -> Void
-    var edit: (() -> Void)? = nil
+/// The newest words of a transcript still in progress. Saved corrections are
+/// applied only to the final text, so a word may change when it finishes.
+private struct PartialTranscriptPreview: View {
+    let text: String
+    let lineLimit: Int
 
     var body: some View {
-        HStack(alignment: .center, spacing: 14) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(snapshot.text)
-                    .font(AppTheme.serif(17, weight: .regular))
-                    .lineSpacing(3)
-                    .foregroundStyle(AppTheme.ink)
-                    .lineLimit(2)
+        Text(text)
+            .font(.subheadline)
+            .foregroundStyle(AppTheme.ink)
+            .lineLimit(lineLimit)
+            .truncationMode(.head)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel("Heard so far")
+            .accessibilityValue(text)
+    }
+}
 
-                HStack(spacing: 6) {
-                    Text(Self.timeFormatter.string(from: snapshot.createdAt))
-                    if let charge = snapshot.chargeText, !charge.isEmpty {
-                        Text("·")
-                        Text(charge)
+enum HistoryDisplay {
+    static let fullTextKey = "history.showsFullText"
+    static let previewLineLimit = 2
+}
+
+private struct HistoryRow: View {
+    let snapshot: TranscriptSnapshot
+    var showsFullText = false
+    let copy: () -> Void
+    var edit: (() -> Void)? = nil
+    @State private var isExpanded = false
+    @State private var previewHeight: CGFloat = 0
+    @State private var fullHeight: CGFloat = 0
+
+    private var isShowingFullText: Bool { showsFullText || isExpanded }
+    // Measured, not guessed from character counts: CJK and Latin text wrap
+    // at very different lengths.
+    private var isTruncated: Bool { fullHeight > previewHeight + 1 }
+
+    var body: some View {
+        Group {
+            if isShowingFullText {
+                // Full text gets the whole card width; the actions move below it.
+                VStack(alignment: .leading, spacing: 8) {
+                    transcriptText
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !showsFullText {
+                        expandButton
+                    }
+                    HStack(alignment: .center, spacing: 10) {
+                        metadata
+                        Spacer(minLength: 8)
+                        actions
                     }
                 }
-                .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(AppTheme.secondary)
-            }
-
-            Spacer()
-
-            if let edit {
-                Button(action: edit) {
-                    Image(systemName: "square.and.pencil").frame(width: 44, height: 44)
+            } else {
+                HStack(alignment: .center, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        transcriptText
+                            .lineLimit(HistoryDisplay.previewLineLimit)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { previewHeight = $0 }
+                            .background(alignment: .topLeading) {
+                                transcriptText
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .hidden()
+                                    .accessibilityHidden(true)
+                                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
+                            }
+                        metadata
+                        if isTruncated {
+                            expandButton
+                        }
+                    }
+                    actions
                 }
-                .modifier(SecondaryControlStyle())
-                .accessibilityLabel("Edit transcript and teach a spelling")
             }
-            Button(action: copy) {
-                Image(systemName: "doc.on.doc")
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .modifier(SecondaryControlStyle())
-            .accessibilityLabel("Copy transcript")
         }
         .padding(.vertical, 14)
+        .onChange(of: showsFullText) { isExpanded = false }
+    }
+
+    private var transcriptText: some View {
+        Text(snapshot.text)
+            .font(AppTheme.serif(17, weight: .regular))
+            .lineSpacing(3)
+            .foregroundStyle(AppTheme.ink)
+            .textSelection(.enabled)
+    }
+
+    private var metadata: some View {
+        HStack(spacing: 6) {
+            Text(Self.timeFormatter.string(from: snapshot.createdAt))
+            if let charge = snapshot.chargeText, !charge.isEmpty {
+                Text("·")
+                Text(charge)
+            }
+        }
+        .font(.system(size: 11.5, weight: .medium))
+        .foregroundStyle(AppTheme.secondary)
+    }
+
+    private var expandButton: some View {
+        Button(isExpanded ? "Show less" : "Show full text") {
+            withAnimation(.easeInOut(duration: 0.18)) { isExpanded.toggle() }
+        }
+        .font(.system(size: 12.5, weight: .semibold))
+        .foregroundStyle(AppTheme.ink)
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("history.row.expand")
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        if let edit {
+            Button(action: edit) {
+                Image(systemName: "square.and.pencil").frame(width: 44, height: 44)
+            }
+            .modifier(SecondaryControlStyle())
+            .accessibilityLabel("Edit transcript and teach a spelling")
+        }
+        Button(action: copy) {
+            Image(systemName: "doc.on.doc")
+                .font(.system(size: 14, weight: .semibold))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .modifier(SecondaryControlStyle())
+        .accessibilityLabel("Copy transcript")
     }
 
     private static let timeFormatter: DateFormatter = {
@@ -1124,7 +1239,12 @@ private struct LedgerNoteCard: View {
 }
 
 struct SettingsScreen: View {
-    @State private var isDictationPresented = false
+    private enum Sheet: String, Identifiable {
+        case dictation, model
+        var id: String { rawValue }
+    }
+
+    @State private var sheet: Sheet?
     @ObservedObject var account: AccountStore
     @ObservedObject var store: StoreKitService
     let openKeyboardSetup: () -> Void
@@ -1138,8 +1258,11 @@ struct SettingsScreen: View {
                     .listRowInsets(EdgeInsets())
             }
             Section("Preferences") {
-                Button { isDictationPresented = true } label: {
+                Button { sheet = .dictation } label: {
                     Label("Languages & vocabulary", systemImage: "character.bubble")
+                }
+                Button { sheet = .model } label: {
+                    Label("Transcription mode & model", systemImage: "waveform")
                 }
                 Button(action: openKeyboardSetup) {
                     Label("Set up VoiceType keyboard", systemImage: "keyboard")
@@ -1177,7 +1300,12 @@ struct SettingsScreen: View {
             }
         }
         .scrollContentBackground(.hidden)
-        .sheet(isPresented: $isDictationPresented) { DictationSettingsView(userID: account.userID) }
+        .sheet(item: $sheet) { sheet in
+            switch sheet {
+            case .dictation: DictationSettingsView(userID: account.userID)
+            case .model: TranscriptionModelSettingsView(userID: account.userID)
+            }
+        }
         .alert("Delete account?", isPresented: $isConfirmingDelete) {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) {

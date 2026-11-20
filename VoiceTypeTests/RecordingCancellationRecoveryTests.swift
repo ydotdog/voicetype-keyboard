@@ -30,10 +30,32 @@ struct RecordingCancellationRecoveryTests {
         return try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(recording)) as? [String: Any])
     }
 
-    private func result(_ id: UUID) -> TranscriptionResponse {
-        TranscriptionResponse(id: id.uuidString, transcript: "Recovered \(id)", model: "test",
+    private func result(_ id: UUID, transcript: String? = nil) -> TranscriptionResponse {
+        TranscriptionResponse(id: id.uuidString, transcript: transcript ?? "Recovered \(id)", model: "test",
             charge: ChargePayload(costUSDMicros: 1, costCreditUnits: 1, formatted: "1 credit", pricingBasis: "test"),
             balance: BalancePayload(balanceUSDMicros: 99, balanceCreditUnits: 99, formatted: "99 credits"))
+    }
+
+    /// What the backend returns for a silent clip.
+    private let noSpeech = BackendClientError.httpError(
+        status: 422, message: "No speech was detected in this recording. Nothing was charged.",
+        context: .general, code: "no_speech")
+    /// The same response from a backend that predates `code`.
+    private let uncodedSilence = BackendClientError.httpError(
+        status: 422, message: "No speech was detected in this recording. Nothing was charged.", context: .general)
+
+    /// Keyboard notices live in the shared App Group. Clears them for a test
+    /// and returns a closure that puts back what was there.
+    private func clearKeyboardNotices() -> () -> Void {
+        let defaults = UserDefaults(suiteName: AppConstants.appGroup)!
+        let keys = ["keyboardFailureNotice", "keyboardFailureNoticeShownID"]
+        let previous = keys.map { defaults.object(forKey: $0) }
+        keys.forEach(defaults.removeObject(forKey:))
+        return {
+            for (key, value) in zip(keys, previous) {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+        }
     }
 
     @Test(arguments: RecordingDurationLimit.allCases)
@@ -343,6 +365,225 @@ struct RecordingCancellationRecoveryTests {
         #expect(controller.failedTranscriptions.isEmpty)
         #expect(controller.retryingTranscriptionID == nil)
         #expect(!SharedTranscriptStore.history.contains { $0.id == id.uuidString })
+    }
+
+    @Test func silentStandardClipIsDeletedWhileOtherFailuresStayInHistory() async throws {
+        let restoreNotices = clearKeyboardNotices()
+        defer { restoreNotices() }
+        for (error, keepsClip) in [(noSpeech, false), (uncodedSilence, true), (BackendClientError.invalidResponse, true)] {
+            let fixture = try CaptureFixture()
+            defer { fixture.cleanUp() }
+            let account = AccountStore(backend: CaptureAccountBackend())
+            defer { account.signOut() }
+            account.apply(auth: auth(ownerID))
+            let controller = fixture.controller()
+            defer { controller.cancel() }
+            await controller.startRecording(account: account)
+            try #require(fixture.recorders.first).capturedTime = 6
+            let stop = Task { await controller.stopAndTranscribe(account: account) }
+            try await waitUntil { !fixture.pendingTranscriptions.isEmpty }
+            let id = try #require(fixture.pendingTranscriptions.first?.id)
+            fixture.respond(to: id, with: .failure(error))
+            await stop.value
+            #expect(!controller.isProcessing)
+            #expect(controller.errorMessage == error.localizedDescription)
+            #expect(controller.failedTranscriptions.map(\.id) == (keepsClip ? [id] : []))
+            #expect((RecordingRecoveryQueue(directory: fixture.recoveryDirectory).recordings[id] != nil) == keepsClip)
+            // Only keyboard clips leave a notice for the keyboard.
+            #expect(KeyboardFailureNoticeStore.claimUnshown() == nil)
+        }
+    }
+
+    @Test func failedKeyboardClipTellsTheKeyboardOnceAndDeletesOnlyASilentClip() async throws {
+        let restoreNotices = clearKeyboardNotices()
+        defer { restoreNotices() }
+        for (error, notice) in [(noSpeech, KeyboardFailureNotice.Kind.noSpeech),
+                                (uncodedSilence, .savedInHistory), (BackendClientError.invalidResponse, .savedInHistory)] {
+            let fixture = try CaptureFixture()
+            defer { fixture.cleanUp() }
+            let account = AccountStore(backend: CaptureAccountBackend())
+            defer { account.signOut() }
+            account.apply(auth: auth(ownerID))
+            let controller = fixture.controller()
+            defer { controller.cancel() }
+            await controller.startKeyboardReady(account: account)
+            let audio = try #require(fixture.recorders.first)
+            audio.capturedTime = 4
+            RecordingBridgeStore.requestStartClip()
+            try await waitUntil { controller.isKeyboardRecording }
+            audio.capturedTime = 9
+            let stop = Task { await controller.stopAndTranscribe(account: account) }
+            try await waitUntil { fixture.exportContinuation != nil }
+            try CaptureFixture.audioBytes.write(to: #require(fixture.exportOutputURL))
+            fixture.exportContinuation?.resume()
+            fixture.exportContinuation = nil
+            try await waitUntil { !fixture.pendingTranscriptions.isEmpty }
+            let id = try #require(fixture.pendingTranscriptions.first?.id)
+            #expect(KeyboardFailureNoticeStore.claimUnshown() == nil)
+            fixture.respond(to: id, with: .failure(error))
+            await stop.value
+
+            let keepsClip = notice == .savedInHistory
+            #expect(controller.isKeyboardReady)
+            #expect(!controller.isProcessing)
+            #expect(controller.errorMessage == error.localizedDescription)
+            #expect(controller.failedTranscriptions.map(\.id) == (keepsClip ? [id] : []))
+            #expect((RecordingRecoveryQueue(directory: fixture.recoveryDirectory).recordings[id] != nil) == keepsClip)
+            #expect(KeyboardFailureNoticeStore.claimUnshown()?.kind == notice)
+            #expect(KeyboardFailureNoticeStore.claimUnshown() == nil)
+        }
+    }
+
+    @Test func standardClipShowsHeardTextAndSavesOnlyTheCorrectedTranscript() async throws {
+        var preferences = DictationPreferences()
+        preferences.remember("GitHub", learned: true, heardAs: "github")
+        DictationPreferencesStore.save(preferences, userID: ownerID)
+        defer { DictationPreferencesStore.clear(userID: ownerID) }
+        let fixture = try CaptureFixture()
+        defer { fixture.cleanUp() }
+        let account = AccountStore(backend: CaptureAccountBackend())
+        defer { account.signOut() }
+        account.apply(auth: auth(ownerID))
+        let controller = fixture.controller()
+        defer { controller.cancel() }
+        await controller.startRecording(account: account)
+        try #require(fixture.recorders.first).capturedTime = 6
+        let stop = Task { await controller.stopAndTranscribe(account: account) }
+        try await waitUntil { !fixture.pendingTranscriptions.isEmpty }
+        let id = try #require(fixture.pendingTranscriptions.first?.id)
+        #expect(controller.partialTranscript.isEmpty)
+
+        fixture.hear("Pushed it to", in: id)
+        #expect(controller.partialTranscript == "Pushed it to")
+        fixture.hear("Pushed it to github", in: id)
+        #expect(controller.partialTranscript == "Pushed it to github")
+        #expect(SharedTranscriptStore.latest.id != id.uuidString)
+
+        fixture.respond(to: id, with: .success(result(id, transcript: "Pushed it to github today.")))
+        await stop.value
+        #expect(controller.partialTranscript.isEmpty)
+        #expect(SharedTranscriptStore.latest.id == id.uuidString)
+        #expect(SharedTranscriptStore.latest.text == "Pushed it to GitHub today.")
+        // A late partial can't bring back text for a finished clip.
+        fixture.hear("Pushed it to github today", in: id)
+        #expect(controller.partialTranscript.isEmpty)
+    }
+
+    @Test func keyboardClipPreviewsHeardTextForItsSessionUntilTheTranscriptIsReady() async throws {
+        let fixture = try CaptureFixture()
+        defer { fixture.cleanUp() }
+        let account = AccountStore(backend: CaptureAccountBackend())
+        defer { account.signOut() }
+        account.apply(auth: auth(ownerID))
+        let controller = fixture.controller()
+        defer { controller.cancel() }
+        await controller.startKeyboardReady(account: account)
+        let audio = try #require(fixture.recorders.first)
+        audio.capturedTime = 4
+        RecordingBridgeStore.requestStartClip()
+        try await waitUntil { controller.isKeyboardRecording }
+        let sessionID = RecordingBridgeStore.state.sessionID
+        audio.capturedTime = 9
+        let stop = Task { await controller.stopAndTranscribe(account: account) }
+        try await waitUntil { fixture.exportContinuation != nil }
+        try CaptureFixture.audioBytes.write(to: #require(fixture.exportOutputURL))
+        fixture.exportContinuation?.resume()
+        fixture.exportContinuation = nil
+        try await waitUntil { !fixture.pendingTranscriptions.isEmpty }
+        let id = try #require(fixture.pendingTranscriptions.first?.id)
+        #expect(PartialTranscriptStore.latest(for: sessionID) == nil)
+
+        fixture.hear("Hel", in: id)
+        fixture.hear("Hello wor", in: id)
+        #expect(RecordingBridgeStore.state.mode == .transcribing)
+        #expect(controller.partialTranscript == "Hello wor")
+        #expect(PartialTranscriptStore.latest(for: sessionID)?.text == "Hello wor")
+        #expect(PartialTranscriptStore.latest(for: "another-keyboard-session") == nil)
+        #expect(SharedTranscriptStore.latest.id != id.uuidString)
+
+        fixture.respond(to: id, with: .success(result(id, transcript: "Hello world.")))
+        await stop.value
+        #expect(controller.partialTranscript.isEmpty)
+        #expect(PartialTranscriptStore.latest(for: sessionID) == nil)
+        #expect(SharedTranscriptStore.latest.id == id.uuidString)
+        #expect(SharedTranscriptStore.latest.text == "Hello world.")
+    }
+
+    @Test func connectionLostMidStreamKeepsTheClipForASameKeyRetry() async throws {
+        let restoreNotices = clearKeyboardNotices()
+        defer { restoreNotices() }
+        let fixture = try CaptureFixture()
+        defer { fixture.cleanUp() }
+        let account = AccountStore(backend: CaptureAccountBackend())
+        defer { account.signOut() }
+        account.apply(auth: auth(ownerID))
+        let controller = fixture.controller()
+        defer { controller.cancel() }
+        await controller.startKeyboardReady(account: account)
+        let audio = try #require(fixture.recorders.first)
+        audio.capturedTime = 4
+        RecordingBridgeStore.requestStartClip()
+        try await waitUntil { controller.isKeyboardRecording }
+        let sessionID = RecordingBridgeStore.state.sessionID
+        audio.capturedTime = 9
+        let stop = Task { await controller.stopAndTranscribe(account: account) }
+        try await waitUntil { fixture.exportContinuation != nil }
+        try CaptureFixture.audioBytes.write(to: #require(fixture.exportOutputURL))
+        fixture.exportContinuation?.resume()
+        fixture.exportContinuation = nil
+        try await waitUntil { !fixture.pendingTranscriptions.isEmpty }
+        let id = try #require(fixture.pendingTranscriptions.first?.id)
+        fixture.hear("Hello wor", in: id)
+        #expect(PartialTranscriptStore.latest(for: sessionID)?.text == "Hello wor")
+
+        fixture.respond(to: id, with: .failure(URLError(.networkConnectionLost)))
+        await stop.value
+        #expect(controller.partialTranscript.isEmpty)
+        #expect(PartialTranscriptStore.latest(for: sessionID) == nil)
+        #expect(SharedTranscriptStore.latest.id != id.uuidString)
+        #expect(controller.failedTranscriptions.map(\.id) == [id])
+        #expect(RecordingRecoveryQueue(directory: fixture.recoveryDirectory).recordings[id] != nil)
+        #expect(KeyboardFailureNoticeStore.claimUnshown()?.kind == .savedInHistory)
+
+        // The service finished that clip; the same key returns it without a second charge.
+        let retry = Task { await controller.retryFailedTranscription(id: id, account: account) }
+        try await waitUntil { fixture.transcriptionCalls.count == 2 }
+        #expect(fixture.transcriptionCalls == [id, id])
+        fixture.hear("Hello", in: id)
+        #expect(controller.retryPartialTranscript == "Hello")
+        #expect(controller.partialTranscript.isEmpty)
+        #expect(PartialTranscriptStore.latest(for: sessionID) == nil)
+        fixture.respond(to: id, with: .success(result(id, transcript: "Hello world.")))
+        await retry.value
+        #expect(controller.retryPartialTranscript.isEmpty)
+        #expect(controller.failedTranscriptions.isEmpty)
+        #expect(SharedTranscriptStore.history.contains { $0.id == id.uuidString && $0.text == "Hello world." })
+    }
+
+    @Test func silentHistoryRetryDeletesOnlyThatClip() async throws {
+        let restoreNotices = clearKeyboardNotices()
+        defer { restoreNotices() }
+        for (error, keepsClip) in [(noSpeech, false), (uncodedSilence, true)] {
+            let fixture = try CaptureFixture()
+            defer { fixture.cleanUp() }
+            let ids = try fixture.seedFailures(owner: ownerID, count: 2)
+            let account = AccountStore(backend: CaptureAccountBackend())
+            defer { account.signOut() }
+            account.apply(auth: auth(ownerID))
+            let controller = fixture.controller()
+            defer { controller.cancel() }
+            let retry = Task { await controller.retryFailedTranscription(id: ids[0], account: account) }
+            try await waitUntil { !fixture.pendingTranscriptions.isEmpty }
+            fixture.respond(to: ids[0], with: .failure(error))
+            await retry.value
+            #expect(controller.retryingTranscriptionID == nil)
+            #expect(controller.retryErrorMessage == error.localizedDescription)
+            #expect(Set(controller.failedTranscriptions.map(\.id)) == (keepsClip ? Set(ids) : [ids[1]]))
+            let queue = RecordingRecoveryQueue(directory: fixture.recoveryDirectory)
+            #expect((queue.recordings[ids[0]] != nil) == keepsClip)
+            #expect(queue.recordings[ids[1]] != nil)
+            #expect(KeyboardFailureNoticeStore.claimUnshown() == nil)
+        }
     }
 
     @Test func expiredRetryRetainsOriginalIDForSameOwnerAndRejectsLateCompletion() async throws {
@@ -692,6 +933,7 @@ private final class CaptureFixture {
     var exportRanges: [(start: TimeInterval, duration: TimeInterval)] = []
     var transcriptionCalls: [UUID] = []
     var pendingTranscriptions: [(id: UUID, continuation: CheckedContinuation<TranscriptionResponse, Error>)] = []
+    var partialHandlers: [UUID: RecordingController.PartialTranscriptHandler] = [:]
 
     init() throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("capture-recovery-\(UUID().uuidString)")
@@ -722,8 +964,9 @@ private final class CaptureFixture {
                 try await withCheckedThrowingContinuation { exportContinuation = $0 }
             },
             audioSessionActivation: {},
-            transcriptionRequest: { [self] _, _, _, id in
+            transcriptionRequest: { [self] _, _, _, id, onPartial in
                 transcriptionCalls.append(id)
+                partialHandlers[id] = onPartial
                 return try await withCheckedThrowingContinuation { pendingTranscriptions.append((id, $0)) }
             }
         )
@@ -739,6 +982,11 @@ private final class CaptureFixture {
                                                         requestID: id, userID: owner)))
             return id
         }
+    }
+
+    /// Reports the text heard so far, as a streaming response does.
+    func hear(_ text: String, in id: UUID) {
+        partialHandlers[id]?(text)
     }
 
     func respond(to id: UUID, with result: Result<TranscriptionResponse, Error>) {

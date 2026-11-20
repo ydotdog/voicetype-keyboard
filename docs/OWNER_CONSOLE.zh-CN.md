@@ -13,9 +13,13 @@
 3. 测试成功后点击“保存并生效”。更改对新请求即时生效，已经开始的请求沿用原配置，不需要重新发布 App。
 4. 如需恢复，在历史配置中选择旧版本，点击“测试并准备恢复”，成功后确认恢复。
 
-当前支持 OpenAI 官方接口的 `gpt-4o-mini-transcribe`、`gpt-4o-transcribe`、`whisper-1`、`gpt-4o-transcribe-diarize`。暂不允许任意服务商 URL；新增处理方需要相应的数据告知和服务端计费适配。Diarize 不支持词汇提示。
+当前支持 OpenAI 官方接口的 `gpt-transcribe`（推荐，按音频时长计费，支持多语言列表和关键词提示）、`gpt-4o-mini-transcribe`、`gpt-4o-transcribe`、`whisper-1`、`gpt-4o-transcribe-diarize`。暂不允许任意服务商 URL；新增处理方需要相应的数据告知和服务端计费适配。Diarize 不支持词汇提示。
 
-2026-10-02 核对 [OpenAI 官方停用公告](https://developers.openai.com/api/docs/deprecations)：上述四个模型计划于 2027-02-26 停用。当前配置未被更换；新模型接入应另行测试识别质量、响应格式、词汇提示和计费。
+这里设置的是服务默认模型。用户可以在 App 的 Settings › Transcription model 中自选 `gpt-transcribe`、`gpt-4o-mini-transcribe`、`gpt-4o-transcribe` 或 `whisper-1`；选择“Automatic”的用户使用这里的模型。用户的选择只在服务端白名单之内生效，计费仍按所选模型的服务端价格。
+
+2026-10-02 核对 [OpenAI 官方停用公告](https://developers.openai.com/api/docs/deprecations)：除 `gpt-transcribe` 外的四个模型计划于 2027-02-26 停用。
+
+2026-10-23 起服务端代码已接入 `gpt-transcribe`，`.env.example` 和未设置 `OPENAI_TRANSCRIBE_MODEL` 时的代码默认值改为该模型。线上配置由后台加密配置决定，部署新代码不会自动更换线上模型；切换前先在后台“测试转写”，再保存。到停用日后：App 中选择了已停用模型的用户自动改用服务默认模型；如果服务默认模型本身已停用，新请求改用 `gpt-transcribe`，后台仍会显示原配置，应尽快保存为新模型。
 
 ## 密钥和会话
 

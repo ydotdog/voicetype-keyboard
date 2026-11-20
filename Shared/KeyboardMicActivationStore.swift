@@ -84,9 +84,11 @@ struct KeyboardMicActivationStore: Sendable {
               let files = try? FileManager.default.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil)
         else { return }
         for file in files where file.lastPathComponent.hasPrefix("request-") && file.pathExtension == "json" {
-            guard let data = try? Data(contentsOf: file),
-                  let request = try? JSONDecoder().decode(Request.self, from: data) else { continue }
-            if !request.isValid(at: now, uptime: uptime) { try? FileManager.default.removeItem(at: file) }
+            // A file that can't be read yet may be protected until first unlock,
+            // so keep it. One that reads but doesn't decode can never be valid.
+            guard let data = try? Data(contentsOf: file) else { continue }
+            let request = try? JSONDecoder().decode(Request.self, from: data)
+            if request?.isValid(at: now, uptime: uptime) != true { try? FileManager.default.removeItem(at: file) }
         }
     }
 }

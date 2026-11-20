@@ -5,8 +5,15 @@ import UIKit
 
 @MainActor
 final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDelegate {
+    typealias PartialTranscriptHandler = @MainActor @Sendable (String) -> Void
+
     @Published private(set) var isRecording = false {
-        didSet { updateKeyboardMetering() }
+        didSet {
+            updateKeyboardMetering()
+            // Every way a recording ends clears this. Live audio not yet
+            // handed to transcription stops here, such as when cancelled.
+            if !isRecording { endLiveTranscription() }
+        }
     }
     @Published private(set) var isProcessing = false
     @Published private(set) var isStarting = false
@@ -16,6 +23,11 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     @Published private(set) var retryErrorMessage: String?
     @Published private(set) var elapsedSeconds: TimeInterval = 0
     @Published private(set) var lastTranscript = SharedTranscriptStore.latest
+    /// What the service has heard so far in the clip being recorded live or
+    /// transcribed. A preview only: raw provider text, never inserted or saved.
+    @Published private(set) var partialTranscript = ""
+    /// The same preview for the History recording being retried.
+    @Published private(set) var retryPartialTranscript = ""
     @Published var durationLimit = RecordingPreferencesStore.durationLimit {
         didSet {
             RecordingPreferencesStore.durationLimit = durationLimit
@@ -85,7 +97,18 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     private var permissionRequest: (() async -> Bool)?
     private var clipExporter: ((URL, URL, TimeInterval, TimeInterval) async throws -> Void)?
     private var audioSessionActivation: (() throws -> Void)?
-    private var transcriptionRequest: ((URL, TimeInterval, String, UUID) async throws -> TranscriptionResponse)?
+    private var transcriptionRequest: ((URL, TimeInterval, String, UUID, @escaping PartialTranscriptHandler) async throws -> TranscriptionResponse)?
+    /// Opens a live session with a token and request ID. `nil` never
+    /// transcribes live.
+    private var liveTransport: ((String, UUID) throws -> any LiveTranscriptionTransport)?
+    private var liveAudioSource: () -> any LiveAudioSource = { EngineLiveAudioSource() }
+    /// The live model a user's next recording streams to, if any.
+    private var liveModel: (String) -> String? = { DictationPreferencesStore.liveModel(userID: $0) }
+    /// The recording being streamed while it is spoken.
+    private var liveClip: LiveClip?
+    /// A user the service turned live transcription down for. Their
+    /// recordings upload until the app restarts.
+    private var liveUnavailableUserID: String?
     private nonisolated static let commandObservers = WeakObserverRegistry<RecordingController>()
     private nonisolated let bridgeObserverToken = RecordingController.commandObservers.makeToken()
     private static let recordingLog = Logger(subsystem: "com.kyleqi.voicetype", category: "Recording")
@@ -106,12 +129,19 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     private var liveActivityEpoch: UInt64 = 0
 
     override init() {
+        liveTransport = { token, requestID in
+            URLSessionLiveTranscriptionTransport(
+                request: try BackendClient.liveTranscriptionRequest(token: token, requestID: requestID)
+            )
+        }
         super.init()
         registerBridgeCommandObserver()
         registerRecoveryObservers()
         restoreFailedTranscription()
     }
 
+    /// Recordings are only streamed live through `liveTransport`, so a
+    /// controller made without one never connects, whatever the saved mode.
     init(
         recoveryDirectory: URL,
         timeSource: RecordingTimeSource = .continuous(),
@@ -119,7 +149,10 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         permissionRequest: (() async -> Bool)? = nil,
         clipExporter: ((URL, URL, TimeInterval, TimeInterval) async throws -> Void)? = nil,
         audioSessionActivation: (() throws -> Void)? = nil,
-        transcriptionRequest: ((URL, TimeInterval, String, UUID) async throws -> TranscriptionResponse)? = nil
+        transcriptionRequest: ((URL, TimeInterval, String, UUID, @escaping PartialTranscriptHandler) async throws -> TranscriptionResponse)? = nil,
+        liveTransport: ((String, UUID) throws -> any LiveTranscriptionTransport)? = nil,
+        liveAudioSource: (() -> any LiveAudioSource)? = nil,
+        liveModel: ((String) -> String?)? = nil
     ) {
         recoveryDirectoryOverride = recoveryDirectory
         self.timeSource = timeSource
@@ -128,6 +161,9 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         self.clipExporter = clipExporter
         self.audioSessionActivation = audioSessionActivation
         self.transcriptionRequest = transcriptionRequest
+        self.liveTransport = liveTransport
+        if let liveAudioSource { self.liveAudioSource = liveAudioSource }
+        if let liveModel { self.liveModel = liveModel }
         super.init()
         registerBridgeCommandObserver()
         registerRecoveryObservers()
@@ -135,6 +171,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
     }
 
     isolated deinit {
+        endLiveTranscription()
         removeBridgeCommandObserver()
         notificationObservers.forEach { NotificationCenter.default.removeObserver($0) }
         timer?.invalidate()
@@ -252,6 +289,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             bridgeMode = .standard
             publishBridgeState()
             startTimer()
+            startLiveTranscription(keyboardSessionID: nil)
         } catch {
             RecordingBridgeStore.state = .inactive
             endLiveActivity()
@@ -441,9 +479,15 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         let accountSessionID = account.sessionID
         let recordedDuration = max(recorder?.currentTime ?? 0, lastRecorderTime)
         let duration = min(Self.maximumKeyboardClipDuration, recordedDuration > 0 ? recordedDuration : Date().timeIntervalSince(startedAt))
+        let heard = partialTranscript
         cancelActiveTranscription()
-        let transcriptionID = UUID()
+        let live = takeLiveClip()
+        live?.session.commit(audioSeconds: duration)
+        // A live recording keeps its session's request ID and context, so
+        // its upload, if needed, returns or replaces the live transcript.
+        let transcriptionID = live?.session.requestID ?? UUID()
         activeTranscriptionID = transcriptionID
+        if live != nil { partialTranscript = heard }
         isStopping = true
         let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "VoiceTypeTranscription") { [weak self] in
             Task { @MainActor [weak self] in
@@ -456,7 +500,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         activeTranscriptionAudio = RecoverableRecording(
             fileURL: fileURL, duration: duration, clipStartTime: nil,
             requestID: transcriptionID, userID: activeAccountUserID,
-            context: DictationPreferencesStore.load(userID: activeAccountUserID).context
+            context: live?.session.context ?? DictationPreferencesStore.context(userID: activeAccountUserID)
         )
         // Preserve the finalized file before yielding to any authentication or
         // lifecycle event, including before the upload task first runs.
@@ -479,7 +523,8 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
                 account: account,
                 token: token,
                 accountSessionID: accountSessionID,
-                requestID: transcriptionID
+                requestID: transcriptionID,
+                live: live
             )
         }
         activeTranscriptionTask = task
@@ -494,7 +539,8 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         token: String,
         accountSessionID: UUID,
         requestID: UUID,
-        clipStartTime: TimeInterval? = nil
+        clipStartTime: TimeInterval? = nil,
+        live: LiveClip? = nil
     ) async {
         var preparedURL = fileURL
         defer {
@@ -527,28 +573,39 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
                 elapsedSeconds = 0
                 isProcessing = false
                 processingStartedAt = nil
+                clearPartialTranscript()
             }
         }
 
         do {
             guard isActiveTranscription(id), account.matchesSession(accountSessionID, token: token) else { return }
-            if let clipStartTime {
-                preparedURL = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("voicetype-retry-\(UUID().uuidString).m4a")
-                try await exportClip(sourceURL: fileURL, outputURL: preparedURL, start: clipStartTime, duration: duration)
+            let response: TranscriptionResponse
+            if let live, let transcript = try await liveTranscript(from: live, userID: account.userID) {
+                response = transcript
+            } else {
+                guard isActiveTranscription(id), account.matchesSession(accountSessionID, token: token) else { return }
+                if let clipStartTime {
+                    preparedURL = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("voicetype-retry-\(UUID().uuidString).m4a")
+                    try await exportClip(sourceURL: fileURL, outputURL: preparedURL, start: clipStartTime, duration: duration)
+                }
+                guard isActiveTranscription(id), account.matchesSession(accountSessionID, token: token) else { return }
+                activeTranscriptionAudio = RecoverableRecording(
+                    fileURL: preparedURL, duration: duration, clipStartTime: nil,
+                    requestID: requestID, userID: account.userID,
+                    context: activeTranscriptionAudio?.context ?? .empty
+                )
+                guard retainFailedTranscription(showRetry: false) else { throw RecorderError.failedToSaveAudio }
+                response = try await transcribe(fileURL: preparedURL, duration: duration, token: token, requestID: requestID) { [weak self] text in
+                    guard let self, self.activeTranscriptionID == id else { return }
+                    self.partialTranscript = text
+                }
             }
             guard isActiveTranscription(id), account.matchesSession(accountSessionID, token: token) else { return }
-            activeTranscriptionAudio = RecoverableRecording(
-                fileURL: preparedURL, duration: duration, clipStartTime: nil,
-                requestID: requestID, userID: account.userID,
-                context: activeTranscriptionAudio?.context ?? .empty
-            )
-            guard retainFailedTranscription(showRetry: false) else { throw RecorderError.failedToSaveAudio }
-            let response = try await transcribe(fileURL: preparedURL, duration: duration, token: token, requestID: requestID)
-            guard isActiveTranscription(id), account.matchesSession(accountSessionID, token: token) else { return }
+            clearPartialTranscript()
             let snapshot = TranscriptSnapshot(
                 id: response.id,
-                text: response.transcript,
+                text: DictationPreferencesStore.applyingCorrections(to: response.transcript, userID: account.userID),
                 createdAt: Date(),
                 chargeText: response.charge.formatted
             )
@@ -559,8 +616,13 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         } catch {
             guard isActiveTranscription(id), account.matchesSession(accountSessionID, token: token) else { return }
             KeyboardAutoInsertStore.clear()
+            clearPartialTranscript()
             errorMessage = error.localizedDescription
-            retainFailedTranscription()
+            if Self.isNoSpeech(error) {
+                discardSilentRecording(id: requestID)
+            } else {
+                retainFailedTranscription()
+            }
         }
     }
 
@@ -707,6 +769,26 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         publishFailedTranscriptions()
     }
 
+    private static func isNoSpeech(_ error: Error) -> Bool {
+        (error as? BackendClientError)?.isNoSpeech == true
+    }
+
+    /// A silent clip fails the same way on every retry, and each retry pays the
+    /// provider again. Delete it instead of keeping it in History. If deletion
+    /// fails, the clip shows in History like any other failure.
+    private func discardSilentRecording(id: UUID) {
+        try? recoveryQueue.remove(id: id)
+        hiddenCheckpointIDs.remove(id)
+        publishFailedTranscriptions()
+    }
+
+    /// The keyboard returns to ready after a failed clip. Tell it once why no
+    /// text arrived, and whether the clip waits in History.
+    private func publishKeyboardFailureNotice(for id: UUID) {
+        let isSaved = failedTranscriptions.contains { $0.id == id }
+        KeyboardFailureNoticeStore.publish(isSaved ? .savedInHistory : .notSaved)
+    }
+
     // Compatibility for callers displaying the latest failed item.
     func discardFailedTranscription() {
         guard let id = failedTranscriptions.first?.id else { return }
@@ -753,7 +835,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         retainRecording(RecoverableRecording(
             fileURL: fileURL, duration: duration, clipStartTime: clipStart,
             requestID: UUID(), userID: activeAccountUserID,
-            context: DictationPreferencesStore.load(userID: activeAccountUserID).context
+            context: DictationPreferencesStore.context(userID: activeAccountUserID)
         ), showRetry: showRetry)
     }
 
@@ -835,6 +917,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
                 historyRetryAccount = nil
                 historyRetrySessionID = nil
                 historyRetryToken = ""
+                retryPartialTranscript = ""
                 publishFailedTranscriptions()
             }
         }
@@ -849,17 +932,23 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             let prepared = RecoverableRecording(fileURL: preparedURL, duration: recording.duration, clipStartTime: nil,
                                                requestID: recording.requestID, userID: recording.userID, createdAt: recording.createdAt, context: recording.context)
             guard recoveryQueue.save(prepared) else { throw RecorderError.failedToSaveAudio }
-            let response = try await transcribe(fileURL: preparedURL, duration: recording.duration, token: token, requestID: recording.requestID)
+            let response = try await transcribe(fileURL: preparedURL, duration: recording.duration, token: token,
+                                                requestID: recording.requestID) { [weak self] text in
+                guard let self, self.historyRetryExecutionID == executionID else { return }
+                self.retryPartialTranscript = text
+            }
             guard isCurrentHistoryRetry(executionID, account: account, sessionID: sessionID, token: token) else { return }
             // History retries never participate in the keyboard's latest-result
             // or insertion protocol, even if a live clip starts during this await.
-            SharedTranscriptStore.appendHistory(TranscriptSnapshot(id: response.id, text: response.transcript,
+            let text = DictationPreferencesStore.applyingCorrections(to: response.transcript, userID: recording.userID)
+            SharedTranscriptStore.appendHistory(TranscriptSnapshot(id: response.id, text: text,
                 createdAt: recording.createdAt, chargeText: response.charge.formatted))
             account.scheduleBalanceRefresh()
             do { try recoveryQueue.remove(id: recording.requestID) }
             catch { retryErrorMessage = "Transcription finished, but its saved audio could not be removed." }
         } catch {
             guard isCurrentHistoryRetry(executionID, account: account, sessionID: sessionID, token: token) else { return }
+            if Self.isNoSpeech(error) { discardSilentRecording(id: recording.requestID) }
             retryErrorMessage = error.localizedDescription
         }
     }
@@ -879,12 +968,116 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         historyRetryAccount = nil
         historyRetrySessionID = nil
         historyRetryToken = ""
+        retryPartialTranscript = ""
     }
 
-    private func transcribe(fileURL: URL, duration: TimeInterval, token: String, requestID: UUID) async throws -> TranscriptionResponse {
-        if let transcriptionRequest { return try await transcriptionRequest(fileURL, duration, token, requestID) }
-        let context = recoveryQueue.recordings[requestID]?.context ?? activeTranscriptionAudio?.context ?? .empty
-        return try await BackendClient.transcribe(fileURL: fileURL, duration: duration, token: token, requestID: requestID, context: context)
+    /// Streams partial text to `onPartial` when the selected model and mode
+    /// support it. Waits while the service finishes a live session for the
+    /// same recording, and then returns its transcript.
+    private func transcribe(fileURL: URL, duration: TimeInterval, token: String, requestID: UUID,
+                            onPartial: @escaping PartialTranscriptHandler) async throws -> TranscriptionResponse {
+        if let transcriptionRequest { return try await transcriptionRequest(fileURL, duration, token, requestID, onPartial) }
+        let recording = recoveryQueue.recordings[requestID] ?? activeTranscriptionAudio
+        let context = recording?.context ?? .empty
+        if DictationPreferencesStore.load(userID: recording?.userID ?? activeAccountUserID).mode == .afterRecording {
+            return try await BackendClient.transcribe(
+                fileURL: fileURL, duration: duration, token: token, requestID: requestID, context: context,
+                patience: Self.liveResultPatience
+            )
+        }
+        return try await BackendClient.transcribeStreaming(
+            fileURL: fileURL, duration: duration, token: token, requestID: requestID, context: context,
+            catalog: TranscriptionModelCatalogStore.load(), patience: Self.liveResultPatience, onPartial: onPartial
+        )
+    }
+
+    /// A recording also streamed to the service while it is spoken.
+    private struct LiveClip {
+        let session: LiveTranscriptionSession
+        let audio: any LiveAudioSource
+    }
+
+    /// Streams the recording that just started to the service as well, when
+    /// the user chose live transcription. The recorder still saves it, to
+    /// upload if the live session can't finish.
+    private func startLiveTranscription(keyboardSessionID: String?) {
+        endLiveTranscription()
+        let userID = activeAccountUserID
+        guard let liveTransport, !userID.isEmpty, liveUnavailableUserID != userID,
+              let model = liveModel(userID) else { return }
+        let requestID = UUID()
+        let transport: any LiveTranscriptionTransport
+        do {
+            transport = try liveTransport(activeAccountToken, requestID)
+        } catch {
+            Self.recordingLog.notice("Live transcription could not start: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        let session = LiveTranscriptionSession(
+            requestID: requestID, model: model,
+            context: DictationPreferencesStore.context(userID: userID), transport: transport
+        ) { [weak self] text in
+            guard let self, self.liveClip?.session.requestID == requestID || self.activeTranscriptionID == requestID else { return }
+            self.partialTranscript = text
+            if let keyboardSessionID {
+                // The keyboard previews it in its prompt; only `latest` is inserted.
+                PartialTranscriptStore.publish(text, sessionID: keyboardSessionID)
+            }
+        }
+        let audio = liveAudioSource()
+        let input = session.audio
+        do {
+            try audio.start { input.append($0) }
+        } catch {
+            Self.recordingLog.notice("Live audio could not start: \(error.localizedDescription, privacy: .public)")
+            session.cancel()
+            return
+        }
+        liveClip = LiveClip(session: session, audio: audio)
+        Self.recordingLog.info("Live transcription started; model=\(model, privacy: .public)")
+    }
+
+    /// The live recording that just stopped, with all its audio queued to send.
+    private func takeLiveClip() -> LiveClip? {
+        guard let live = liveClip else { return nil }
+        liveClip = nil
+        live.audio.stop()
+        return live
+    }
+
+    /// Stops streaming a recording that won't be transcribed live, such as
+    /// one that was cancelled or interrupted.
+    private func endLiveTranscription() {
+        takeLiveClip()?.session.end()
+    }
+
+    /// The live transcript of a recording, or nil to upload it instead.
+    private func liveTranscript(from live: LiveClip, userID: String) async throws -> TranscriptionResponse? {
+        switch await live.session.result() {
+        case let .transcribed(response):
+            return response
+        case let .rejected(error):
+            // The service heard only silence. Trust that only if the
+            // microphone tap heard something: a tap can miss audio the
+            // recorder saved.
+            guard live.audio.heardSignal else { return nil }
+            throw error
+        case .cancelled:
+            return nil
+        case let .upload(code):
+            if code == "realtime_unavailable" || code == "unsupported_model" {
+                // Until the app restarts, so a catalog refresh can catch up.
+                liveUnavailableUserID = userID
+            }
+            return nil
+        }
+    }
+
+    /// Partial text belongs to one clip. Cleared before the final text is
+    /// published, so the keyboard never previews text it has already inserted.
+    private func clearPartialTranscript() {
+        partialTranscript = ""
+        PartialTranscriptStore.clear()
     }
 
     private func finishPendingStart(_ id: UUID) {
@@ -972,6 +1165,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         processingStartedAt = nil
         isProcessing = false
         isStopping = false
+        clearPartialTranscript()
     }
 
     private func startProcessingWatchdog(for id: UUID) {
@@ -1070,6 +1264,9 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
 
         errorMessage = "Transcription timed out. Retry the saved recording."
         retainFailedTranscription()
+        if bridgeMode == .transcribing, let id = activeTranscriptionAudio?.requestID {
+            publishKeyboardFailureNotice(for: id)
+        }
         if let activeTranscriptionID {
             endTranscriptionBackgroundTask(for: activeTranscriptionID)
         }
@@ -1080,6 +1277,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         processingWatchdogTask?.cancel()
         processingWatchdogTask = nil
         KeyboardAutoInsertStore.clear()
+        clearPartialTranscript()
         isProcessing = false
         processingStartedAt = nil
         isStopping = false
@@ -1342,6 +1540,10 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         return formatter
     }()
     private static let maximumTranscriptionWait: TimeInterval = 600
+    /// How long an upload waits for a live session of the same recording
+    /// that the service is still finishing. It has 35 seconds after the
+    /// recording ends.
+    private static let liveResultPatience: TimeInterval = 40
     private static let maximumKeyboardClipDuration = RecordingSessionPolicy.maximumClipDuration
     private static let maximumIdleAudioFileDuration = RecordingSessionPolicy.maximumIdleFileDuration
 
@@ -1592,6 +1794,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         bridgeMode = .keyboardRecording
         guard refreshRecorderCaptureLimit() else { return }
         publishBridgeState()
+        startLiveTranscription(keyboardSessionID: activeSessionID)
         Self.recordingLog.info("Keyboard clip started; recorder running=\(recorder.isRecording)")
     }
 
@@ -1626,14 +1829,18 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         }
         let token = activeAccountToken
         let accountSessionID = activeAccount.sessionID
+        let heard = partialTranscript
         cancelActiveTranscription()
 
         let clipEndTime = max(recorder?.currentTime ?? 0, lastRecorderTime)
         let clipDuration = min(Self.maximumKeyboardClipDuration, max(0, clipEndTime - clipStartTime))
         keyboardClipStartTime = nil
+        // Taken first: clearing `isRecording` ends a live session.
+        let live = takeLiveClip()
         isRecording = false
 
         guard clipDuration >= 0.25 else {
+            live?.session.cancel()
             if shouldStopKeyboardSessionAfterCurrentClip {
                 shouldStopKeyboardSessionAfterCurrentClip = false
                 stopKeyboardReady()
@@ -1644,8 +1851,14 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
             return nil
         }
 
-        let transcriptionID = UUID()
+        live?.session.commit(audioSeconds: clipDuration)
+        let transcriptionID = live?.session.requestID ?? UUID()
         activeTranscriptionID = transcriptionID
+        if live != nil, !heard.isEmpty {
+            // Keep showing what the live session heard until it finishes.
+            partialTranscript = heard
+            PartialTranscriptStore.publish(heard, sessionID: activeSessionID)
+        }
         isStopping = true
         // Hold a background task across the whole stop -> restart -> transcribe
         // window so iOS does not suspend the app while the continuous recorder is
@@ -1662,7 +1875,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         activeTranscriptionAudio = RecoverableRecording(
             fileURL: sourceURL, duration: clipDuration, clipStartTime: clipStartTime,
             requestID: transcriptionID, userID: activeAccountUserID,
-            context: DictationPreferencesStore.load(userID: activeAccountUserID).context
+            context: live?.session.context ?? DictationPreferencesStore.context(userID: activeAccountUserID)
         )
         // Export is asynchronous. Keep the original segment and its start
         // offset durable before an expired sign-in can cancel that export.
@@ -1677,6 +1890,7 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         let clipURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("voicetype-clip-\(UUID().uuidString)")
             .appendingPathExtension("m4a")
+        let bridgeSessionID = activeSessionID
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.finishKeyboardClipTranscription(
@@ -1687,7 +1901,9 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
                 clipDuration: clipDuration,
                 account: activeAccount,
                 token: token,
-                accountSessionID: accountSessionID
+                accountSessionID: accountSessionID,
+                bridgeSessionID: bridgeSessionID,
+                live: live
             )
         }
         activeTranscriptionTask = task
@@ -1702,7 +1918,9 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         clipDuration: TimeInterval,
         account: AccountStore,
         token: String,
-        accountSessionID: UUID
+        accountSessionID: UUID,
+        bridgeSessionID: String,
+        live: LiveClip? = nil
     ) async {
         defer {
             endTranscriptionBackgroundTask(for: id)
@@ -1716,26 +1934,39 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
                 processingWatchdogTask = nil
                 isStopping = false
                 processingStartedAt = nil
+                clearPartialTranscript()
             }
         }
 
         do {
             recoverKeyboardRecorderIfNeeded(reason: "keyboard clip handoff")
             guard isActiveTranscription(id), account.matchesSession(accountSessionID, token: token) else { return }
-            try await exportClip(sourceURL: sourceURL, outputURL: clipURL, start: clipStartTime, duration: clipDuration)
-            guard isActiveTranscription(id), account.matchesSession(accountSessionID, token: token) else { return }
-            activeTranscriptionAudio = RecoverableRecording(
-                fileURL: clipURL, duration: clipDuration, clipStartTime: nil,
-                requestID: id, userID: account.userID,
-                context: activeTranscriptionAudio?.context ?? .empty
-            )
-            guard retainFailedTranscription(showRetry: false) else { throw RecorderError.failedToSaveAudio }
+            let response: TranscriptionResponse
+            if let live, let transcript = try await liveTranscript(from: live, userID: account.userID) {
+                response = transcript
+            } else {
+                guard isActiveTranscription(id), account.matchesSession(accountSessionID, token: token) else { return }
+                try await exportClip(sourceURL: sourceURL, outputURL: clipURL, start: clipStartTime, duration: clipDuration)
+                guard isActiveTranscription(id), account.matchesSession(accountSessionID, token: token) else { return }
+                activeTranscriptionAudio = RecoverableRecording(
+                    fileURL: clipURL, duration: clipDuration, clipStartTime: nil,
+                    requestID: id, userID: account.userID,
+                    context: activeTranscriptionAudio?.context ?? .empty
+                )
+                guard retainFailedTranscription(showRetry: false) else { throw RecorderError.failedToSaveAudio }
 
-            let response = try await transcribe(fileURL: clipURL, duration: clipDuration, token: token, requestID: id)
+                response = try await transcribe(fileURL: clipURL, duration: clipDuration, token: token, requestID: id) { [weak self] text in
+                    guard let self, self.activeTranscriptionID == id else { return }
+                    self.partialTranscript = text
+                    // The keyboard previews it in its prompt; only `latest` is inserted.
+                    PartialTranscriptStore.publish(text, sessionID: bridgeSessionID)
+                }
+            }
             guard isActiveTranscription(id), account.matchesSession(accountSessionID, token: token) else { return }
+            clearPartialTranscript()
             let snapshot = TranscriptSnapshot(
                 id: response.id,
-                text: response.transcript,
+                text: DictationPreferencesStore.applyingCorrections(to: response.transcript, userID: account.userID),
                 createdAt: Date(),
                 chargeText: response.charge.formatted
             )
@@ -1760,8 +1991,15 @@ final class RecordingController: NSObject, ObservableObject, AVAudioRecorderDele
         } catch {
             guard isActiveTranscription(id), account.matchesSession(accountSessionID, token: token) else { return }
             KeyboardAutoInsertStore.clear()
+            clearPartialTranscript()
             errorMessage = error.localizedDescription
-            retainFailedTranscription()
+            if Self.isNoSpeech(error) {
+                discardSilentRecording(id: id)
+                KeyboardFailureNoticeStore.publish(.noSpeech)
+            } else {
+                retainFailedTranscription()
+                publishKeyboardFailureNotice(for: id)
+            }
             isProcessing = false
             if shouldStopKeyboardSessionAfterCurrentClip {
                 shouldStopKeyboardSessionAfterCurrentClip = false

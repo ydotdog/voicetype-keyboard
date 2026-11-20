@@ -81,6 +81,79 @@ struct TranscriptionResponse: Decodable {
     let balance: BalancePayload
 }
 
+/// Models a user can choose, with an estimated price per minute of audio.
+struct TranscriptionModelCatalog: Codable, Equatable {
+    let defaultModel: String
+    let defaultModelName: String
+    let models: [TranscriptionModelOption]
+    /// Live transcription models. Absent from older servers, which only
+    /// accept uploads.
+    var realtime: RealtimeTranscriptionCatalog? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case defaultModel = "default_model"
+        case defaultModelName = "default_model_name"
+        case models, realtime
+    }
+}
+
+/// Models that transcribe audio while it is spoken, over a WebSocket.
+struct RealtimeTranscriptionCatalog: Codable, Equatable {
+    /// False when the owner turned live transcription off; the app uploads.
+    let available: Bool
+    let defaultModel: String
+    let models: [RealtimeTranscriptionModel]
+
+    enum CodingKeys: String, CodingKey {
+        case available
+        case defaultModel = "default_model"
+        case models
+    }
+}
+
+struct RealtimeTranscriptionModel: Codable, Equatable, Identifiable {
+    let id: String
+    let name: String
+    let recommended: Bool
+    /// True for models that cannot transcribe an uploaded recording.
+    let liveOnly: Bool
+    /// "while_speaking" or "after_pauses".
+    let textTiming: String
+    let retiresOn: String?
+    let pricingBasis: String
+    let creditUnitsPerMinute: Int
+    let formattedPerMinute: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, recommended
+        case liveOnly = "live_only"
+        case textTiming = "text_timing"
+        case retiresOn = "retires_on"
+        case pricingBasis = "pricing_basis"
+        case creditUnitsPerMinute = "credit_units_per_minute"
+        case formattedPerMinute = "formatted_per_minute"
+    }
+}
+
+struct TranscriptionModelOption: Codable, Equatable, Identifiable {
+    let id: String
+    let name: String
+    let recommended: Bool
+    let streaming: Bool
+    let retiresOn: String?
+    let pricingBasis: String
+    let creditUnitsPerMinute: Int
+    let formattedPerMinute: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, recommended, streaming
+        case retiresOn = "retires_on"
+        case pricingBasis = "pricing_basis"
+        case creditUnitsPerMinute = "credit_units_per_minute"
+        case formattedPerMinute = "formatted_per_minute"
+    }
+}
+
 struct ChargePayload: Codable {
     let costUSDMicros: Int
     let costCreditUnits: Int?
