@@ -104,7 +104,7 @@ struct DictationSettingsView: View {
             .tint(AppTheme.coral)
             .navigationTitle("Dictation")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { ToolbarActionButton(title: "Done", systemImage: "checkmark") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { ToolbarActionButton(title: "Done", systemImage: "checkmark", confirms: true) { dismiss() } } }
             .onChange(of: preferences) { _, value in DictationPreferencesStore.save(value, userID: userID) }
             .confirmationDialog("Clear all saved words?", isPresented: $confirmingClear, titleVisibility: .visible) {
                 Button("Clear vocabulary", role: .destructive) { preferences.words = [] }
@@ -277,7 +277,7 @@ struct TranscriptCorrectionView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { ToolbarActionButton(title: "Cancel", systemImage: "xmark") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    ToolbarActionButton(title: "Save", systemImage: "checkmark") { save() }
+                    ToolbarActionButton(title: "Save", systemImage: "checkmark", confirms: true) { save() }
                         .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
@@ -431,7 +431,7 @@ struct TranscriptionModelSettingsView: View {
             .tint(AppTheme.coral)
             .navigationTitle("Transcription")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { ToolbarActionButton(title: "Done", systemImage: "checkmark") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { ToolbarActionButton(title: "Done", systemImage: "checkmark", confirms: true) { dismiss() } } }
             .task { await load() }
         }
     }

@@ -114,11 +114,15 @@ struct AdaptiveColumns: Layout {
 /// A toolbar button that carries an icon as well as a title.
 ///
 /// The system can move a bar item onto a vertical bar, such as the side bar of
-/// iPhone Duo, only when the item has both. Systems before iOS 26 keep the
-/// familiar text button.
+/// iPhone Duo, only when the item has both. From iOS 26 a bar shows the icon
+/// alone and fills the button that confirms a sheet with a tint; here that is
+/// the green of the app's primary controls, not the asset catalog's accent
+/// color. Systems before iOS 26 keep the familiar text button.
 struct ToolbarActionButton: View {
     let title: LocalizedStringKey
     let systemImage: String
+    /// Whether the button confirms the sheet, as Done and Save do.
+    var confirms = false
     let action: () -> Void
 
     var body: some View {
@@ -126,6 +130,7 @@ struct ToolbarActionButton: View {
             Button(action: action) {
                 Label(title, systemImage: systemImage)
             }
+            .tint(confirms ? AppTheme.primaryControl : nil)
         } else {
             Button(title, action: action)
         }

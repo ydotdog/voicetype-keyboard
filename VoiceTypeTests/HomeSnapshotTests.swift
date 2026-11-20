@@ -288,7 +288,179 @@ final class HomeSnapshotTests: XCTestCase {
         }
     }
 
-    private func capture<Content: View>(_ content: Content, tab: VoiceTypeTab, name: String, width: CGFloat, height: CGFloat, scheme: ColorScheme, standalone: Bool = false, typeSize: DynamicTypeSize = .large, delay: Duration = .milliseconds(200)) async throws {
+    /// The longest `testCaptureAtSceneSize` leaves each page on the simulator's
+    /// screen while a script takes a screenshot of the display, from the
+    /// environment variable `UI_ON_SCREEN_SECONDS`. Nil in a normal test run.
+    private static let onScreenSeconds: Double? = ProcessInfo.processInfo.environment["UI_ON_SCREEN_SECONDS"].flatMap { Double($0) }
+
+    /// Whether `testCaptureAtSceneSize` repeats its pages with the scene turned to
+    /// landscape, from the environment variable `UI_TURN_SCENE`. False in a
+    /// normal test run, so that no other test runs in a turned scene.
+    private static let turnsScene = ProcessInfo.processInfo.environment["UI_TURN_SCENE"] == "1"
+
+    /// Renders the pages in a window as large as the scene the system gave the
+    /// app, with the system's safe areas. The sizes above imitate a device; this
+    /// shows the pages the way the simulator the tests run on lays them out, in
+    /// the posture and orientation it is in.
+    func testCaptureAtSceneSize() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        try describe(scene, name: "scene")
+        try await captureScenePages(in: scene, prefix: "scene")
+
+        guard Self.turnsScene else { return }
+        let turned = try await turn(scene, toLandscape: true)
+        XCTAssertTrue(turned, "The scene did not turn to landscape.")
+        if turned {
+            try describe(scene, name: "scene-landscape")
+            try await captureScenePages(in: scene, prefix: "scene-landscape")
+        }
+        _ = try await turn(scene, toLandscape: false)
+    }
+
+    /// Asks the system to turn the scene to landscape or back to portrait, the way
+    /// it turns when the device is turned on its side, and waits until it has.
+    /// Returns false when the scene has not turned in time.
+    private func turn(_ scene: UIWindowScene, toLandscape landscape: Bool) async throws -> Bool {
+        let orientations: UIInterfaceOrientationMask = landscape ? .landscapeRight : .portrait
+        scene.requestGeometryUpdate(UIWindowScene.GeometryPreferences.iOS(interfaceOrientations: orientations)) { @Sendable error in
+            print("UI_SCENE the system refused to turn the scene: \(error)")
+        }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(100))
+            let size = scene.coordinateSpace.bounds.size
+            if scene.effectiveGeometry.interfaceOrientation.isLandscape == landscape, (size.width > size.height) == landscape {
+                // Lets the turn's animation end before a page is laid out.
+                try await Task.sleep(for: .seconds(1))
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Renders the app's pages in a window as large as `scene`. Each image is
+    /// named `prefix` followed by its page.
+    private func captureScenePages(in scene: UIWindowScene, prefix: String) async throws {
+        let size = scene.coordinateSpace.bounds.size
+
+        let savedBalance = SharedAccountStore.balanceText
+        defer { SharedAccountStore.balanceText = savedBalance }
+        let account = AccountStore(backend: SnapshotAccountBackend())
+        account.apply(balance: BalancePayload(balanceUSDMicros: 1_000_000, balanceCreditUnits: 100_000, formatted: "100,000 credits"))
+        let store = StoreKitService()
+        let userID = "snapshot-scene-\(UUID().uuidString)"
+        defer { DictationPreferencesStore.clear(userID: userID) }
+        let transcript = TranscriptSnapshot(id: "snapshot-success", text: "Let's meet at ten tomorrow. I'll bring the notes.",
+                                            createdAt: Date().addingTimeInterval(-180), chargeText: "27 credits")
+        let history = HistoryContent(
+            history: [transcript],
+            failedTranscriptions: [FailedTranscriptionSnapshot(id: UUID(), createdAt: Date().addingTimeInterval(-60), duration: 12.4)],
+            retryingTranscriptionID: nil, retryErrorMessage: nil, isSignedIn: true,
+            copy: { _ in }, retry: { _ in }, delete: { _ in }
+        )
+
+        func page<Content: View>(_ content: Content, tab: VoiceTypeTab, name: String, standalone: Bool = false,
+                                 delay: Duration = .milliseconds(200)) async throws {
+            try await capture(content, tab: tab, name: "\(prefix)-\(name)", width: size.width, height: size.height,
+                              scheme: .light, standalone: standalone, delay: delay, systemSafeAreas: true)
+        }
+
+        for state in [HomeMicState.ready, .recording] {
+            let home = HomeContent(micState: state, elapsedSeconds: 65, durationLimit: .constant(.fiveMinutes),
+                                   isBusy: false, hasNegativeBalance: false, errorMessage: nil, toggleMic: {})
+            try await page(home, tab: .home, name: "mic-\(state)")
+        }
+        try await page(CreditScreen(store: store, account: account), tab: .credit, name: "credit")
+        try await page(history, tab: .history, name: "history")
+        let settings = VoiceTypeTabs(selection: .constant(.settings)) { _ in
+            SettingsScreen(account: account, store: store, openKeyboardSetup: {})
+        }
+        try await page(settings, tab: .settings, name: "settings", standalone: true)
+        let toast = VoiceTypeTabs(selection: .constant(.history)) { _ in
+            TabPage { history }
+                .toast("Copied", bottomPadding: 16)
+        }
+        try await page(toast, tab: .history, name: "toast", standalone: true)
+        try await page(SignInScreen(openKeyboardSetup: {}).environmentObject(account), tab: .home, name: "signin", standalone: true)
+        try await page(KeyboardSetupScreen(close: {}), tab: .home, name: "setup", standalone: true)
+        // The app presents these three as sheets. Here each fills the window, which
+        // is enough to show where the system puts their bar buttons.
+        try await page(DictationSettingsView(userID: userID), tab: .settings, name: "dictation", standalone: true)
+        try await page(TranscriptCorrectionView(snapshot: transcript, userID: userID, draft: transcript.text, onSave: {}), tab: .history,
+                       name: "correction", standalone: true, delay: .seconds(2))
+        try await page(TranscriptionModelSettingsView(userID: userID, catalog: nil, refreshCatalog: { nil }), tab: .settings,
+                       name: "models", standalone: true)
+    }
+
+    /// Records the scene the test host runs in: its size, safe areas and size
+    /// classes. The images of `testCaptureAtSceneSize` are read against these.
+    /// The report is the file `voicetype-` followed by `name`.
+    private func describe(_ scene: UIWindowScene, name: String) throws {
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIViewController()
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        window.layoutIfNeeded()
+
+        func sizeClassName(_ sizeClass: UIUserInterfaceSizeClass) -> String {
+            switch sizeClass {
+            case .compact: return "compact"
+            case .regular: return "regular"
+            default: return "unspecified"
+            }
+        }
+        func orientationName(_ orientation: UIInterfaceOrientation) -> String {
+            switch orientation {
+            case .portrait: return "portrait"
+            case .portraitUpsideDown: return "portrait, upside down"
+            case .landscapeLeft: return "landscape left"
+            case .landscapeRight: return "landscape right"
+            default: return "unknown"
+            }
+        }
+        let bounds = scene.coordinateSpace.bounds
+        let screen = scene.screen
+        let insets = window.safeAreaInsets
+        let traits = scene.traitCollection
+        let geometry = scene.effectiveGeometry
+        var lines: [String] = []
+        lines.append("scene: \(bounds.width) x \(bounds.height) points")
+        lines.append("screen: \(screen.bounds.width) x \(screen.bounds.height) points, scale \(screen.scale)")
+        lines.append("screen pixels: \(screen.nativeBounds.width) x \(screen.nativeBounds.height)")
+        lines.append("safe area insets: top \(insets.top), left \(insets.left), bottom \(insets.bottom), right \(insets.right)")
+        lines.append("horizontal size class: \(sizeClassName(traits.horizontalSizeClass))")
+        lines.append("vertical size class: \(sizeClassName(traits.verticalSizeClass))")
+        lines.append("orientation: \(orientationName(geometry.interfaceOrientation))")
+        lines.append("idiom: \(UIDevice.current.userInterfaceIdiom.rawValue)")
+        // The descriptions list every value the system reports, including ones that
+        // a newer SDK adds and this code cannot name.
+        lines.append("geometry: \(String(describing: geometry))")
+        lines.append("traits: \(String(describing: traits))")
+        for other in UIApplication.shared.connectedScenes {
+            var line = "connected scene: role \(other.session.role.rawValue), activation state \(other.activationState.rawValue)"
+            if let windowScene = other as? UIWindowScene {
+                let sceneBounds = windowScene.coordinateSpace.bounds
+                let frames: [String] = windowScene.windows.map { "\($0.frame.width) x \($0.frame.height)" }
+                line += ", \(sceneBounds.width) x \(sceneBounds.height) points"
+                line += ", windows \(frames.joined(separator: " | "))"
+            }
+            lines.append(line)
+        }
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent("voicetype-\(name).txt")
+        try (lines.joined(separator: "\n") + "\n").write(to: output, atomically: true, encoding: .utf8)
+        print("UI_SCENE_REPORT=\(output.path)")
+        for line in lines {
+            print("UI_SCENE \(name) | \(line)")
+        }
+    }
+
+    /// `systemSafeAreas` keeps the insets the system gives the window and lets the
+    /// page fill it. Otherwise the page gets exactly `width` × `height` and no insets.
+    private func capture<Content: View>(_ content: Content, tab: VoiceTypeTab, name: String, width: CGFloat, height: CGFloat, scheme: ColorScheme, standalone: Bool = false, typeSize: DynamicTypeSize = .large, delay: Duration = .milliseconds(200), systemSafeAreas: Bool = false) async throws {
         let maxWidth = pageWidth(for: tab)
         let screen = ZStack {
             AppTheme.background.ignoresSafeArea()
@@ -302,12 +474,17 @@ final class HomeSnapshotTests: XCTestCase {
         }
         .environment(\.colorScheme, scheme)
         .environment(\.dynamicTypeSize, typeSize)
-        .frame(width: width, height: height)
+        .frame(width: systemSafeAreas ? nil : width, height: systemSafeAreas ? nil : height)
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: width, height: height)
         let hosting = UIHostingController(rootView: screen)
-        hosting.safeAreaRegions = []
+        if systemSafeAreas {
+            // Above the app's own window, so that the page is what the screen shows.
+            window.windowLevel = UIWindow.Level(rawValue: UIWindow.Level.normal.rawValue + 1)
+        } else {
+            hosting.safeAreaRegions = []
+        }
         hosting.overrideUserInterfaceStyle = scheme == .dark ? .dark : .light
         window.rootViewController = hosting
         window.isHidden = false
@@ -335,6 +512,25 @@ final class HomeSnapshotTests: XCTestCase {
         attachment.name = "VoiceType \(name)"
         attachment.lifetime = .keepAlways
         add(attachment)
+
+        if systemSafeAreas, let seconds = Self.onScreenSeconds {
+            // Leaves the page on the simulator's screen and says so with a file. A
+            // script on the Mac then takes a screenshot of the display and answers
+            // with a second file. The image above has no status bar; that one does.
+            let folder = FileManager.default.temporaryDirectory
+            let marker = folder.appendingPathComponent("voicetype-onscreen-\(name).marker")
+            let answer = folder.appendingPathComponent("voicetype-onscreen-\(name).done")
+            try? FileManager.default.removeItem(at: answer)
+            try Data().write(to: marker)
+            defer {
+                try? FileManager.default.removeItem(at: marker)
+                try? FileManager.default.removeItem(at: answer)
+            }
+            let deadline = ContinuousClock.now.advanced(by: .seconds(seconds))
+            while ContinuousClock.now < deadline, !FileManager.default.fileExists(atPath: answer.path) {
+                try await Task.sleep(for: .milliseconds(200))
+            }
+        }
     }
 
     /// The widest each tab's page grows in the app.

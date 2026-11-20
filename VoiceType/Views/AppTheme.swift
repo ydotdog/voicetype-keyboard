@@ -12,6 +12,9 @@ enum AppTheme {
                                      dark: UIColor(red: 0.941, green: 0.737, blue: 0.271, alpha: 1))
     static let accentDeep = dynamicColor(light: UIColor(red: 0.290, green: 0.337, blue: 0.239, alpha: 1),
                                          dark: UIColor(red: 0.941, green: 0.737, blue: 0.271, alpha: 1))
+    /// The deep green that fills primary controls. It stays the same in dark mode,
+    /// where `accentDeep` turns amber, so a light label remains readable on it.
+    static let primaryControl = Color(red: 0.290, green: 0.337, blue: 0.239)
     static let accentTint = accent.opacity(0.16)
     static let coral = dynamicColor(light: UIColor(red: 0.812, green: 0.290, blue: 0.125, alpha: 1),
                                     dark: UIColor(red: 0.941, green: 0.380, blue: 0.184, alpha: 1))
@@ -197,12 +200,12 @@ struct PrimaryControlStyle: ViewModifier {
         if #available(iOS 26.0, *) {
             content
                 .buttonStyle(.glassProminent)
-                .tint(Color(red: 0.290, green: 0.337, blue: 0.239))
+                .tint(AppTheme.primaryControl)
                 .controlSize(.large)
         } else {
             content
                 .buttonStyle(.borderedProminent)
-                .tint(Color(red: 0.290, green: 0.337, blue: 0.239))
+                .tint(AppTheme.primaryControl)
                 .controlSize(.large)
         }
     }
