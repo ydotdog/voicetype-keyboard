@@ -1,9 +1,10 @@
 #!/bin/bash
 # Builds the VoiceType scheme for an iOS simulator, runs both test bundles on it,
 # and gathers the logs, the snapshot images the tests write and screenshots of
-# the simulator's display.
+# the simulator's display. On an iPhone Duo it also opens the device and shows the
+# pages on the inner display.
 #
-# usage: run_ios_tests.sh build | test | collect | screenshot | onscreen
+# usage: run_ios_tests.sh build | test | collect | screenshot | onscreen | unfolded open | unfolded half-open
 #
 # Read from the environment:
 #   SIM_NAME  simulator device name, for example "iPhone 17"
@@ -34,21 +35,22 @@ find_simulator() {
 }
 
 # Runs a command and stops it when it takes longer than a number of seconds.
-# macOS has no timeout(1), and simctl can wait for a simulator without end.
+# macOS has no timeout(1), and simctl can wait for a simulator without end. The
+# time is read from the clock: on a busy machine each short sleep below can take
+# much longer than it asks for.
 guard() {
-  local seconds=$1 ticks=0 pid
+  local seconds=$1 start=$SECONDS pid
   shift
   "$@" &
   pid=$!
   while kill -0 "$pid" 2>/dev/null; do
-    if [ "$ticks" -ge $((seconds * 4)) ]; then
+    if [ $((SECONDS - start)) -ge "$seconds" ]; then
       echo "stopped after ${seconds}s: $*"
       kill -9 "$pid" 2>/dev/null
       wait "$pid" 2>/dev/null
       return 124
     fi
     sleep 0.25
-    ticks=$((ticks + 1))
   done
   wait "$pid"
 }
@@ -56,6 +58,25 @@ guard() {
 # How many built-in screens the simulator has, once known: 2 for an iPhone Duo,
 # whose outer and inner displays are separate screens, 1 for other iPhones.
 DISPLAYS=""
+
+# Counts the simulator's built-in screens into DISPLAYS. Listing them has taken
+# minutes while a test was starting, so each step counts them before it starts
+# anything, and the count is kept in a file for the steps after it.
+count_displays() {
+  local udid=$1 count
+  [ -n "$DISPLAYS" ] && return 0
+  if [ -s "$OUT/simulator-display-count.txt" ]; then
+    DISPLAYS=$(cat "$OUT/simulator-display-count.txt")
+    return 0
+  fi
+  guard 180 xcrun simctl io "$udid" enumerate > "$OUT/simulator-displays.txt" 2>&1
+  count=$(grep -c "Screen Type: Integrated" "$OUT/simulator-displays.txt")
+  if [ "${count:-0}" -gt 0 ]; then
+    DISPLAYS=$count
+    echo "$count" > "$OUT/simulator-display-count.txt"
+  fi
+  echo "built-in screens: ${DISPLAYS:-not known}"
+}
 # The last screenshot saved of each screen of an iPhone Duo, and the screens that
 # showed the same image twice in a row.
 LAST_OUTER=""
@@ -91,15 +112,9 @@ shoot_side() {
 # <path>-outer.png and <path>-inner.png. The third argument is the longest one
 # screenshot may take, in seconds.
 shoot() {
-  local udid=$1 path=$2 seconds=${3:-60} count=$DISPLAYS
-  if [ -z "$count" ]; then
-    guard 60 xcrun simctl io "$udid" enumerate > "$OUT/simulator-displays.txt" 2>&1
-    count=$(grep -c "Screen Type: Integrated" "$OUT/simulator-displays.txt")
-    if [ "${count:-0}" -gt 0 ]; then
-      DISPLAYS=$count
-    fi
-  fi
-  if [ "${count:-0}" -ge 2 ]; then
+  local udid=$1 path=$2 seconds=${3:-60}
+  count_displays "$udid"
+  if [ "${DISPLAYS:-0}" -ge 2 ]; then
     shoot_side "$udid" primary outer "$path" "$seconds"
     shoot_side "$udid" primary-1 inner "$path" "$seconds"
   elif ! guard "$seconds" xcrun simctl io "$udid" screenshot "$path.png"; then
@@ -229,6 +244,7 @@ screenshot() {
   # bootstatus has reported a failed data migration for a simulator that then
   # ran the app, so what it returns does not end this step.
   guard 240 xcrun simctl bootstatus "$udid" -b
+  count_displays "$udid"
   guard 300 xcrun simctl install "$udid" "$app"
   guard 120 xcrun simctl launch "$udid" "$BUNDLE_ID"
   sleep 12
@@ -240,35 +256,39 @@ screenshot() {
 # display while each page is up. The test says that a page is up by writing a file
 # into its temporary folder, then waits for the answer written here. Unlike the
 # images the tests render themselves, a screenshot shows the status bar and
-# everything else the system draws around the app.
-onscreen() {
-  local udid containers pid status marker name seen=" "
-  udid=$(cat "$OUT/simulator-udid.txt" 2>/dev/null)
-  if [ -z "$udid" ] || [ ! -d "$DERIVED_DATA/Build/Products" ]; then
-    echo "nothing built to run"
-    return 0
-  fi
+# everything else the system draws around the app. The screenshots and the pages
+# the test rendered go into $OUT/<folder>, the test's log into $OUT/<folder>.log.
+show_pages() {
+  local udid=$1 folder=$2 containers pid status marker name seen=" " began
   # The test host's temporary folder is in its data container on this machine.
   containers="$HOME/Library/Developer/CoreSimulator/Devices/$udid/data/Containers/Data/Application"
-  mkdir -p "$OUT/onscreen/rendered"
+  mkdir -p "$OUT/$folder/rendered"
+  # Files an earlier run left there would be taken for this run's.
+  find "$containers" -maxdepth 4 -type f \( -name 'voicetype-scene*' -o -name 'voicetype-onscreen-*' \) \
+    -delete 2>/dev/null
+  count_displays "$udid"
+  # Every run starts with screenshots of both screens of an iPhone Duo.
+  LAST_OUTER=""
+  LAST_INNER=""
+  UNCHANGING=""
 
   # xcodebuild hands a variable named TEST_RUNNER_<name> to the tests as <name>.
   # The test waits this long for an answer at most: longer than one screenshot of
   # each of two screens may take below.
-  TEST_RUNNER_UI_ON_SCREEN_SECONDS=45 TEST_RUNNER_UI_TURN_SCENE=1 xcodebuild test-without-building \
+  TEST_RUNNER_UI_ON_SCREEN_SECONDS=90 TEST_RUNNER_UI_TURN_SCENE=1 xcodebuild test-without-building \
     -project "$SRC/VoiceType.xcodeproj" -scheme VoiceType \
     -destination "platform=iOS Simulator,id=$udid" \
     -derivedDataPath "$DERIVED_DATA" \
     -parallel-testing-enabled NO \
     -maximum-concurrent-test-simulator-destinations 1 \
     -only-testing:VoiceTypeTests/HomeSnapshotTests/testCaptureAtSceneSize \
-    > "$OUT/onscreen.log" 2>&1 &
+    > "$OUT/$folder.log" 2>&1 &
   pid=$!
 
-  SECONDS=0
+  began=$SECONDS
   while kill -0 "$pid" 2>/dev/null; do
-    if [ "$SECONDS" -ge 900 ]; then
-      echo "stopped the on-screen run after $SECONDS seconds"
+    if [ $((SECONDS - began)) -ge 900 ]; then
+      echo "stopped the on-screen run after $((SECONDS - began)) seconds"
       kill -9 "$pid" 2>/dev/null
       break
     fi
@@ -279,7 +299,7 @@ onscreen() {
       seen="$seen$name "
       # Lets the display catch up with the page before the screenshot.
       sleep 1
-      shoot "$udid" "$OUT/onscreen/$name" 20
+      shoot "$udid" "$OUT/$folder/$name" 30
       : > "${marker%.marker}.done"
     done 3< <(find "$containers" -maxdepth 4 -name 'voicetype-onscreen-*.marker' 2>/dev/null)
     sleep 0.5
@@ -290,17 +310,119 @@ onscreen() {
   # What this run rendered itself: the same pages without the system's drawing,
   # and the tests' reports on the scene in both orientations.
   find "$containers" -maxdepth 4 -type f \( -name 'voicetype-scene*.png' -o -name 'voicetype-scene*.txt' \) \
-    -exec cp -f {} "$OUT/onscreen/rendered/" \; 2>/dev/null
-  grep -E "Test Case .* (passed|failed) \(|\*\* TEST|: error: |UI_SCENE " "$OUT/onscreen.log" |
+    -exec cp -f {} "$OUT/$folder/rendered/" \; 2>/dev/null
+  grep -E "Test Case .* (passed|failed) \(|\*\* TEST|: error: |UI_SCENE " "$OUT/$folder.log" |
     sed "s|$SRC/||" | cut -c1-400 | head -80
   echo "on-screen run exit $status," \
-    "screenshots: $(find "$OUT/onscreen" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ')," \
-    "pages the test rendered: $(find "$OUT/onscreen/rendered" -name '*.png' | wc -l | tr -d ' ')"
+    "screenshots: $(find "$OUT/$folder" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ')," \
+    "pages the test rendered: $(find "$OUT/$folder/rendered" -name '*.png' | wc -l | tr -d ' ')"
   if [ "$status" -ne 0 ]; then
     echo "--- last lines of the on-screen log"
-    tail -n 40 "$OUT/onscreen.log"
+    tail -n 40 "$OUT/$folder.log"
   fi
   return "$status"
+}
+
+onscreen() {
+  local udid
+  udid=$(cat "$OUT/simulator-udid.txt" 2>/dev/null)
+  if [ -z "$udid" ] || [ ! -d "$DERIVED_DATA/Build/Products" ]; then
+    echo "nothing built to run"
+    return 0
+  fi
+  show_pages "$udid" onscreen
+}
+
+# The program that turns the hinge of an iPhone Duo, built from duo_hinge.m.
+HINGE="$WORK/duo_hinge"
+
+# Saves what each of the two screens of an iPhone Duo shows, as <path>-outer.png
+# and <path>-inner.png, also when a screen shows what it showed before.
+shoot_both() {
+  local udid=$1 path=$2
+  guard 30 xcrun simctl io "$udid" screenshot --display=primary "$path-outer.png" || rm -f "$path-outer.png"
+  guard 30 xcrun simctl io "$udid" screenshot --display=primary-1 "$path-inner.png" || rm -f "$path-inner.png"
+}
+
+# Prints the hinge angle the device reports, as "<degrees> valid" or "<degrees>
+# invalid", or why it reports none.
+hinge_angle() {
+  guard 30 xcrun simctl spawn "$1" "$HINGE" angle 2>&1 | head -3 | tr '\n' ' '
+}
+
+# Opens an iPhone Duo to a pose and shows the pages there: "open" lays it flat,
+# and "half-open" holds it at 130 degrees, the angle of Simulator's Book preset.
+# The app is on the screen when the hinge turns, the way someone opens the phone
+# while using it, and both screens are saved before and after. A simulator with
+# one screen has no hinge, and the step ends there.
+unfolded() {
+  local pose=${1:-} degrees udid app reading angle tries settled=0
+  case "$pose" in
+    open) degrees=180 ;;
+    half-open) degrees=130 ;;
+    *)
+      echo "usage: $0 unfolded open | half-open" >&2
+      return 64
+      ;;
+  esac
+  udid=$(cat "$OUT/simulator-udid.txt" 2>/dev/null)
+  app="$DERIVED_DATA/Build/Products/Debug-iphonesimulator/VoiceType.app"
+  if [ -z "$udid" ] || [ ! -d "$app" ]; then
+    echo "nothing built to run"
+    return 0
+  fi
+  guard 240 xcrun simctl bootstatus "$udid" -b
+  count_displays "$udid"
+  if [ "${DISPLAYS:-0}" -lt 2 ]; then
+    echo "this simulator has one screen and no hinge"
+    return 0
+  fi
+
+  if [ ! -x "$HINGE" ]; then
+    if ! xcrun --sdk iphonesimulator clang -target "$(uname -m)-apple-ios17.0-simulator" \
+        -fobjc-arc -Wall -Wextra -framework Foundation \
+        "$SRC/scripts/ci/duo_hinge.m" -o "$HINGE" > "$OUT/duo-hinge-build.log" 2>&1; then
+      echo "the hinge program did not build:"
+      cat "$OUT/duo-hinge-build.log"
+      return 1
+    fi
+  fi
+  mkdir -p "$OUT/$pose"
+
+  guard 120 xcrun simctl launch "$udid" "$BUNDLE_ID"
+  sleep 8
+  shoot_both "$udid" "$OUT/$pose/before"
+  echo "before: $(hinge_angle "$udid")" > "$OUT/$pose/hinge.txt"
+  if ! guard 30 xcrun simctl spawn "$udid" "$HINGE" set "$degrees" >> "$OUT/$pose/hinge.txt" 2>&1; then
+    cat "$OUT/$pose/hinge.txt"
+    echo "the hinge could not be set to $degrees degrees"
+    return 1
+  fi
+  # The device reports the angle while the hinge moves. The pose has settled once
+  # two readings in a row are within half a degree of it.
+  for tries in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+    sleep 1
+    reading=$(hinge_angle "$udid")
+    echo "reading $tries: $reading" >> "$OUT/$pose/hinge.txt"
+    angle=${reading%% *}
+    if [[ "$reading" == *" valid"* ]] &&
+        awk -v a="$angle" -v t="$degrees" 'BEGIN { if (a !~ /^[0-9]+([.][0-9]+)?$/) exit 1; d = a - t; exit !(d <= 0.5 && d >= -0.5) }'; then
+      settled=$((settled + 1))
+      [ "$settled" -ge 2 ] && break
+    else
+      settled=0
+    fi
+  done
+  cat "$OUT/$pose/hinge.txt"
+  if [ "$settled" -ge 2 ]; then
+    echo "the hinge is at $degrees degrees"
+  else
+    echo "the device did not report the hinge at $degrees degrees; the screenshots show where the app went"
+  fi
+  # Lets the app move to the other screen and lay itself out there.
+  sleep 5
+  shoot_both "$udid" "$OUT/$pose/after"
+  show_pages "$udid" "onscreen-$pose"
 }
 
 case "${1:-}" in
@@ -309,8 +431,9 @@ case "${1:-}" in
   collect) collect ;;
   screenshot) screenshot ;;
   onscreen) onscreen ;;
+  unfolded) unfolded "${2:-}" ;;
   *)
-    echo "usage: $0 build | test | collect | screenshot | onscreen" >&2
+    echo "usage: $0 build | test | collect | screenshot | onscreen | unfolded open | unfolded half-open" >&2
     exit 64
     ;;
 esac

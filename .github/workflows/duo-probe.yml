@@ -1,9 +1,9 @@
 name: iPhone Duo simulator probe
 
-# Temporary. Records what GitHub's Xcode 27 image offers for driving the iPhone Duo
-# simulator: its two displays, its posture and its rotation. The test workflow
-# needs that to render the app the way the open device shows it. Delete this file
-# and scripts/probe once the test workflow does so.
+# Temporary. Checks on GitHub's Xcode 27 image that scripts/ci/duo_hinge.m turns
+# the hinge of the iPhone Duo simulator, and saves both displays at each pose. The
+# test workflow opens the device the same way to show the app on the inner
+# display. Delete this file and scripts/probe once the test workflow does so.
 on:
   push:
     paths:
@@ -28,7 +28,7 @@ jobs:
       SIM_NAME: iPhone Duo
       SIM_OS: "27.1"
     steps:
-      - name: Check out the probe script
+      - name: Check out the probe script and the hinge program
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

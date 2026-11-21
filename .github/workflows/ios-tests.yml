@@ -81,6 +81,18 @@ jobs:
         continue-on-error: true
         timeout-minutes: 17
         run: bash src/scripts/ci/run_ios_tests.sh onscreen
+      # An iPhone Duo is closed until something turns its hinge. These steps open
+      # it flat and then half way, and show the pages on the inner display.
+      - name: Open the iPhone Duo and show the pages
+        if: ${{ always() && matrix.slug == 'iphone-duo' }}
+        continue-on-error: true
+        timeout-minutes: 22
+        run: bash src/scripts/ci/run_ios_tests.sh unfolded open
+      - name: Half-open the iPhone Duo and show the pages
+        if: ${{ always() && matrix.slug == 'iphone-duo' }}
+        continue-on-error: true
+        timeout-minutes: 22
+        run: bash src/scripts/ci/run_ios_tests.sh unfolded half-open
       - name: Upload logs and images
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
