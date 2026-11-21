@@ -227,3 +227,61 @@ enum RecordingBridgeStore {
         CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), name, nil, nil, true)
     }
 }
+
+/// A one-time keyboard message about a clip that produced no text.
+struct KeyboardFailureNotice: Codable, Equatable {
+    enum Kind: String, Codable {
+        /// The clip failed and waits in History for a retry.
+        case savedInHistory
+        /// The clip was silent, so it was deleted and nothing was charged.
+        case noSpeech
+        /// The clip failed and could not be kept.
+        case notSaved
+    }
+
+    let id: String
+    let kind: Kind
+    let createdAt: Date
+
+    var message: String {
+        switch kind {
+        case .savedInHistory: "Couldn't transcribe — saved in History"
+        case .noSpeech: "No speech detected — nothing charged"
+        case .notSaved: "Couldn't transcribe — try again"
+        }
+    }
+}
+
+/// The app writes the notice and the keyboard writes the id it last showed,
+/// so neither process overwrites the other's key.
+enum KeyboardFailureNoticeStore {
+    private static let noticeKey = "keyboardFailureNotice"
+    private static let shownIDKey = "keyboardFailureNoticeShownID"
+    /// Once the user has been away from the keyboard this long, the notice no
+    /// longer describes what they just did. History still has the clip.
+    static let lifetime: TimeInterval = 60
+
+    static func publish(_ kind: KeyboardFailureNotice.Kind, at date: Date = Date()) {
+        guard
+            let defaults = UserDefaults(suiteName: AppConstants.appGroup),
+            let data = try? JSONEncoder().encode(KeyboardFailureNotice(id: UUID().uuidString, kind: kind, createdAt: date))
+        else { return }
+        defaults.set(data, forKey: noticeKey)
+        defaults.synchronize()
+    }
+
+    /// Returns a recent notice that no keyboard has shown yet, and marks it
+    /// shown so a later refresh or another keyboard instance skips it.
+    static func claimUnshown(at now: Date = Date()) -> KeyboardFailureNotice? {
+        guard
+            let defaults = UserDefaults(suiteName: AppConstants.appGroup),
+            let data = defaults.data(forKey: noticeKey),
+            let notice = try? JSONDecoder().decode(KeyboardFailureNotice.self, from: data),
+            defaults.string(forKey: shownIDKey) != notice.id
+        else { return nil }
+        defaults.set(notice.id, forKey: shownIDKey)
+        defaults.synchronize()
+        let age = now.timeIntervalSince(notice.createdAt)
+        return age >= -2 && age <= lifetime ? notice : nil
+    }
+}

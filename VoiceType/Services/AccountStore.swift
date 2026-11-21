@@ -64,6 +64,7 @@ final class AccountStore: ObservableObject {
         if token.isEmpty {
             retainTranscriptsForAuthenticationExpiry()
             SharedTranscriptStore.clear()
+            PartialTranscriptStore.clear()
         } else if !userID.isEmpty {
             restoreRetainedTranscripts(for: userID)
         }
@@ -114,7 +115,7 @@ final class AccountStore: ObservableObject {
         } catch {
             guard matchesSession(requestSession, token: requestToken),
                   profileRequestRevision == requestRevision, !Task.isCancelled else { return }
-            if case BackendClientError.httpError(status: 401, message: _, context: .general) = error {
+            if case BackendClientError.httpError(status: 401, message: _, context: .general, code: _) = error {
                 signOut(preservePendingRecording: true)
             }
             errorMessage = error.localizedDescription
@@ -170,6 +171,7 @@ final class AccountStore: ObservableObject {
         if userID != auth.user.id {
             SharedTranscriptStore.clear()
             KeyboardAutoInsertStore.clear()
+            PartialTranscriptStore.clear()
         }
         token = auth.token
         userID = auth.user.id
@@ -241,6 +243,7 @@ final class AccountStore: ObservableObject {
         SharedAccountStore.balanceText = ""
         SharedTranscriptStore.clear()
         KeyboardAutoInsertStore.clear()
+        PartialTranscriptStore.clear()
         KeychainStore.delete(service: keychainService, account: tokenAccount)
         UserDefaults.standard.removeObject(forKey: userIDKey)
         UserDefaults.standard.removeObject(forKey: emailKey)

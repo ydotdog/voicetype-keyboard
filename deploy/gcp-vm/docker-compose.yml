@@ -32,6 +32,7 @@ services:
       - /opt/voicetype/env/backend.env
     volumes:
       - /opt/voicetype/certs:/opt/voicetype/certs:ro
+      - /opt/voicetype/data/provider:/data/provider
     depends_on:
       postgres:
         condition: service_healthy

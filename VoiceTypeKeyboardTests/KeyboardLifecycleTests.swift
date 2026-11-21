@@ -36,10 +36,19 @@ struct KeyboardLifecycleTests {
             defer { UIView.setAnimationsEnabled(animationsWereEnabled) }
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("VoiceTypeUIReview", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            for width in [320, 390, 768] {
+            // 466, 669 and 951 pt approximate iPhone Duo: closed, open in
+            // portrait and open in landscape.
+            for width in [320, 390, 466, 669, 768, 951] {
                 for (styleName, style) in [("light", UIUserInterfaceStyle.light), ("dark", .dark)] {
-                    for (stateName, mode) in [("off", RecordingBridgeMode.standard), ("ready", .keyboardReady), ("recording", .keyboardRecording), ("transcribing", .transcribing), ("access", .keyboardReady)] {
+                    var transcribingHeight: CGFloat = 0
+                    for (stateName, mode) in [("off", RecordingBridgeMode.standard), ("ready", .keyboardReady), ("recording", .keyboardRecording), ("transcribing", .transcribing), ("streaming", .transcribing), ("access", .keyboardReady)] {
                         setBridge(mode)
+                        if stateName == "streaming" {
+                            PartialTranscriptStore.publish("Let's move the design review to Thursday afternoon so everyone can join",
+                                                           sessionID: "keyboard-lifecycle-test")
+                        } else {
+                            PartialTranscriptStore.clear()
+                        }
                         let controller = FixtureKeyboardController()
                         controller.fullAccess = stateName != "access"
                         controller.proxy.testDocumentIdentifier = UUID()
@@ -74,7 +83,7 @@ struct KeyboardLifecycleTests {
                                     #expect(bar.bounds.height > 3.5)
                                 }
                             }
-                            for identifier in ["keyboard.return", "keyboard.delete"] {
+                            for identifier in ["keyboard.paste", "keyboard.return", "keyboard.delete"] {
                                 let key = try control(identifier, in: controller)
                                 #expect(key.bounds.width >= 44 && key.bounds.height >= 44)
                                 let frame = key.convert(key.bounds, to: controller.view)
@@ -85,6 +94,26 @@ struct KeyboardLifecycleTests {
                             let actionFrame = action.convert(action.bounds, to: controller.view)
                             let bottomFrame = bottomKey.convert(bottomKey.bounds, to: controller.view)
                             #expect(actionFrame.maxY < bottomFrame.minY)
+                            // Compact keyboards keep the phone-sized controls;
+                            // wider ones let them grow with the row, up to a cap.
+                            let expectedActionWidth = min(max(CGFloat(width) * 0.45, 224), 400)
+                            #expect(abs(actionFrame.width - expectedActionWidth) <= 1)
+                            #expect(abs(actionFrame.midX - controller.view.bounds.midX) <= 1)
+                            if width >= 390 {
+                                let expectedReturnWidth = min(max(CGFloat(width) * 0.28, 160), 320)
+                                #expect(abs(bottomFrame.width - expectedReturnWidth) <= 1)
+                            }
+                            let preview = try #require(descendant("keyboard.partialTranscript", in: controller.view))
+                            #expect(preview.isHidden == (stateName != "streaming"))
+                            if stateName == "transcribing" { transcribingHeight = fittingSize.height }
+                            if stateName == "streaming" {
+                                // Heard text shares the brand row, so the keyboard keeps its height.
+                                #expect(fittingSize.height == transcribingHeight)
+                                let previewFrame = preview.convert(preview.bounds, to: controller.view)
+                                #expect(previewFrame.width >= 60)
+                                #expect(controller.view.bounds.contains(previewFrame))
+                                #expect(previewFrame.maxY <= actionFrame.minY)
+                            }
                             if stateName == "access" {
                                 let helper = try #require(descendant("keyboard.helper", in: controller.view))
                                 let helperFrame = helper.convert(helper.bounds, to: controller.view)
@@ -244,6 +273,85 @@ struct KeyboardLifecycleTests {
                 controller.textDidChange(nil)
                 #expect(controller.proxy.insertedTexts == [snapshot.text])
                 #expect(!KeyboardAutoInsertStore.shouldInsert(snapshot))
+            }
+        }
+    }
+
+    @Test func transcribingPreviewsHeardTextButInsertsOnlyTheFinalTranscript() throws {
+        try withCleanStores {
+            setBridge(.keyboardReady)
+            let controller = FixtureKeyboardController()
+            controller.proxy.testDocumentIdentifier = UUID()
+            try withVisibleController(controller) {
+                let preview = try #require(descendant("keyboard.partialTranscript", in: controller.view) as? UILabel)
+                #expect(preview.isHidden)
+                try startAndStopClip(controller)
+                PartialTranscriptStore.publish("Text from another keyboard", sessionID: "another-keyboard-session")
+                controller.textDidChange(nil)
+                #expect(preview.isHidden)
+
+                PartialTranscriptStore.publish("Keyboard regres", sessionID: "keyboard-lifecycle-test")
+                controller.textDidChange(nil)
+                #expect(!preview.isHidden)
+                #expect(preview.text == "Keyboard regres")
+                #expect(preview.accessibilityValue == "Keyboard regres")
+                PartialTranscriptStore.publish("Keyboard regression trans", sessionID: "keyboard-lifecycle-test")
+                controller.textDidChange(nil)
+                #expect(preview.text == "Keyboard regression trans")
+                #expect(controller.proxy.insertedTexts.isEmpty)
+
+                // The app clears the heard text before it publishes the transcript.
+                PartialTranscriptStore.clear()
+                let snapshot = completeTranscript()
+                controller.textDidChange(nil)
+                controller.textDidChange(nil)
+                #expect(preview.isHidden)
+                #expect(controller.proxy.insertedTexts == [snapshot.text])
+            }
+        }
+    }
+
+    @Test func heardTextShowsOnlyWhileAClipIsRecordedOrTranscribedWithFullAccess() throws {
+        try withCleanStores {
+            setBridge(.transcribing)
+            PartialTranscriptStore.publish("Heard so far", sessionID: "keyboard-lifecycle-test")
+            let controller = FixtureKeyboardController()
+            controller.proxy.testDocumentIdentifier = UUID()
+            try withVisibleController(controller) {
+                let preview = try #require(descendant("keyboard.partialTranscript", in: controller.view) as? UILabel)
+                #expect(!preview.isHidden)
+                controller.fullAccess = false
+                controller.textDidChange(nil)
+                #expect(preview.isHidden)
+                controller.fullAccess = true
+                controller.textDidChange(nil)
+                #expect(!preview.isHidden)
+                // Text the app never cleared, as after a crash, stays out of a ready keyboard.
+                setBridge(.keyboardReady)
+                controller.textDidChange(nil)
+                #expect(preview.isHidden)
+                #expect(controller.proxy.insertedTexts.isEmpty)
+            }
+        }
+    }
+
+    @Test func liveRecordingPreviewsHeardTextBeforeTheClipStops() throws {
+        try withCleanStores {
+            setBridge(.keyboardRecording)
+            let controller = FixtureKeyboardController()
+            controller.proxy.testDocumentIdentifier = UUID()
+            try withVisibleController(controller) {
+                let preview = try #require(descendant("keyboard.partialTranscript", in: controller.view) as? UILabel)
+                // A clip that is uploaded when it stops has no text yet.
+                #expect(preview.isHidden)
+                PartialTranscriptStore.publish("Heard while speaking", sessionID: "keyboard-lifecycle-test")
+                controller.textDidChange(nil)
+                #expect(!preview.isHidden)
+                #expect(preview.text == "Heard while speaking")
+                setBridge(.transcribing)
+                controller.textDidChange(nil)
+                #expect(preview.text == "Heard while speaking")
+                #expect(controller.proxy.insertedTexts.isEmpty)
             }
         }
     }
@@ -477,6 +585,57 @@ struct KeyboardLifecycleTests {
         }
     }
 
+    @Test func keyboardReplacesTheSystemDictationKey() {
+        withCleanStores {
+            let controller = KeyboardViewController()
+            controller.loadViewIfNeeded()
+            #expect(controller.hasDictationKey)
+        }
+    }
+
+    @Test func pasteKeyInsertsClipboardTextIntoTheActiveField() throws {
+        try withCleanStores { try withPrivatePasteboard { pasteboard in
+            setBridge(.keyboardReady)
+            let controller = FixtureKeyboardController()
+            controller.pasteboard = pasteboard
+            controller.proxy.testDocumentIdentifier = UUID()
+            try withVisibleController(controller) {
+                let paste = try control("keyboard.paste", in: controller)
+                #expect(paste.isEnabled)
+                pasteboard.string = "Copied from another app"
+                paste.sendActions(for: .touchUpInside)
+                #expect(controller.proxy.insertedTexts == ["Copied from another app"])
+
+                pasteboard.items = []
+                paste.sendActions(for: .touchUpInside)
+                #expect(controller.proxy.insertedTexts == ["Copied from another app"])
+                let helper = try #require(descendant("keyboard.helper", in: controller.view) as? UILabel)
+                #expect(helper.text == "The clipboard has no text to paste.")
+            }
+        } }
+    }
+
+    @Test func pasteKeyNeedsFullAccessAndAFocusedField() throws {
+        try withCleanStores { try withPrivatePasteboard { pasteboard in
+            pasteboard.string = "Private clipboard"
+            let controller = FixtureKeyboardController()
+            controller.pasteboard = pasteboard
+            controller.fullAccess = false
+            controller.proxy.testDocumentIdentifier = UUID()
+            try withVisibleController(controller) {
+                try control("keyboard.paste", in: controller).sendActions(for: .touchUpInside)
+                #expect(controller.proxy.insertedTexts.isEmpty)
+                controller.fullAccess = true
+                controller.proxy.testDocumentIdentifier = nil
+                controller.textDidChange(nil)
+                let paste = try control("keyboard.paste", in: controller)
+                #expect(!paste.isEnabled)
+                paste.sendActions(for: .touchUpInside)
+                #expect(controller.proxy.insertedTexts.isEmpty)
+            }
+        } }
+    }
+
     @Test func compactKeyboardWithOwnGlobeKeepsEveryTextKeyReachable() throws {
         try withCleanStores {
             setBridge(.keyboardReady)
@@ -487,7 +646,7 @@ struct KeyboardLifecycleTests {
                 controller.view.frame.size.width = 320
                 controller.view.setNeedsLayout()
                 controller.view.layoutIfNeeded()
-                for identifier in ["keyboard.nextKeyboard", "keyboard.return", "keyboard.delete", "keyboard.primaryAction"] {
+                for identifier in ["keyboard.nextKeyboard", "keyboard.paste", "keyboard.return", "keyboard.delete", "keyboard.primaryAction"] {
                     let key = try control(identifier, in: controller)
                     #expect(!key.isHidden)
                     #expect(key.bounds.width >= 44 && key.bounds.height >= 44)
@@ -495,6 +654,107 @@ struct KeyboardLifecycleTests {
                 }
             }
         }
+    }
+
+    @Test func failedClipNoticeShowsOnceAcrossRefreshesAndKeyboardInstances() throws {
+        try withCleanStores {
+            setBridge(.keyboardReady)
+            let controller = FixtureKeyboardController()
+            controller.proxy.testDocumentIdentifier = UUID()
+            try withVisibleController(controller) {
+                try startAndStopClip(controller)
+                let helper = try #require(descendant("keyboard.helper", in: controller.view) as? UILabel)
+                #expect(helper.isHidden)
+                // The app publishes the notice just before it returns to ready.
+                KeyboardFailureNoticeStore.publish(.savedInHistory)
+                controller.textDidChange(nil)
+                #expect(helper.text == "Couldn't transcribe — saved in History")
+                #expect(!helper.isHidden)
+                setBridge(.keyboardReady)
+                controller.textDidChange(nil)
+                controller.textDidChange(nil)
+                #expect(helper.text == "Couldn't transcribe — saved in History")
+                #expect(!helper.isHidden)
+            }
+            let next = FixtureKeyboardController()
+            next.proxy.testDocumentIdentifier = UUID()
+            try withVisibleController(next) {
+                let helper = try #require(descendant("keyboard.helper", in: next.view) as? UILabel)
+                #expect(helper.isHidden)
+            }
+            #expect(KeyboardFailureNoticeStore.claimUnshown() == nil)
+        }
+    }
+
+    @Test func failureNoticeWaitsForTheVisibleKeyboardAndExpires() throws {
+        try withCleanStores {
+            setBridge(.keyboardReady)
+            let controller = FixtureKeyboardController()
+            controller.proxy.testDocumentIdentifier = UUID()
+            try withVisibleController(controller) {
+                let helper = try #require(descendant("keyboard.helper", in: controller.view) as? UILabel)
+                setVisible(false, controller: controller)
+                KeyboardFailureNoticeStore.publish(.noSpeech)
+                controller.textDidChange(nil)
+                #expect(helper.isHidden)
+                setVisible(true, controller: controller)
+                #expect(helper.text == "No speech detected — nothing charged")
+                #expect(!helper.isHidden)
+            }
+
+            // A notice from a clip the user left long ago describes nothing
+            // they just did, so a later keyboard drops it.
+            KeyboardFailureNoticeStore.publish(.savedInHistory,
+                                               at: Date().addingTimeInterval(-(KeyboardFailureNoticeStore.lifetime + 1)))
+            let later = FixtureKeyboardController()
+            later.proxy.testDocumentIdentifier = UUID()
+            try withVisibleController(later) {
+                let helper = try #require(descendant("keyboard.helper", in: later.view) as? UILabel)
+                #expect(helper.isHidden)
+            }
+        }
+    }
+
+    @Test func stateChangesClearOnlyTheNoticesTheyOwn() throws {
+        try withCleanStores { try withPrivatePasteboard { pasteboard in
+            setBridge(.keyboardRecording)
+            let controller = FixtureKeyboardController()
+            controller.pasteboard = pasteboard
+            controller.proxy.testDocumentIdentifier = UUID()
+            try withVisibleController(controller) {
+                let helper = try #require(descendant("keyboard.helper", in: controller.view) as? UILabel)
+                pasteboard.items = []
+                try control("keyboard.paste", in: controller).sendActions(for: .touchUpInside)
+                #expect(helper.text == "The clipboard has no text to paste.")
+                // Refreshes during recording and transcribing, and the return
+                // to ready, all leave a timed notice to its own timer.
+                for mode in [RecordingBridgeMode.keyboardRecording, .transcribing, .keyboardReady] {
+                    setBridge(mode)
+                    controller.textDidChange(nil)
+                    #expect(helper.text == "The clipboard has no text to paste.")
+                    #expect(!helper.isHidden)
+                }
+
+                // A status notice still clears once the state it explains changes.
+                controller.fullAccess = false
+                controller.textDidChange(nil)
+                try control("keyboard.primaryAction", in: controller).sendActions(for: .touchUpInside)
+                #expect(helper.text == "Settings → General → Keyboard → Keyboards → VoiceType → Allow Full Access.")
+                controller.fullAccess = true
+                setBridge(.keyboardRecording)
+                controller.textDidChange(nil)
+                #expect(helper.isHidden)
+            }
+        } }
+    }
+
+    /// Reading `UIPasteboard.general` from a test shows the system paste
+    /// prompt and stalls the run, so paste tests get a throwaway pasteboard.
+    private func withPrivatePasteboard(body: (UIPasteboard) throws -> Void) throws {
+        let name = UIPasteboard.Name("voicetype-tests-\(UUID().uuidString)")
+        let pasteboard = try #require(UIPasteboard(name: name, create: true))
+        defer { UIPasteboard.remove(withName: name) }
+        try body(pasteboard)
     }
 
     private func descendant(_ identifier: String, in view: UIView) -> UIView? {
@@ -574,9 +834,14 @@ struct KeyboardLifecycleTests {
 
     private func withCleanStores(body: () throws -> Void) rethrows {
         RecordingAudioLevelStore.clear()
-        defer { RecordingAudioLevelStore.clear() }
+        PartialTranscriptStore.clear()
+        defer {
+            RecordingAudioLevelStore.clear()
+            PartialTranscriptStore.clear()
+        }
         let keys = ["latestTranscript", "transcriptHistory", "recordingBridgeState", "recordingBridgeCommand",
-                    "keyboardAutoInsertBaselineTranscriptID", "keyboardAutoInsertLastInsertedTranscriptID"]
+                    "keyboardAutoInsertBaselineTranscriptID", "keyboardAutoInsertLastInsertedTranscriptID",
+                    "keyboardFailureNotice", "keyboardFailureNoticeShownID"]
         let defaults = UserDefaults(suiteName: AppConstants.appGroup)!
         let previous = keys.map { defaults.object(forKey: $0) }
         for key in keys { defaults.removeObject(forKey: key) }
@@ -593,9 +858,14 @@ struct KeyboardLifecycleTests {
 
     private func withCleanStores(body: () async throws -> Void) async rethrows {
         RecordingAudioLevelStore.clear()
-        defer { RecordingAudioLevelStore.clear() }
+        PartialTranscriptStore.clear()
+        defer {
+            RecordingAudioLevelStore.clear()
+            PartialTranscriptStore.clear()
+        }
         let keys = ["latestTranscript", "transcriptHistory", "recordingBridgeState", "recordingBridgeCommand",
-                    "keyboardAutoInsertBaselineTranscriptID", "keyboardAutoInsertLastInsertedTranscriptID"]
+                    "keyboardAutoInsertBaselineTranscriptID", "keyboardAutoInsertLastInsertedTranscriptID",
+                    "keyboardFailureNotice", "keyboardFailureNoticeShownID"]
         let defaults = UserDefaults(suiteName: AppConstants.appGroup)!
         let previous = keys.map { defaults.object(forKey: $0) }
         for key in keys { defaults.removeObject(forKey: key) }

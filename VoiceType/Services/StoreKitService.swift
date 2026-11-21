@@ -91,12 +91,7 @@ final class StoreKitService: ObservableObject {
         statusMessage = nil
         defer { isLoading = false }
 
-        if account.appAccountToken == nil {
-            await account.refresh()
-        }
-        guard account.matchesSession(purchaseSession, token: purchaseToken),
-              let appAccountToken = account.appAccountToken else {
-            errorMessage = "Sign in again before adding credit."
+        guard let appAccountToken = await loadPurchaseAccount(account, session: purchaseSession, token: purchaseToken) else {
             return
         }
 
@@ -121,6 +116,23 @@ final class StoreKitService: ObservableObject {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    /// The account ID a new purchase is bound to. A reinstall keeps the sign-in
+    /// but not the ID, so offline the profile can't load it yet.
+    func loadPurchaseAccount(_ account: AccountStore, session: UUID, token: String) async -> UUID? {
+        if account.appAccountToken == nil {
+            await account.refresh()
+        }
+        guard account.matchesSession(session, token: token) else {
+            errorMessage = "Sign in again before adding credit."
+            return nil
+        }
+        guard let appAccountToken = account.appAccountToken else {
+            errorMessage = "Your VoiceType account hasn't loaded yet. Check your connection, then try again."
+            return nil
+        }
+        return appAccountToken
     }
 
     func syncUnfinishedTransactions(account: AccountStore) async {
@@ -157,6 +169,12 @@ final class StoreKitService: ObservableObject {
         let requestSession = account.sessionID
         let requestToken = account.token
         statusMessage = nil
+        // Purchases are matched by account ID, which a reinstall loses until the
+        // profile loads. Load it first so one check can credit them.
+        if account.appAccountToken == nil {
+            await account.refresh()
+            guard account.matchesSession(requestSession, token: requestToken), !Task.isCancelled else { return }
+        }
         await syncUnfinishedTransactions(account: account)
         guard account.matchesSession(requestSession, token: requestToken), !Task.isCancelled else { return }
         await account.refresh()
@@ -174,7 +192,12 @@ final class StoreKitService: ObservableObject {
             transactionAccount: transaction.appAccountToken,
             signedInAccount: account.appAccountToken,
             isRevoked: transaction.revocationDate != nil
-        ) else { throw StoreKitError.differentAccount }
+        ) else {
+            throw StoreKitTransactionPolicy.refusal(
+                transactionAccount: transaction.appAccountToken,
+                signedInAccount: account.appAccountToken
+            )
+        }
         guard submittingTransactions.insert(transaction.id).inserted else {
             throw StoreKitError.verificationInProgress
         }
@@ -212,11 +235,24 @@ enum StoreKitTransactionPolicy {
               let transactionAccount, let signedInAccount else { return false }
         return transactionAccount == signedInAccount
     }
+
+    /// Why a known, unrevoked credit pack can't be credited to the signed-in account.
+    static func refusal(transactionAccount: UUID?, signedInAccount: UUID?) -> StoreKitError {
+        // A purchase made outside the app, such as with an offer code, has no
+        // account token, so signing in to another account won't credit it either.
+        guard transactionAccount != nil else { return .unlinkedPurchase }
+        // A reinstall keeps the Keychain sign-in but not the stored account ID,
+        // so the owner can't be compared until the profile loads.
+        guard signedInAccount != nil else { return .accountNotLoaded }
+        return .differentAccount
+    }
 }
 
 enum StoreKitError: LocalizedError {
     case unverified
     case differentAccount
+    case unlinkedPurchase
+    case accountNotLoaded
     case verificationInProgress
 
     var errorDescription: String? {
@@ -225,6 +261,10 @@ enum StoreKitError: LocalizedError {
             "The App Store transaction could not be verified on this device. Check purchases again later."
         case .differentAccount:
             "An unfinished purchase belongs to another VoiceType account. Sign in to the account used to buy it to receive its credit."
+        case .unlinkedPurchase:
+            "An unfinished purchase isn't linked to a VoiceType account, so its credit can't be added automatically. Contact support through VoiceType's App Store page."
+        case .accountNotLoaded:
+            "Your VoiceType account hasn't loaded yet, so credit from an unfinished purchase can't be added. Check your connection, then check purchases again. You do not need to buy it again."
         case .verificationInProgress:
             "A purchase is still being verified. Wait a moment, then check purchases again. You do not need to buy it again."
         }

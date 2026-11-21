@@ -74,6 +74,26 @@ def provider_hints(context, legacy_language=None):
     return language, "\n".join(parts) or None
 
 
+# Regional codes the provider documents for Chinese; the written script is
+# still enforced afterwards by normalize_transcript.
+PROVIDER_LANGUAGE_CODES = {"zh-Hans": "zh-cn", "zh-Hant": "zh-tw"}
+LEGACY_LANGUAGE = re.compile(r"[a-z]{2}|zh-(?:cn|tw|hk)")
+
+
+def multilingual_hints(context, legacy_language=None):
+    """Return (languages, keywords, prompt) for models that take list-valued hints."""
+    languages, words = context["languages"], context["vocabulary"]
+    codes = [PROVIDER_LANGUAGE_CODES.get(x, x) for x in languages]
+    legacy = (legacy_language or "").strip().lower()
+    if not codes and LEGACY_LANGUAGE.fullmatch(legacy):
+        codes = [legacy]
+    chinese = next((x for x in languages if x.startswith("zh-")), None)
+    keywords = [converter(chinese).convert(word) for word in words] if chinese else list(words)
+    # Vocabulary travels as keywords, so the prompt carries only the style guidance.
+    _, prompt = provider_hints({"languages": languages, "vocabulary": []})
+    return codes, list(dict.fromkeys(keywords)), prompt
+
+
 @lru_cache(maxsize=2)
 def converter(script):
     return OpenCC("t2s" if script == "zh-Hans" else "s2t")

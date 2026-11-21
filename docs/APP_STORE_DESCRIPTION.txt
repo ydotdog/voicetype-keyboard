@@ -1,0 +1,20 @@
+Turn speech into text in the apps you use every day.
+
+VoiceType is a pay-as-you-go dictation keyboard for iPhone and iPad. Tap the keyboard microphone to open VoiceType and turn on the microphone, then return manually to your original app. Tap to record a clip, tap the waveform to finish, and keep the same text field open while your words are transcribed and inserted.
+
+YOUR WORDS, YOUR WORKFLOW
+Choose your preferred languages, including simplified or traditional Chinese, and add names or phrases to your personal vocabulary. Review and copy transcripts in History. Correct a transcript and choose a spelling to remember for future dictation. Failed recordings are saved on your device so you can retry or delete them.
+
+CONTROL YOUR MICROPHONE SESSION
+Choose a 5-minute, 12-hour or untimed session. Your saved choice is used when you turn on the microphone from the keyboard. The microphone stays active in the background between clips so you can dictate repeatedly. Turn it off on VoiceType's Home screen. System interruptions can also end a session.
+
+CLOUD TRANSCRIPTION
+VoiceType sends recorded clips, your language choices and vocabulary hints to its server and OpenAI for transcription. Temporary audio between clips is discarded locally and is not uploaded for transcription. VoiceType does not upload text you type in other apps. Review the privacy policy for details about processing and storage.
+
+PAY AS YOU GO
+Buy consumable credit packs through the App Store and use credit for transcription. No subscription or automatic top-up. Dictation requires Sign in with Apple, an internet connection, microphone permission, keyboard Full Access and sufficient credit.
+
+Third-party keyboards are unavailable in secure text fields and in apps that do not support them.
+
+Privacy: https://apeonwheels.com/voicetype/privacy/
+Support: https://apeonwheels.com/voicetype/support/
